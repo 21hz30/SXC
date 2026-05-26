@@ -1,0 +1,263 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  name         String
+  role         String   // "admin" | "coach"
+  createdAt    DateTime @default(now())
+
+  camps        Camp[]   @relation("CoachCamps")
+  todos        Todo[]
+  chatSessions ChatSession[]
+}
+
+model ChatSession {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String   @default("New chat")
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  messages      ChatMessage[]
+
+  @@index([userId, lastMessageAt])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String   // "user" | "assistant"
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+model Todo {
+  id        String    @id @default(cuid())
+  ownerId   String
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title     String
+  dueDate   DateTime?
+  done      Boolean   @default(false)
+  source    String    @default("manual") // "manual" | "ai" | "slash"
+  createdAt DateTime  @default(now())
+}
+
+model Customer {
+  id            String   @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  age           Int?
+  weightKg      Float?
+  heightCm      Float?
+  goalRaceDate  DateTime?
+  hyroxPbSec    Int?
+  notes         String?
+  tags          String?
+  createdAt     DateTime @default(now())
+
+  benchmarks    Benchmark[]
+  rosterEntries RosterEntry[]
+  logs          Log[]
+  activities    ActivityData[]
+  videos        Video[]
+  campMembers   CampMember[]
+  chatSessions  ChatSession[]
+  performances  Performance[]
+}
+
+model Benchmark {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  metric     String
+  value      Float
+  unit       String
+  testedAt   DateTime @default(now())
+}
+
+model ActivityData {
+  id           String   @id @default(cuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  date         DateTime
+  activityType String   // "run" | "row" | "ski" | "ride" | "hyrox_sim"
+  durationSec  Int?
+  distanceM    Int?
+  avgHr        Int?
+  maxHr        Int?
+  avgPaceSec   Int?    // sec / km
+  avgCadence   Int?
+  caloriesKcal Int?
+  notes        String?
+  source       String  @default("manual") // "manual" | "garmin"
+  createdAt    DateTime @default(now())
+}
+
+model Video {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  title      String
+  filePath   String   // relative path under /public/uploads
+  exercise   String?  // e.g. "wall_ball", "sled_push"
+  notes      String?
+  uploadedAt DateTime @default(now())
+}
+
+model Camp {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  startDate   DateTime
+  endDate     DateTime
+  coachId     String?
+  coach       User?    @relation("CoachCamps", fields: [coachId], references: [id])
+  createdAt   DateTime @default(now())
+
+  members  CampMember[]
+  classes  Class[]
+  workouts WorkoutCamp[]
+}
+
+model CampMember {
+  id         String   @id @default(cuid())
+  campId     String
+  camp       Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  joinedAt   DateTime @default(now())
+
+  @@unique([campId, customerId])
+}
+
+model Workout {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  tags        String?  // comma-separated, e.g. "pro team,strength"
+  createdAt   DateTime @default(now())
+
+  items       WorkoutItem[]
+  classes     ClassWorkout[]
+  camps       WorkoutCamp[]
+}
+
+model WorkoutItem {
+  id           String   @id @default(cuid())
+  workoutId    String
+  workout      Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  order        Int      @default(0)
+  category     String   // ski | sled_push | sled_pull | burpee | row | farmers | lunges | wallball | run | rest | strength | other
+  label        String?  // optional override; otherwise label comes from category
+  distanceM    Int?
+  timeSec      Int?
+  weightKg     Float?
+  reps         Int?
+  sets         Int?
+  paceSecPerKm Int?
+  heightM      Float?
+  notes        String?
+
+  @@index([workoutId, order])
+}
+
+model ClassWorkout {
+  id        String  @id @default(cuid())
+  classId   String
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  workoutId String
+  workout   Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  order     Int     @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([classId, workoutId])
+  @@index([classId, order])
+}
+
+model WorkoutCamp {
+  id        String  @id @default(cuid())
+  workoutId String
+  workout   Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  campId    String
+  camp      Camp    @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  @@unique([workoutId, campId])
+}
+
+model Class {
+  id          String   @id @default(cuid())
+  title       String
+  startsAt    DateTime
+  durationMin Int      @default(60)
+  location    String?
+  capacity    Int      @default(12)
+  notes       String?
+  campId      String?
+  camp        Camp?    @relation(fields: [campId], references: [id])
+  createdAt   DateTime @default(now())
+
+  roster       RosterEntry[]
+  workouts     ClassWorkout[]
+  performances Performance[]
+}
+
+model RosterEntry {
+  id         String   @id @default(cuid())
+  classId    String
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  attendance String   @default("pending")
+  createdAt  DateTime @default(now())
+
+  logs       Log[]
+
+  @@unique([classId, customerId])
+}
+
+model Performance {
+  id           String   @id @default(cuid())
+  classId      String
+  class        Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status       String   @default("pending") // pending | completed | partial | dnf
+  rpe          Int?     // perceived exertion 1-10
+  fatiguePct   Int?     // 0-100 (e.g. "80% tired")
+  feeling      String?  // short free text, e.g. "legs heavy"
+  injuryNote   String?  // injury flag / note — empty means no concern
+  notes        String?
+  resultsJson  String?  // per-exercise achieved: { "<itemId>": "achieved value" }
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+
+  @@unique([classId, customerId])
+  @@index([customerId, createdAt])
+}
+
+model Log {
+  id            String      @id @default(cuid())
+  rosterEntryId String
+  rosterEntry   RosterEntry @relation(fields: [rosterEntryId], references: [id], onDelete: Cascade)
+  customerId    String
+  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  exerciseName  String
+  resultJson    String
+  createdAt     DateTime    @default(now())
+}
