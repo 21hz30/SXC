@@ -17,6 +17,7 @@ async function main() {
   await db.chatMessage.deleteMany();
   await db.chatSession.deleteMany();
   await db.log.deleteMany();
+  await db.performance.deleteMany();
   await db.rosterEntry.deleteMany();
   await db.classWorkout.deleteMany();
   await db.class.deleteMany();
@@ -43,14 +44,14 @@ async function main() {
   // Customers
   const customers = await Promise.all(
     [
-      { name: "Alex Chen", age: 32, weightKg: 78, heightCm: 178, hyroxPbSec: 70 * 60 + 12, tags: "competing,Oct" },
-      { name: "Maya Rodríguez", age: 28, weightKg: 62, heightCm: 165, hyroxPbSec: 78 * 60 + 30, tags: "intermediate" },
-      { name: "Jordan Park", age: 35, weightKg: 84, heightCm: 182, hyroxPbSec: 65 * 60 + 45, tags: "elite,pro" },
-      { name: "Sofia Bauer", age: 41, weightKg: 70, heightCm: 170, hyroxPbSec: 95 * 60, tags: "masters" },
-      { name: "Tom Whitfield", age: 26, weightKg: 92, heightCm: 188, tags: "beginner" },
-      { name: "Priya Shah", age: 30, weightKg: 58, heightCm: 162, hyroxPbSec: 82 * 60, tags: "intermediate" },
-      { name: "Liam O'Connor", age: 38, weightKg: 88, heightCm: 184, hyroxPbSec: 72 * 60 + 20, tags: "competing,Oct" },
-      { name: "Naomi Tanaka", age: 24, weightKg: 60, heightCm: 168, hyroxPbSec: 88 * 60 + 10, tags: "new" },
+      { name: "Alex Chen", gender: "male", division: "pro", age: 32, weightKg: 78, heightCm: 178, hyroxPbSec: 70 * 60 + 12, tags: "competing,Oct" },
+      { name: "Maya Rodríguez", gender: "female", division: "open", age: 28, weightKg: 62, heightCm: 165, hyroxPbSec: 78 * 60 + 30, tags: "intermediate" },
+      { name: "Jordan Park", gender: "male", division: "pro", age: 35, weightKg: 84, heightCm: 182, hyroxPbSec: 65 * 60 + 45, tags: "elite,pro" },
+      { name: "Sofia Bauer", gender: "female", division: "open", age: 41, weightKg: 70, heightCm: 170, hyroxPbSec: 95 * 60, tags: "masters" },
+      { name: "Tom Whitfield", gender: "male", division: "open", age: 26, weightKg: 92, heightCm: 188, tags: "beginner" },
+      { name: "Priya Shah", gender: "female", division: "open", age: 30, weightKg: 58, heightCm: 162, hyroxPbSec: 82 * 60, tags: "intermediate" },
+      { name: "Liam O'Connor", gender: "male", division: "open", age: 38, weightKg: 88, heightCm: 184, hyroxPbSec: 72 * 60 + 20, tags: "competing,Oct" },
+      { name: "Naomi Tanaka", gender: "female", division: "doubles", age: 24, weightKg: 60, heightCm: 168, hyroxPbSec: 88 * 60 + 10, tags: "new" },
     ].map((c) =>
       db.customer.create({
         data: {
@@ -245,10 +246,29 @@ async function main() {
       await db.classWorkout.create({ data: { classId: cls.id, workoutId: cd.workoutIds[i], order: i } });
     }
     const members = await db.campMember.findMany({ where: { campId: cd.campId } });
+    const feelings = ["legs heavy", "felt strong", "good engine, slow sled", "tired but pushed", "fresh", "grip gave out"];
     for (const m of members) {
+      const attended = cd.d < 0 ? Math.random() < 0.85 : false;
       await db.rosterEntry.create({
-        data: { classId: cls.id, customerId: m.customerId, attendance: cd.d < 0 ? (Math.random() < 0.85 ? "attended" : "no_show") : "pending" },
+        data: { classId: cls.id, customerId: m.customerId, attendance: cd.d < 0 ? (attended ? "attended" : "no_show") : "pending" },
       });
+      // Log performance/recovery for past sessions the athlete attended, so the
+      // athlete profile shows a fatigue/RPE/feeling trend across weeks.
+      if (attended) {
+        const fatigue = 40 + Math.floor(Math.random() * 55); // 40–95%
+        const injury = Math.random() < 0.12 ? "tight L hamstring — monitor" : null;
+        await db.performance.create({
+          data: {
+            classId: cls.id,
+            customerId: m.customerId,
+            status: Math.random() < 0.85 ? "completed" : "partial",
+            rpe: 5 + Math.floor(Math.random() * 5), // 5–9
+            fatiguePct: fatigue,
+            feeling: feelings[Math.floor(Math.random() * feelings.length)],
+            injuryNote: injury,
+          },
+        });
+      }
     }
   }
 

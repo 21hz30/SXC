@@ -234,7 +234,7 @@ export default function WorkoutEditor({
   );
 }
 
-function ItemForm({
+export function ItemForm({
   initial,
   onSubmit,
   onCancel,

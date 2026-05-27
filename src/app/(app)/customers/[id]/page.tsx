@@ -11,16 +11,9 @@ import { createSession } from "@/domain/chat";
 import { requireUser } from "@/lib/auth";
 import { Sparkles } from "lucide-react";
 import BackButton from "@/components/BackButton";
+import { benchmarkLabel, genderLabel, divisionLabel, GENDERS, DIVISIONS } from "@/domain/benchmarks";
 
 export const dynamic = "force-dynamic";
-
-const METRIC_LABELS: Record<string, string> = {
-  "1km_run_sec": "1km Run",
-  "wall_ball_unbroken": "Wall Ball (unbroken)",
-  "deadlift_1rm_kg": "Deadlift 1RM",
-  "row_500m_sec": "500m Row",
-  "sled_push_kg": "Sled Push",
-};
 
 export default async function CustomerDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
   const { id } = await params;
@@ -33,6 +26,10 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       videos: { orderBy: { uploadedAt: "desc" } },
       campMembers: { include: { camp: true } },
       rosterEntries: { include: { class: true }, orderBy: { class: { startsAt: "desc" } } },
+      performances: {
+        include: { class: { select: { id: true, title: true, startsAt: true } } },
+        orderBy: { class: { startsAt: "asc" } },
+      },
     },
   });
   if (!c) notFound();
@@ -56,6 +53,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
         name: String(formData.get("name") ?? c!.name).trim(),
         email: String(formData.get("email") ?? "").trim() || null,
         phone: String(formData.get("phone") ?? "").trim() || null,
+        gender: String(formData.get("gender") ?? "").trim() || null,
+        division: String(formData.get("division") ?? "").trim() || null,
         age: Number(formData.get("age")) || null,
         weightKg: Number(formData.get("weightKg")) || null,
         heightCm: Number(formData.get("heightCm")) || null,
@@ -118,6 +117,17 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     .filter((a) => a.distanceM != null)
     .map((a) => ({ x: a.date.getTime(), y: a.distanceM! / 1000, label: formatDate(a.date) }));
 
+  // Performance / recovery history (chronological for the trend charts).
+  const perfRpePoints = c.performances
+    .filter((p) => p.rpe != null)
+    .map((p) => ({ x: p.class.startsAt.getTime(), y: p.rpe!, label: formatDate(p.class.startsAt) }));
+  const perfFatiguePoints = c.performances
+    .filter((p) => p.fatiguePct != null)
+    .map((p) => ({ x: p.class.startsAt.getTime(), y: p.fatiguePct!, label: formatDate(p.class.startsAt) }));
+  // Most-recent-first for the table.
+  const perfHistory = [...c.performances].reverse();
+  const latestPerf = perfHistory[0];
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <BackButton fallback="/customers" label="Back" />
@@ -150,6 +160,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           <div className="col-span-2"><label className="block text-sm font-medium mb-1.5">Name</label><input name="name" defaultValue={c.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Email</label><input name="email" defaultValue={c.email ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Phone</label><input name="phone" defaultValue={c.phone ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div><label className="block text-sm font-medium mb-1.5">Gender</label><select name="gender" defaultValue={c.gender ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm"><option value="">—</option>{GENDERS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}</select></div>
+          <div><label className="block text-sm font-medium mb-1.5">Division</label><select name="division" defaultValue={c.division ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm"><option value="">—</option>{DIVISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</select></div>
           <div><label className="block text-sm font-medium mb-1.5">Age</label><input name="age" type="number" defaultValue={c.age ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Weight (kg)</label><input name="weightKg" type="number" step="0.1" defaultValue={c.weightKg ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Height (cm)</label><input name="heightCm" type="number" step="0.1" defaultValue={c.heightCm ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
@@ -159,6 +171,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
         </form>
       ) : (
         <div className="grid grid-cols-4 gap-3 mb-6">
+          <Info label="Gender" value={genderLabel(c.gender)} />
+          <Info label="Division" value={divisionLabel(c.division)} />
           <Info label="Age" value={c.age?.toString() ?? "—"} />
           <Info label="Weight" value={c.weightKg ? `${c.weightKg} kg` : "—"} />
           <Info label="Height" value={c.heightCm ? `${c.heightCm} cm` : "—"} />
@@ -181,7 +195,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           <div className="bg-card border border-border rounded-xl divide-y divide-border">
             {c.benchmarks.map((b) => (
               <div key={b.id} className="flex justify-between items-center px-4 py-2.5">
-                <div className="text-sm">{METRIC_LABELS[b.metric] ?? b.metric}</div>
+                <div className="text-sm">{benchmarkLabel(b.metric)}</div>
                 <div className="font-semibold tabular-nums text-sm">{b.metric.endsWith("_sec") ? formatSec(b.value) : `${b.value} ${b.unit}`}</div>
               </div>
             ))}
@@ -225,6 +239,64 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           <input name="notes" placeholder="Notes" className="col-span-2 rounded-lg border border-border px-3 py-2 text-sm" />
           <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm">Upload</button>
         </form>
+      </section>
+
+      <section className="mb-6">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Performance &amp; recovery history</h2>
+          {latestPerf && (
+            <div className="text-xs text-muted">
+              Last session: {latestPerf.fatiguePct != null ? `${latestPerf.fatiguePct}% fatigue` : "—"}
+              {latestPerf.feeling ? ` · "${latestPerf.feeling}"` : ""}
+              {latestPerf.injuryNote?.trim() ? ` · ⚠ ${latestPerf.injuryNote}` : ""}
+            </div>
+          )}
+        </div>
+        {c.performances.length === 0 ? (
+          <div className="bg-card border border-border rounded-xl p-6 text-center text-sm text-muted">
+            No performance logged yet. Log it on a class page after the session.
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <ChartCard title="RPE (effort 1–10)" points={perfRpePoints} unit="/10" />
+              <ChartCard title="Fatigue (%)" points={perfFatiguePoints} unit="%" />
+            </div>
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-background text-muted text-xs uppercase tracking-wide">
+                  <tr className="text-left">
+                    <th className="px-4 py-2.5 font-medium">Session</th>
+                    <th className="px-3 py-2.5 font-medium">Status</th>
+                    <th className="px-3 py-2.5 font-medium">RPE</th>
+                    <th className="px-3 py-2.5 font-medium">Fatigue</th>
+                    <th className="px-3 py-2.5 font-medium">Feeling</th>
+                    <th className="px-3 py-2.5 font-medium">Injury</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {perfHistory.map((p) => {
+                    const hasInjury = !!p.injuryNote?.trim();
+                    const highFatigue = (p.fatiguePct ?? 0) >= 80;
+                    return (
+                      <tr key={p.id} className={hasInjury ? "bg-red-50" : highFatigue ? "bg-amber-50" : ""}>
+                        <td className="px-4 py-2.5">
+                          <Link href={`/classes/${p.class.id}`} className="font-medium hover:text-accent">{p.class.title}</Link>
+                          <div className="text-xs text-muted">{formatDate(p.class.startsAt)}</div>
+                        </td>
+                        <td className="px-3 py-2.5 capitalize">{p.status}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{p.rpe ?? "—"}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{p.fatiguePct != null ? `${p.fatiguePct}%` : "—"}</td>
+                        <td className="px-3 py-2.5 text-muted">{p.feeling ?? "—"}</td>
+                        <td className="px-3 py-2.5">{hasInjury ? <span className="text-red-600">{p.injuryNote}</span> : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </section>
 
       <section>

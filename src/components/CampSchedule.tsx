@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { GripVertical, X } from "lucide-react";
 
@@ -25,6 +25,15 @@ export default function CampSchedule({
   const [classes, setClasses] = useState<Klass[]>(initialClasses);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overClassId, setOverClassId] = useState<string | null>(null);
+
+  // Re-sync from the server when the set of classes changes (e.g. a class was
+  // added/removed on the camp page). Keyed on class IDs so optimistic workout
+  // assignments within existing classes aren't clobbered on every re-render.
+  const classIdsKey = initialClasses.map((c) => c.id).join(",");
+  useEffect(() => {
+    setClasses(initialClasses);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classIdsKey]);
 
   async function addWorkout(classId: string, workout: Workout) {
     // optimistic
@@ -140,11 +149,11 @@ export default function CampSchedule({
                     </div>
                   </div>
                   {c.workouts.length === 0 ? (
-                    <div className="text-xs text-muted italic">
-                      {isOver ? "Drop to assign" : "No workouts — drop one here"}
+                    <div className="text-xs text-muted italic mb-2">
+                      {isOver ? "Drop to assign" : "No workouts yet — add one below or drag from the left."}
                     </div>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1.5 mb-2">
                       {c.workouts.map((w) => (
                         <span key={w.id} className="inline-flex items-center gap-1 text-xs bg-accent/10 text-accent rounded-full pl-2.5 pr-1 py-0.5">
                           {w.name}
@@ -155,6 +164,29 @@ export default function CampSchedule({
                       ))}
                     </div>
                   )}
+                  {(() => {
+                    const assigned = new Set(c.workouts.map((w) => w.id));
+                    const available = workouts.filter((w) => !assigned.has(w.id));
+                    if (available.length === 0) {
+                      return <div className="text-[11px] text-muted">All camp workouts are assigned to this class.</div>;
+                    }
+                    return (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const w = workouts.find((x) => x.id === e.target.value);
+                          if (w) addWorkout(c.id, w);
+                          e.target.value = "";
+                        }}
+                        className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-xs"
+                      >
+                        <option value="">+ Add workout to this class…</option>
+                        {available.map((w) => (
+                          <option key={w.id} value={w.id}>{w.name}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </li>
               );
             })}

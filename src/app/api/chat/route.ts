@@ -20,6 +20,8 @@ tailor them to this athlete's profile and recent benchmarks.
 
 Athlete profile:
 - Name: ${c.name}
+- Gender: ${c.gender ?? "—"}
+- Division: ${c.division ?? "—"}
 - Age: ${c.age ?? "—"}
 - Weight: ${c.weightKg ?? "—"} kg
 - Height: ${c.heightCm ?? "—"} cm

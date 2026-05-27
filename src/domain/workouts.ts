@@ -113,6 +113,70 @@ export async function saveWorkout(
   bust(id);
 }
 
+/**
+ * Adjust the exercises of a workout *as used by one class* (copy-on-write).
+ *
+ * If the workout is shared (assigned to other classes, or part of a camp's
+ * workout pool), we clone it into a class-specific copy and re-point this
+ * class at the clone — so other classes/camps keep the original. If the
+ * workout is only used by this class, we edit it in place.
+ *
+ * Returns the effective workout id (the clone's id when a copy was made).
+ */
+export async function adjustClassWorkout(
+  _ctx: Ctx,
+  classId: string,
+  workoutId: string,
+  items: WorkoutItemInput[]
+): Promise<{ workoutId: string; cloned: boolean }> {
+  const orig = await db.workout.findUnique({ where: { id: workoutId } });
+  if (!orig) throw new Error("workout not found");
+
+  const [otherClassUses, campUses] = await Promise.all([
+    db.classWorkout.count({ where: { workoutId, NOT: { classId } } }),
+    db.workoutCamp.count({ where: { workoutId } }),
+  ]);
+  const shared = otherClassUses > 0 || campUses > 0;
+
+  if (!shared) {
+    await saveWorkout(_ctx, workoutId, {
+      name: orig.name,
+      description: orig.description,
+      tags: orig.tags,
+      items,
+    });
+    return { workoutId, cloned: false };
+  }
+
+  const clone = await db.workout.create({
+    data: {
+      name: orig.name.includes("(adjusted)") ? orig.name : `${orig.name} (adjusted)`,
+      description: orig.description,
+      tags: orig.tags,
+      items: {
+        create: items.map((it, i) => ({
+          order: i,
+          category: it.category,
+          label: it.label ?? null,
+          distanceM: it.distanceM ?? null,
+          timeSec: it.timeSec ?? null,
+          weightKg: it.weightKg ?? null,
+          reps: it.reps ?? null,
+          sets: it.sets ?? null,
+          paceSecPerKm: it.paceSecPerKm ?? null,
+          heightM: it.heightM ?? null,
+          notes: it.notes ?? null,
+        })),
+      },
+    },
+  });
+
+  const link = await db.classWorkout.findFirst({ where: { classId, workoutId } });
+  if (link) await db.classWorkout.update({ where: { id: link.id }, data: { workoutId: clone.id } });
+  revalidatePath(`/classes/${classId}`);
+  return { workoutId: clone.id, cloned: true };
+}
+
 export async function createWorkout(_ctx: Ctx, input: { name: string; description?: string | null }) {
   const w = await db.workout.create({
     data: { name: input.name.trim(), description: input.description?.trim() || null },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 
@@ -24,6 +24,19 @@ const STATUS_OPTS = [
   { v: "dnf", label: "DNF" },
 ];
 
+function blankRow(customerId: string): PerfRow {
+  return {
+    customerId,
+    status: "pending",
+    rpe: null,
+    fatiguePct: null,
+    feeling: null,
+    injuryNote: null,
+    notes: null,
+    results: {},
+  };
+}
+
 export default function PerformanceTable({
   classId,
   members,
@@ -39,21 +52,29 @@ export default function PerformanceTable({
     const map: Record<string, PerfRow> = {};
     for (const m of members) {
       const existing = initial.find((p) => p.customerId === m.customerId);
-      map[m.customerId] = existing ?? {
-        customerId: m.customerId,
-        status: "pending",
-        rpe: null,
-        fatiguePct: null,
-        feeling: null,
-        injuryNote: null,
-        notes: null,
-        results: {},
-      };
+      map[m.customerId] = existing ?? blankRow(m.customerId);
     }
     return map;
   });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // When the roster changes (a member added/removed on the class page), make
+  // sure every member has a row so the table never reads from `undefined`.
+  const memberIdsKey = members.map((m) => m.customerId).join(",");
+  useEffect(() => {
+    setRows((cur) => {
+      const map = { ...cur };
+      for (const m of members) {
+        if (!map[m.customerId]) {
+          const existing = initial.find((p) => p.customerId === m.customerId);
+          map[m.customerId] = existing ?? blankRow(m.customerId);
+        }
+      }
+      return map;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberIdsKey]);
 
   async function patch(customerId: string, fields: Partial<PerfRow>) {
     setRows((cur) => ({ ...cur, [customerId]: { ...cur[customerId], ...fields } }));
@@ -67,7 +88,7 @@ export default function PerformanceTable({
   }
 
   function setResult(customerId: string, exId: string, val: string) {
-    const results = { ...rows[customerId].results, [exId]: val };
+    const results = { ...(rows[customerId]?.results ?? {}), [exId]: val };
     patch(customerId, { results });
   }
 
@@ -88,7 +109,7 @@ export default function PerformanceTable({
           </thead>
           <tbody className="divide-y divide-border">
             {members.map((m) => {
-              const r = rows[m.customerId];
+              const r = rows[m.customerId] ?? blankRow(m.customerId);
               const highFatigue = (r.fatiguePct ?? 0) >= 80;
               const hasInjury = !!r.injuryNote?.trim();
               const isOpen = expanded === m.customerId;

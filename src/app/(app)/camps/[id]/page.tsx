@@ -58,6 +58,24 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
     await db.workoutCamp.delete({ where: { id: linkId } });
     revalidatePath(`/camps/${id}`);
   }
+  async function addClass(formData: FormData) {
+    "use server";
+    const title = String(formData.get("title") ?? "").trim();
+    const date = String(formData.get("date") ?? "");
+    const time = String(formData.get("time") ?? "") || "07:00";
+    if (!title || !date) return;
+    await db.class.create({
+      data: {
+        campId: id,
+        title,
+        startsAt: new Date(`${date}T${time}`),
+        durationMin: Number(formData.get("durationMin")) || 60,
+        capacity: Number(formData.get("capacity")) || 12,
+        location: String(formData.get("location") ?? "").trim() || null,
+      },
+    });
+    revalidatePath(`/camps/${id}`);
+  }
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -146,6 +164,29 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
 
       <section>
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Schedule</h2>
+        <form action={addClass} className="bg-card border border-border rounded-xl p-4 mb-4 flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[160px]">
+            <label className="block text-xs text-muted mb-1">Class title</label>
+            <input name="title" required placeholder="e.g. Pro Team Strength" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Date</label>
+            <input name="date" type="date" required defaultValue={camp.startDate.toISOString().slice(0, 10)} className="rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Time</label>
+            <input name="time" type="time" defaultValue="07:00" className="rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div className="w-20">
+            <label className="block text-xs text-muted mb-1">Capacity</label>
+            <input name="capacity" type="number" defaultValue={12} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div className="w-32">
+            <label className="block text-xs text-muted mb-1">Location</label>
+            <input name="location" placeholder="optional" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Add class</button>
+        </form>
         <CampSchedule
           workouts={camp.workouts.map((wc) => ({
             id: wc.workout.id,

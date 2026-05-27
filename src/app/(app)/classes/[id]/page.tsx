@@ -8,6 +8,7 @@ import { formatItem } from "@/domain/exercises";
 import { requireUser } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
 import PerformanceTable, { type Exercise } from "@/components/PerformanceTable";
+import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,20 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
   });
   if (!cls) notFound();
 
+  // Candidates to add to the roster: camp members (if this class belongs to a
+  // camp) otherwise all customers, excluding anyone already rostered.
+  const rosteredIds = new Set(cls.roster.map((r) => r.customerId));
+  const candidates = cls.campId
+    ? (
+        await db.campMember.findMany({
+          where: { campId: cls.campId },
+          include: { customer: { select: { id: true, name: true } } },
+          orderBy: { customer: { name: "asc" } },
+        })
+      ).map((m) => m.customer)
+    : await db.customer.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
+
   const performances = await listPerformance({ user }, id);
   // Flatten all exercises across the class's workouts for the per-exercise log
   const exercises: Exercise[] = cls.workouts.flatMap((cw) =>
@@ -42,6 +57,21 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
     const entryId = String(formData.get("entryId"));
     const status = String(formData.get("status"));
     await db.rosterEntry.update({ where: { id: entryId }, data: { attendance: status } });
+    revalidatePath(`/classes/${id}`);
+  }
+
+  async function addToRoster(formData: FormData) {
+    "use server";
+    const customerId = String(formData.get("customerId") ?? "");
+    if (!customerId) return;
+    await db.rosterEntry.create({ data: { classId: id, customerId } });
+    revalidatePath(`/classes/${id}`);
+  }
+
+  async function removeFromRoster(formData: FormData) {
+    "use server";
+    const entryId = String(formData.get("entryId") ?? "");
+    await db.rosterEntry.delete({ where: { id: entryId } });
     revalidatePath(`/classes/${id}`);
   }
 
@@ -69,7 +99,7 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
                   <Link href={`/customers/${r.customerId}`} className="font-medium hover:text-accent">{r.customer.name}</Link>
                   <div className="text-xs text-muted">{r.customer.tags}</div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex items-center gap-1">
                   {[
                     { v: "attended",    label: "✓", color: "bg-emerald-600 text-white" },
                     { v: "no_show",     label: "✗", color: "bg-red-600 text-white" },
@@ -90,11 +120,25 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
                       </button>
                     </form>
                   ))}
+                  <form action={removeFromRoster} className="ml-1">
+                    <input type="hidden" name="entryId" value={r.id} />
+                    <button type="submit" className="text-xs text-muted hover:text-red-600 px-1" title="Remove from roster">Remove</button>
+                  </form>
                 </div>
               </li>
             ))}
             {cls.roster.length === 0 && <li className="px-2 py-6 text-center text-sm text-muted">No athletes on the roster.</li>}
           </ul>
+          <form action={addToRoster} className="flex gap-2 mt-3 pt-3 border-t border-border">
+            <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
+              <option value="">+ Add athlete{cls.campId ? " (camp member)" : ""}…</option>
+              {rosterCandidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
+          </form>
+          {cls.campId && rosterCandidates.length === 0 && cls.roster.length > 0 && (
+            <div className="text-xs text-muted mt-2">All camp members are on the roster.</div>
+          )}
         </section>
 
         <section className="lg:col-span-5 space-y-4">
@@ -105,39 +149,26 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
             </div>
           ) : (
             cls.workouts.map((cw) => (
-              <div key={cw.id} className="bg-card border border-border rounded-xl p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <Link href={`/workouts/${cw.workoutId}`} className="text-base font-semibold hover:text-accent">{cw.workout.name}</Link>
-                    {cw.workout.description && <div className="text-xs text-muted mt-0.5">{cw.workout.description}</div>}
-                  </div>
-                </div>
-                <ul className="divide-y divide-border -mx-2">
-                  {cw.workout.items.map((it, idx) => {
-                    const { title, details } = formatItem({
-                      category: it.category as never,
-                      label: it.label,
-                      distanceM: it.distanceM,
-                      timeSec: it.timeSec,
-                      weightKg: it.weightKg,
-                      reps: it.reps,
-                      sets: it.sets,
-                      paceSecPerKm: it.paceSecPerKm,
-                      heightM: it.heightM,
-                      notes: it.notes,
-                    });
-                    return (
-                      <li key={it.id} className="px-2 py-2 flex items-start gap-3">
-                        <span className="text-xs text-muted font-mono w-5 text-right shrink-0 pt-0.5">{idx + 1}.</span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium">{title}</div>
-                          {details && <div className="text-xs text-muted">{details}</div>}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
+              <ClassWorkoutEditor
+                key={cw.id}
+                classId={cls.id}
+                workoutId={cw.workoutId}
+                workoutName={cw.workout.name}
+                description={cw.workout.description}
+                initialItems={cw.workout.items.map((it) => ({
+                  id: it.id,
+                  category: it.category as never,
+                  label: it.label,
+                  distanceM: it.distanceM,
+                  timeSec: it.timeSec,
+                  weightKg: it.weightKg,
+                  reps: it.reps,
+                  sets: it.sets,
+                  paceSecPerKm: it.paceSecPerKm,
+                  heightM: it.heightM,
+                  notes: it.notes,
+                }))}
+              />
             ))
           )}
         </section>

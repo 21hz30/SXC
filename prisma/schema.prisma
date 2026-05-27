@@ -62,6 +62,8 @@ model Customer {
   name          String
   email         String?
   phone         String?
+  gender        String?  // "male" | "female"
+  division      String?  // "open" | "pro" | "doubles" | "relay"
   age           Int?
   weightKg      Float?
   heightCm      Float?
