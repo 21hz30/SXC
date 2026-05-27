@@ -6,6 +6,7 @@ import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
+import { randomUUID } from "crypto";
 import { createSession } from "@/domain/chat";
 import { requireUser } from "@/lib/auth";
 import { Sparkles } from "lucide-react";
@@ -90,7 +91,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     const file = formData.get("file") as File;
     if (!file || file.size === 0) return;
     const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase();
-    const filename = `${id}_${Date.now()}.${ext}`;
+    const filename = `${id}_${randomUUID()}.${ext}`;
     const uploadDir = path.join(process.cwd(), "public", "uploads");
     await mkdir(uploadDir, { recursive: true });
     const buf = Buffer.from(await file.arrayBuffer());

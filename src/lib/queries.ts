@@ -22,7 +22,7 @@ export async function getTodayClasses() {
   return db.class.findMany({
     where: { startsAt: { gte: startOfDay(), lte: endOfDay() } },
     orderBy: { startsAt: "asc" },
-    include: { roster: true, workout: true },
+    include: { roster: true, workouts: { include: { workout: true } } },
   });
 }
 

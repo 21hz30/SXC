@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon, MessagesSquare } from "lucide-react";
 import Markdown from "./Markdown";
@@ -35,7 +35,7 @@ function parseSlashLine(text: string) {
   return m ? { cmd: m[1].toLowerCase(), rest: m[2] } : null;
 }
 
-export default function AiSidebar({ user }: { user: { name: string; role: string } }) {
+export default function AiSidebar({ user: _user }: { user: { name: string; role: string } }) {
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);

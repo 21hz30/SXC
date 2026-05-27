@@ -36,7 +36,7 @@ export default function ChatSessionsPanel() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    queueMicrotask(refresh);
     const h = () => refresh();
     window.addEventListener("sxc:sessions-changed", h);
     return () => window.removeEventListener("sxc:sessions-changed", h);
