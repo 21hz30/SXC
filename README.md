@@ -4,19 +4,22 @@ An AI-assisted training dashboard for Hyrox coaches: manage athletes, camps,
 classes, structured workouts, and per-class performance — with a built-in
 AI co-coach for drafting plans and athlete-specific guidance.
 
-**Stack:** Next.js 16 (App Router) · React 19 · Prisma 7 + SQLite · Tailwind 4 · Anthropic SDK.
+**Stack:** Next.js 16 (App Router) · React 19 · Prisma 7 + PostgreSQL (Supabase) · Tailwind 4 · Anthropic SDK.
 
-> **Project phase:** This is currently in a **demo / validation** phase. It runs
-> on SQLite with simple cookie auth so the data model and features can be
-> confirmed cheaply. Production infrastructure (PostgreSQL, real auth, object
-> storage) is intentionally deferred — see [Deploying to the cloud](#deploying-to-the-cloud).
+> **Project phase:** This is currently in a **demo / validation** phase. The
+> database is hosted on Supabase; auth is a simple cookie-based scheme that
+> covers admin / coach / customer roles. Production hardening (managed auth
+> like Auth.js, object storage for video uploads, CI/CD) is intentionally
+> deferred — see [Deploying to the cloud](#deploying-to-the-cloud).
 
 ---
 
 ## Prerequisites
 
 - **Node.js 20+** (22 works) and npm
-- No external database needed for the demo — SQLite lives in a local file.
+- A **Supabase** project (free tier is fine). Grab its **session-mode pooler**
+  connection string from *Project Settings → Database → Connection string →
+  Session*.
 
 ## Getting started
 
@@ -50,7 +53,7 @@ Copy `.env.example` to `.env` and set:
 
 | Variable         | Required    | Description                                                            |
 | ---------------- | ----------- | ---------------------------------------------------------------------- |
-| `DATABASE_URL`   | yes         | Database connection. Demo default: `file:./dev.db` (SQLite).           |
+| `DATABASE_URL`   | yes         | Supabase **session-mode pooler** URL. Format: `postgresql://postgres.<ref>:<password>@aws-1-<region>.pooler.supabase.com:5432/postgres` |
 | `SESSION_SECRET` | yes         | Secret used to sign session cookies. Use a long random string in prod. |
 | `AI_API_KEY`     | for AI chat | API key for the model provider (Anthropic-compatible).                 |
 | `AI_BASE_URL`    | for AI chat | Base URL of the model provider.                                        |
@@ -95,33 +98,28 @@ is intentional for a single full-stack Next.js app.
 
 ## Deploying to the cloud
 
-The architecture (stateless Next.js + Prisma) is cloud-ready; only the
-*infrastructure pieces* need to grow with you. Recommended path:
+The architecture (stateless Next.js + Prisma + Supabase) is cloud-ready out
+of the box. Recommended path:
 
-### Demo / early stage (now)
-Keep it simple and cheap. Deploy the app as a **single container** to a
-platform with a **persistent disk** for the SQLite file:
+### Now
+Database already lives on **Supabase** (managed PostgreSQL). The app server
+is stateless, so any host works:
 
-- **Railway**, **Render**, or **Fly.io** — git-connected, deploy on push, and
-  give you a persistent volume mounted where `dev.db` lives.
-- Set `DATABASE_URL`, `SESSION_SECRET`, and the `AI_*` vars as platform secrets.
-- Run `npm run db:migrate` as the release/start step.
+- **Vercel** — zero-config for Next.js. Set `DATABASE_URL`, `SESSION_SECRET`,
+  and the `AI_*` vars as platform secrets. Deploy on push.
+- **Railway / Render / Fly.io** — same idea, container-based, also fine.
+- Run `npm run db:migrate` as the release step.
+- **Deploy in the same region as your Supabase project** (currently
+  `ap-southeast-1`). Cross-region adds significant latency to every request.
 
-> Note: **Vercel and other serverless platforms have an ephemeral filesystem**,
-> so a SQLite file is wiped on every deploy. Use a VM/container with a volume
-> while on SQLite, or move to managed Postgres first (below).
-
-### Scaling up (later, pre-launch)
-When you're ready for real traffic, change infrastructure — **not the code**:
-
-1. **Database:** point `DATABASE_URL` at a managed **PostgreSQL** (Neon, Supabase,
-   RDS) and switch the Prisma datasource provider to `postgresql`. Prisma keeps
-   the app code unchanged.
-2. **Hosting:** with Postgres you can deploy on **Vercel** (zero-config for
-   Next.js) or keep containers behind a load balancer for horizontal scaling.
-3. **Auth:** replace the demo cookie auth with a battle-tested library + secret store.
-4. **File uploads:** move athlete videos from `/public/uploads` to object
-   storage (S3 / Cloudflare R2).
+### Hardening before real users
+1. **Auth:** replace the demo cookie auth with Auth.js (NextAuth) + Prisma
+   adapter; add email verification + password reset.
+2. **File uploads:** move athlete videos from `/public/uploads` to object
+   storage (S3 / Cloudflare R2). Local disk doesn't survive serverless deploys.
+3. **Secrets rotation:** rotate the Supabase DB password and any AI keys that
+   have ever appeared in chat transcripts or repos.
+4. **Rate limits + AI cost caps** on the chat endpoint.
 
 ### CI/CD (recommended setup)
 Keep the pipeline boring and repeatable. A typical GitHub Actions flow:
