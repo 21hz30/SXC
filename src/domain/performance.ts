@@ -4,6 +4,7 @@ import type { Ctx } from "./types";
 
 export type PerformanceDTO = {
   customerId: string;
+  workoutId: string | null;
   status: string;
   rpe: number | null;
   fatiguePct: number | null;
@@ -17,6 +18,7 @@ export async function listPerformance(_ctx: Ctx, classId: string): Promise<Perfo
   const rows = await db.performance.findMany({ where: { classId } });
   return rows.map((r) => ({
     customerId: r.customerId,
+    workoutId: r.workoutId,
     status: r.status,
     rpe: r.rpe,
     fatiguePct: r.fatiguePct,
@@ -31,6 +33,7 @@ export async function upsertPerformance(
   _ctx: Ctx,
   classId: string,
   customerId: string,
+  workoutId: string | null,
   input: Partial<{
     status: string;
     rpe: number | null;
@@ -50,9 +53,11 @@ export async function upsertPerformance(
   if (input.notes !== undefined) data.notes = input.notes;
   if (input.results !== undefined) data.resultsJson = JSON.stringify(input.results);
 
+  // Prisma's compound-unique input types workoutId as `string` even though the
+  // column is nullable; the runtime correctly accepts null. Cast at the edge.
   await db.performance.upsert({
-    where: { classId_customerId: { classId, customerId } },
-    create: { classId, customerId, ...data },
+    where: { classId_customerId_workoutId: { classId, customerId, workoutId: workoutId as string } },
+    create: { classId, customerId, workoutId, ...data },
     update: data,
   });
   revalidatePath(`/classes/${classId}`);

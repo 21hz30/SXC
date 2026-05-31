@@ -1,20 +1,22 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { formatTime, formatDate } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import { formatItem } from "@/domain/exercises";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireCoach } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
-import PerformanceTable, { type Exercise } from "@/components/PerformanceTable";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
+import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
+import { canAccessCamp } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-export default async function ClassDetail({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireUser();
+export default async function ClassDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
+  const user = await requireCoach();
   const { id } = await params;
+  const { edit } = await searchParams;
   const cls = await db.class.findUnique({
     where: { id },
     include: {
@@ -27,14 +29,20 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
     },
   });
   if (!cls) notFound();
+  // A class is accessible if its camp is — coaches can only see their own
+  // camps' classes, customers only see classes they're rostered on (TODO).
+  if (cls.camp && !canAccessCamp(user, cls.camp)) redirect("/calendar");
 
-  // Candidates to add to the roster: camp members (if this class belongs to a
-  // camp) otherwise all customers, excluding anyone already rostered.
+  // Candidates to add to the roster:
+  //  - drop-in classes accept ANY customer (open to walk-ins outside the camp)
+  //  - regular classes belonging to a camp are restricted to camp members
+  //  - free-standing classes (no camp) also accept any customer
   const rosteredIds = new Set(cls.roster.map((r) => r.customerId));
-  const candidates = cls.campId
+  const restrictToCamp = !!cls.campId && !cls.dropInAllowed;
+  const candidates = restrictToCamp
     ? (
         await db.campMember.findMany({
-          where: { campId: cls.campId },
+          where: { campId: cls.campId! },
           include: { customer: { select: { id: true, name: true } } },
           orderBy: { customer: { name: "asc" } },
         })
@@ -43,14 +51,52 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
   const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
 
   const performances = await listPerformance({ user }, id);
-  // Flatten all exercises across the class's workouts for the per-exercise log
-  const exercises: Exercise[] = cls.workouts.flatMap((cw) =>
-    cw.workout.items.map((it) => {
+  // Map each workout to its exercises (for per-workout feedback inputs) and to
+  // the subset of performance rows scoped to it.
+  const workoutFeedbackData = cls.workouts.map((cw) => ({
+    workoutId: cw.workoutId,
+    name: cw.workout.name,
+    exercises: cw.workout.items.map((it) => {
       const { title, details } = formatItem(it as never);
       return { id: it.id, label: details ? `${title} (${details})` : title };
-    })
-  );
+    }),
+    initial: performances
+      .filter((p) => p.workoutId === cw.workoutId)
+      .map((p) => ({ ...p, workoutId: cw.workoutId } as WorkoutPerfRow)),
+  }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
+
+  async function updateClass(formData: FormData) {
+    "use server";
+    const title = String(formData.get("title") ?? "").trim();
+    const date = String(formData.get("date") ?? "");
+    const time = String(formData.get("time") ?? "") || "07:00";
+    if (!title || !date) return;
+    await db.class.update({
+      where: { id },
+      data: {
+        title,
+        startsAt: new Date(`${date}T${time}`),
+        durationMin: Number(formData.get("durationMin")) || 60,
+        capacity: Number(formData.get("capacity")) || 12,
+        location: String(formData.get("location") ?? "").trim() || null,
+        dropInAllowed: formData.get("dropInAllowed") === "on",
+      },
+    });
+    revalidatePath(`/classes/${id}`);
+    redirect(`/classes/${id}`);
+  }
+
+  async function deleteClass() {
+    "use server";
+    const target = await db.class.findUnique({ where: { id }, select: { campId: true } });
+    await db.class.delete({ where: { id } });
+    if (target?.campId) {
+      revalidatePath(`/camps/${target.campId}`);
+      redirect(`/camps/${target.campId}`);
+    }
+    redirect("/calendar");
+  }
 
   async function setAttendance(formData: FormData) {
     "use server";
@@ -78,109 +124,176 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
-      <header className="mt-3 mb-6">
-        <div className="text-sm text-muted">
-          {formatDate(cls.startsAt)} · {formatTime(cls.startsAt)} · {cls.location ?? "—"}
-          {cls.camp && (<> · <Link href={`/camps/${cls.campId}`} className="text-accent hover:underline">{cls.camp.name}</Link></>)}
+      <header className="mt-3 mb-6 flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm text-muted">
+            {formatDate(cls.startsAt)} · {formatTime(cls.startsAt)} · {cls.location ?? "—"} · {cls.durationMin} min
+            {cls.camp && (<> · <Link href={`/camps/${cls.campId}`} className="text-accent hover:underline">{cls.camp.name}</Link></>)}
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-3xl font-semibold tracking-tight">{cls.title}</h1>
+            {cls.dropInAllowed && (
+              <span className="text-[11px] font-semibold uppercase tracking-wide rounded px-2 py-1 bg-emerald-100 text-emerald-700">Drop-in</span>
+            )}
+          </div>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight mt-1">{cls.title}</h1>
+        <Link
+          href={edit ? `/classes/${id}` : `/classes/${id}?edit=1`}
+          className="text-xs text-accent hover:underline shrink-0 mt-1"
+        >
+          {edit ? "Cancel" : "Edit class"}
+        </Link>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <section className="lg:col-span-7 bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Roster</h2>
-            <div className="text-sm text-muted tabular-nums">{cls.roster.length} / {cls.capacity}</div>
+      {edit && (
+        <form action={updateClass} className="bg-card border border-border rounded-xl p-5 mb-6 flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs text-muted mb-1">Class title</label>
+            <input name="title" required defaultValue={cls.title} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
           </div>
-          <ul className="divide-y divide-border -mx-2">
-            {cls.roster.map((r) => (
-              <li key={r.id} className="flex items-center justify-between px-2 py-3">
-                <div>
-                  <Link href={`/customers/${r.customerId}`} className="font-medium hover:text-accent">{r.customer.name}</Link>
-                  <div className="text-xs text-muted">{r.customer.tags}</div>
-                </div>
-                <div className="flex items-center gap-1">
-                  {[
-                    { v: "attended",    label: "✓", color: "bg-emerald-600 text-white" },
-                    { v: "no_show",     label: "✗", color: "bg-red-600 text-white" },
-                    { v: "late_cancel", label: "L", color: "bg-amber-500 text-white" },
-                    { v: "pending",     label: "—", color: "bg-zinc-200 text-zinc-700" },
-                  ].map((opt) => (
-                    <form key={opt.v} action={setAttendance}>
-                      <input type="hidden" name="entryId" value={r.id} />
-                      <input type="hidden" name="status" value={opt.v} />
-                      <button
-                        type="submit"
-                        className={`w-10 h-10 rounded-lg font-semibold text-sm ${
-                          r.attendance === opt.v ? opt.color : "bg-background hover:bg-zinc-100 text-muted"
-                        }`}
-                        title={opt.v}
-                      >
-                        {opt.label}
-                      </button>
-                    </form>
-                  ))}
-                  <form action={removeFromRoster} className="ml-1">
-                    <input type="hidden" name="entryId" value={r.id} />
-                    <button type="submit" className="text-xs text-muted hover:text-red-600 px-1" title="Remove from roster">Remove</button>
-                  </form>
-                </div>
-              </li>
-            ))}
-            {cls.roster.length === 0 && <li className="px-2 py-6 text-center text-sm text-muted">No athletes on the roster.</li>}
-          </ul>
-          <form action={addToRoster} className="flex gap-2 mt-3 pt-3 border-t border-border">
-            <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
-              <option value="">+ Add athlete{cls.campId ? " (camp member)" : ""}…</option>
-              {rosterCandidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
-          </form>
-          {cls.campId && rosterCandidates.length === 0 && cls.roster.length > 0 && (
-            <div className="text-xs text-muted mt-2">All camp members are on the roster.</div>
-          )}
-        </section>
+          <div>
+            <label className="block text-xs text-muted mb-1">Date</label>
+            <input name="date" type="date" required defaultValue={cls.startsAt.toISOString().slice(0, 10)} className="rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Time</label>
+            <input name="time" type="time" defaultValue={cls.startsAt.toISOString().slice(11, 16)} className="rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div className="w-24">
+            <label className="block text-xs text-muted mb-1">Duration (min)</label>
+            <input name="durationMin" type="number" defaultValue={cls.durationMin} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div className="w-20">
+            <label className="block text-xs text-muted mb-1">Capacity</label>
+            <input name="capacity" type="number" defaultValue={cls.capacity} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div className="w-40">
+            <label className="block text-xs text-muted mb-1">Location</label>
+            <input name="location" defaultValue={cls.location ?? ""} placeholder="optional" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-muted pb-2 cursor-pointer">
+            <input type="checkbox" name="dropInAllowed" defaultChecked={cls.dropInAllowed} className="rounded border-border" />
+            Allow drop-ins
+          </label>
+          <div className="flex gap-2 ml-auto">
+            <Link href={`/classes/${id}`} className="px-3 py-2 text-sm rounded-lg border border-border">Cancel</Link>
+            <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Save</button>
+          </div>
+        </form>
+      )}
+      {edit && (
+        <form action={deleteClass} className="mb-6 text-right">
+          <button type="submit" className="text-xs text-muted hover:text-red-600">Delete this class</button>
+        </form>
+      )}
 
-        <section className="lg:col-span-5 space-y-4">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Workouts ({cls.workouts.length})</h2>
-          {cls.workouts.length === 0 ? (
-            <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
-              No workout assigned yet. Drag one from the camp page.
-            </div>
-          ) : (
-            cls.workouts.map((cw) => (
-              <ClassWorkoutEditor
-                key={cw.id}
-                classId={cls.id}
-                workoutId={cw.workoutId}
-                workoutName={cw.workout.name}
-                description={cw.workout.description}
-                initialItems={cw.workout.items.map((it) => ({
-                  id: it.id,
-                  category: it.category as never,
-                  label: it.label,
-                  distanceM: it.distanceM,
-                  timeSec: it.timeSec,
-                  weightKg: it.weightKg,
-                  reps: it.reps,
-                  sets: it.sets,
-                  paceSecPerKm: it.paceSecPerKm,
-                  heightM: it.heightM,
-                  notes: it.notes,
-                }))}
-              />
-            ))
-          )}
-        </section>
-      </div>
-
-      <section className="mt-8">
+      {/* 1. WORKOUTS — session plan + per-workout athlete feedback under each one */}
+      <section className="mb-6">
         <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Performance &amp; Recovery</h2>
-          <div className="text-xs text-muted">Log how each athlete performed and felt — used for next-session planning &amp; injury management.</div>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Workouts ({cls.workouts.length})</h2>
+          <div className="text-xs text-muted">Each card has the plan + a feedback table for athletes&apos; RPE / fatigue / feeling for THIS workout.</div>
         </div>
-        <PerformanceTable classId={cls.id} members={members} exercises={exercises} initial={performances} />
+        {cls.workouts.length === 0 ? (
+          <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
+            No workout assigned yet. Drag one from the camp page or use &ldquo;+ Add workout&rdquo; there.
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {cls.workouts.map((cw, idx) => {
+              const fb = workoutFeedbackData[idx];
+              return (
+                <div key={cw.id} className="bg-card border border-border rounded-xl overflow-hidden">
+                  <ClassWorkoutEditor
+                    classId={cls.id}
+                    workoutId={cw.workoutId}
+                    workoutName={cw.workout.name}
+                    description={cw.workout.description}
+                    initialItems={cw.workout.items.map((it) => ({
+                      id: it.id,
+                      category: it.category as never,
+                      label: it.label,
+                      distanceM: it.distanceM,
+                      timeSec: it.timeSec,
+                      weightKg: it.weightKg,
+                      reps: it.reps,
+                      sets: it.sets,
+                      paceSecPerKm: it.paceSecPerKm,
+                      heightM: it.heightM,
+                      notes: it.notes,
+                    }))}
+                  />
+                  <div className="px-5 pt-4 pb-1 text-[11px] font-medium text-muted uppercase tracking-wide">
+                    Athlete feedback for this workout
+                  </div>
+                  <WorkoutFeedbackPanel
+                    classId={cls.id}
+                    workoutId={cw.workoutId}
+                    members={members}
+                    exercises={fb.exercises}
+                    initial={fb.initial}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
+
+      {/* 2. ROSTER — compact attendance bar + add athlete */}
+      <section className="bg-card border border-border rounded-xl p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Roster</h2>
+          <div className="text-sm text-muted tabular-nums">{cls.roster.length} / {cls.capacity}</div>
+        </div>
+        <ul className="divide-y divide-border -mx-2">
+          {cls.roster.map((r) => (
+            <li key={r.id} className="flex items-center justify-between px-2 py-3">
+              <div>
+                <Link href={`/customers/${r.customerId}`} className="font-medium hover:text-accent">{r.customer.name}</Link>
+                <div className="text-xs text-muted">{r.customer.tags}</div>
+              </div>
+              <div className="flex items-center gap-1">
+                {[
+                  { v: "attended",    label: "✓", color: "bg-emerald-600 text-white" },
+                  { v: "no_show",     label: "✗", color: "bg-red-600 text-white" },
+                  { v: "late_cancel", label: "L", color: "bg-amber-500 text-white" },
+                  { v: "pending",     label: "—", color: "bg-zinc-200 text-zinc-700" },
+                ].map((opt) => (
+                  <form key={opt.v} action={setAttendance}>
+                    <input type="hidden" name="entryId" value={r.id} />
+                    <input type="hidden" name="status" value={opt.v} />
+                    <button
+                      type="submit"
+                      className={`w-10 h-10 rounded-lg font-semibold text-sm ${
+                        r.attendance === opt.v ? opt.color : "bg-background hover:bg-zinc-100 text-muted"
+                      }`}
+                      title={opt.v}
+                    >
+                      {opt.label}
+                    </button>
+                  </form>
+                ))}
+                <form action={removeFromRoster} className="ml-1">
+                  <input type="hidden" name="entryId" value={r.id} />
+                  <button type="submit" className="text-xs text-muted hover:text-red-600 px-1" title="Remove from roster">Remove</button>
+                </form>
+              </div>
+            </li>
+          ))}
+          {cls.roster.length === 0 && <li className="px-2 py-6 text-center text-sm text-muted">No athletes on the roster.</li>}
+        </ul>
+        <form action={addToRoster} className="flex gap-2 mt-3 pt-3 border-t border-border">
+          <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
+            <option value="">+ Add athlete{restrictToCamp ? " (camp member)" : cls.dropInAllowed ? " (drop-in open)" : ""}…</option>
+            {rosterCandidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
+        </form>
+        {cls.campId && rosterCandidates.length === 0 && cls.roster.length > 0 && (
+          <div className="text-xs text-muted mt-2">All camp members are on the roster.</div>
+        )}
+      </section>
+
     </div>
   );
 }

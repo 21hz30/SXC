@@ -54,7 +54,6 @@ export async function listWorkouts(_ctx: Ctx) {
     include: {
       items: { orderBy: { order: "asc" } },
       classes: true,
-      camps: { include: { camp: true } },
     },
   });
 }
@@ -132,11 +131,9 @@ export async function adjustClassWorkout(
   const orig = await db.workout.findUnique({ where: { id: workoutId } });
   if (!orig) throw new Error("workout not found");
 
-  const [otherClassUses, campUses] = await Promise.all([
-    db.classWorkout.count({ where: { workoutId, NOT: { classId } } }),
-    db.workoutCamp.count({ where: { workoutId } }),
-  ]);
-  const shared = otherClassUses > 0 || campUses > 0;
+  // Shared = used by another class (workouts no longer attach to camps).
+  const otherClassUses = await db.classWorkout.count({ where: { workoutId, NOT: { classId } } });
+  const shared = otherClassUses > 0;
 
   if (!shared) {
     await saveWorkout(_ctx, workoutId, {

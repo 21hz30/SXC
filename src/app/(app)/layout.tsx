@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { clearSession, requireUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield } from "lucide-react";
+import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge } from "lucide-react";
 import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 
@@ -14,14 +14,21 @@ async function logout() {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
 
-  const nav = [
-    { href: "/", label: "Dashboard", icon: Home },
-    { href: "/calendar", label: "Calendar", icon: Calendar },
-    { href: "/camps", label: "Camps", icon: Tent },
-    { href: "/customers", label: "Customers", icon: Users },
-    { href: "/workouts", label: "Workouts", icon: Dumbbell },
-    ...(user.role === "admin" ? [{ href: "/coaches", label: "Coaches", icon: Shield }] : []),
-  ];
+  const nav = user.role === "customer"
+    ? [{ href: "/me", label: "My profile", icon: Home }]
+    : [
+        { href: "/", label: "Dashboard", icon: Home },
+        { href: "/calendar", label: "Calendar", icon: Calendar },
+        { href: "/camps", label: "Camps", icon: Tent },
+        { href: "/customers", label: "Customers", icon: Users },
+        { href: "/workouts", label: "Workouts", icon: Dumbbell },
+        ...(user.role === "admin"
+          ? [
+              { href: "/coaches", label: "Coaches", icon: Shield },
+              { href: "/admin/standards", label: "Standards", icon: Gauge },
+            ]
+          : []),
+      ];
 
   return (
     <div className="min-h-screen">

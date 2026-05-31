@@ -6,9 +6,9 @@ import { upsertPerformance } from "@/domain/performance";
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const body = (await req.json()) as { customerId: string } & Record<string, unknown>;
+  const body = (await req.json()) as { customerId: string; workoutId?: string | null } & Record<string, unknown>;
   if (!body.customerId) return Response.json({ ok: false, message: "customerId required" }, { status: 400 });
-  const { customerId, ...fields } = body;
-  await upsertPerformance({ user }, id, customerId, fields);
+  const { customerId, workoutId = null, ...fields } = body;
+  await upsertPerformance({ user }, id, customerId, workoutId ?? null, fields);
   return Response.json({ ok: true });
 }

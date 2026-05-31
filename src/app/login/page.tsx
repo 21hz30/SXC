@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { login, getSessionUser } from "@/lib/auth";
 
 export default async function LoginPage({
@@ -46,10 +47,8 @@ export default async function LoginPage({
         >
           Sign in
         </button>
-        <div className="mt-5 text-xs text-muted leading-relaxed">
-          Demo accounts:<br />
-          <code>peter</code> / <code>peter123</code> (admin)<br />
-          <code>src</code> / <code>src123</code> (coach)
+        <div className="mt-5 text-xs text-muted text-center">
+          No account? <Link href="/register" className="text-accent hover:underline">Create one</Link>
         </div>
       </form>
     </main>

@@ -1,32 +1,33 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { requireCoach } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
 import { Calendar, Users, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import { listTodos } from "@/domain/todos";
+import { classScope, customerScope, campScope } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const user = await requireUser();
+  const user = await requireCoach();
   const now = new Date();
   const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos] = await Promise.all([
     db.class.findMany({
-      where: { startsAt: { gte: startOfDay(), lte: endOfDay() } },
+      where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
       include: { roster: true, workouts: { include: { workout: { select: { name: true } } } }, camp: true },
     }),
     db.class.findMany({
-      where: { startsAt: { gt: endOfDay(), lte: endOfDay(addDays(now, 7)) } },
+      where: { startsAt: { gt: endOfDay(), lte: endOfDay(addDays(now, 7)) }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
       take: 5,
       include: { camp: true, roster: true },
     }),
-    db.customer.count(),
-    db.camp.count(),
+    db.customer.count({ where: customerScope(user) }),
+    db.camp.count({ where: campScope(user) }),
     db.workout.count(),
-    db.activityData.findMany({ orderBy: { date: "desc" }, take: 5, include: { customer: true } }),
+    db.activityData.findMany({ where: { customer: customerScope(user) }, orderBy: { date: "desc" }, take: 5, include: { customer: true } }),
     listTodos({ user }),
   ]);
 

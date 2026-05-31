@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 
 export type Member = { customerId: string; name: string };
 export type Exercise = { id: string; label: string };
+export type WorkoutGroup = { id: string; name: string; items: Exercise[] };
 export type PerfRow = {
   customerId: string;
   status: string;
@@ -40,14 +41,17 @@ function blankRow(customerId: string): PerfRow {
 export default function PerformanceTable({
   classId,
   members,
-  exercises,
+  workoutGroups,
   initial,
 }: {
   classId: string;
   members: Member[];
-  exercises: Exercise[];
+  /** Exercises grouped by the workout they belong to, in class order. */
+  workoutGroups: WorkoutGroup[];
   initial: PerfRow[];
 }) {
+  // Flat exercise count drives whether the expand toggle is shown.
+  const totalExercises = workoutGroups.reduce((n, g) => n + g.items.length, 0);
   const [rows, setRows] = useState<Record<string, PerfRow>>(() => {
     const map: Record<string, PerfRow> = {};
     for (const m of members) {
@@ -172,8 +176,8 @@ export default function PerformanceTable({
                       </div>
                     </td>
                     <td className="px-2 py-2.5">
-                      {exercises.length > 0 && (
-                        <button onClick={() => setExpanded(isOpen ? null : m.customerId)} className="text-muted hover:text-foreground" title="Per-exercise log">
+                      {totalExercises > 0 && (
+                        <button onClick={() => setExpanded(isOpen ? null : m.customerId)} className="text-muted hover:text-foreground" title="Per-workout log">
                           {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         </button>
                       )}
@@ -182,17 +186,28 @@ export default function PerformanceTable({
                   {isOpen && (
                     <tr className="bg-background">
                       <td colSpan={7} className="px-4 py-3">
-                        <div className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Per-exercise achieved — {m.name}</div>
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 mb-3">
-                          {exercises.map((ex) => (
-                            <div key={ex.id} className="flex items-center gap-2">
-                              <span className="text-xs text-muted flex-1 truncate" title={ex.label}>{ex.label}</span>
-                              <input
-                                defaultValue={r.results[ex.id] ?? ""}
-                                onBlur={(e) => setResult(m.customerId, ex.id, e.target.value)}
-                                placeholder="achieved"
-                                className="w-24 rounded-md border border-border px-2 py-1 text-xs"
-                              />
+                        <div className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Per-workout achieved — {m.name}</div>
+                        <div className="space-y-3 mb-3">
+                          {workoutGroups.map((g) => (
+                            <div key={g.id} className="bg-card border border-border rounded-lg p-3">
+                              <div className="text-xs font-semibold mb-2">{g.name}</div>
+                              {g.items.length === 0 ? (
+                                <div className="text-xs text-muted italic">No exercises in this workout.</div>
+                              ) : (
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {g.items.map((ex) => (
+                                    <div key={ex.id} className="flex items-center gap-2">
+                                      <span className="text-xs text-muted flex-1 truncate" title={ex.label}>{ex.label}</span>
+                                      <input
+                                        defaultValue={r.results[ex.id] ?? ""}
+                                        onBlur={(e) => setResult(m.customerId, ex.id, e.target.value)}
+                                        placeholder="achieved"
+                                        className="w-24 rounded-md border border-border px-2 py-1 text-xs"
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

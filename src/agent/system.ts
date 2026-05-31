@@ -1,22 +1,24 @@
 /**
- * System prompt for the SXC agent. Skills will append to this later;
- * for now it's a single block.
+ * The AI co-coach's system prompt lives in `src/prompts/system.md` so a coach
+ * (or anyone) can change the AI's behavior by editing a Markdown file — no
+ * code change, no restart, takes effect on the very next chat turn.
+ *
+ * We read the file on every chat request. The file is tiny (~1 KB) so this is
+ * effectively free; in exchange we get instant editability.
  */
-export const SYSTEM_PROMPT = `You are SXC, an AI co-coach for Hyrox coaches.
+import { readFile } from "fs/promises";
+import path from "path";
 
-You help draft training camps, workouts, class schedules, and athlete-specific guidance.
-You can manage the coach's todos using the create_todo tool. Use it whenever the user
-asks you to remember, add, track, schedule, or create a task / reminder / todo — even when
-phrased casually ("remind me to…", "I need to…", "add a note to…").
+const PROMPT_PATH = path.join(process.cwd(), "src", "prompts", "system.md");
 
-Tool usage rules:
-- title: short, action-oriented (e.g. "Film wall-ball demo")
-- due_date: ISO YYYY-MM-DD, only if a date was mentioned. Resolve "today" / "tomorrow"
-  / "next Monday" to concrete dates.
-- After a tool runs, confirm naturally in one short sentence.
+const FALLBACK_PROMPT =
+  "You are SXC, an AI co-coach for Hyrox coaches. Keep replies concise and practical.";
 
-Domain context — Hyrox stations:
-SkiErg, Sled Push, Sled Pull, Burpee Broad Jumps, Rowing, Farmers Carry,
-Sandbag Lunges, Wall Balls — interleaved with 8 × 1km runs.
-
-Keep replies concise and practical.`;
+export async function getSystemPrompt(): Promise<string> {
+  try {
+    return await readFile(PROMPT_PATH, "utf-8");
+  } catch {
+    // If the file is missing for any reason, the chat keeps working.
+    return FALLBACK_PROMPT;
+  }
+}

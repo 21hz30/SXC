@@ -5,20 +5,20 @@ import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { categoryLabel } from "@/domain/exercises";
+import { requireCoach } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function WorkoutsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  await requireCoach();
   const { new: isNew } = await searchParams;
   const workouts = await db.workout.findMany({
     orderBy: { createdAt: "desc" },
     include: {
       items: { orderBy: { order: "asc" }, take: 6 },
       classes: { include: { class: { select: { startsAt: true } } } },
-      camps: { include: { camp: true } },
     },
   });
-  const camps = await db.camp.findMany({ orderBy: { name: "asc" } });
 
   async function createWorkout(formData: FormData) {
     "use server";
@@ -27,8 +27,6 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
     const w = await db.workout.create({
       data: { name, description: String(formData.get("description") ?? "").trim() || null },
     });
-    const campId = String(formData.get("campId") ?? "");
-    if (campId) await db.workoutCamp.create({ data: { workoutId: w.id, campId } });
     revalidatePath("/workouts");
     redirect(`/workouts/${w.id}`);
   }
@@ -49,14 +47,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
         <form action={createWorkout} className="bg-card border border-border rounded-xl p-6 mb-6 space-y-4">
           <div><label className="block text-sm font-medium mb-1.5">Name</label><input name="name" required className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Description</label><input name="description" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5">Assign to camp (optional)</label>
-            <select name="campId" className="w-full rounded-lg border border-border px-3 py-2 text-sm">
-              <option value="">— none —</option>
-              {camps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div className="text-xs text-muted">You&apos;ll add exercises on the next screen.</div>
+          <div className="text-xs text-muted">You&apos;ll add exercises on the next screen. Assign the workout to specific classes from the camp page.</div>
           <div className="flex justify-end gap-2">
             <Link href="/workouts" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
             <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Create &amp; edit</button>
@@ -91,11 +82,6 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {(w.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean).map((t) => (
                   <span key={t} className="text-xs bg-accent/10 text-accent rounded-full px-2 py-0.5">{t}</span>
-                ))}
-                {w.camps.map((wc) => (
-                  <span key={wc.id} className="text-xs bg-background border border-border rounded-full px-2 py-0.5">
-                    {wc.camp.name}
-                  </span>
                 ))}
               </div>
             </Link>

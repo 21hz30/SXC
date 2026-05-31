@@ -1,17 +1,19 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { formatDate, formatTime } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import CampSchedule from "@/components/CampSchedule";
-import { formatItem } from "@/domain/exercises";
-import { Pencil } from "lucide-react";
+import { requireCoach } from "@/lib/auth";
+import { canAccessCamp } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampDetail({ params }: { params: Promise<{ id: string }> }) {
+export default async function CampDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
+  const user = await requireCoach();
   const { id } = await params;
+  const { edit } = await searchParams;
   const camp = await db.camp.findUnique({
     where: { id },
     include: {
@@ -24,15 +26,44 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
           roster: true,
         },
       },
-      workouts: { include: { workout: { include: { items: true } } } },
     },
   });
   if (!camp) notFound();
+  if (!canAccessCamp(user, camp)) redirect("/camps");
 
   const allCustomers = await db.customer.findMany({ orderBy: { name: "asc" } });
-  const allWorkouts = await db.workout.findMany({ orderBy: { name: "asc" } });
+  const allWorkouts = await db.workout.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } });
+  const coaches = edit ? await db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } }) : [];
   const memberIds = new Set(camp.members.map((m) => m.customerId));
-  const workoutIds = new Set(camp.workouts.map((w) => w.workoutId));
+
+  async function updateCamp(formData: FormData) {
+    "use server";
+    const name = String(formData.get("name") ?? "").trim();
+    const startDate = String(formData.get("startDate") ?? "");
+    const endDate = String(formData.get("endDate") ?? "");
+    if (!name || !startDate || !endDate) return;
+    await db.camp.update({
+      where: { id },
+      data: {
+        name,
+        description: String(formData.get("description") ?? "").trim() || null,
+        division: String(formData.get("division") ?? "open") === "pro" ? "pro" : "open",
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        coachId: String(formData.get("coachId") ?? "") || null,
+      },
+    });
+    revalidatePath(`/camps/${id}`);
+    revalidatePath("/camps");
+    redirect(`/camps/${id}`);
+  }
+
+  async function deleteCamp() {
+    "use server";
+    await db.camp.delete({ where: { id } });
+    revalidatePath("/camps");
+    redirect("/camps");
+  }
 
   async function addMember(formData: FormData) {
     "use server";
@@ -44,18 +75,6 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
     "use server";
     const memberId = String(formData.get("memberId"));
     await db.campMember.delete({ where: { id: memberId } });
-    revalidatePath(`/camps/${id}`);
-  }
-  async function linkWorkout(formData: FormData) {
-    "use server";
-    const workoutId = String(formData.get("workoutId"));
-    if (workoutId) await db.workoutCamp.create({ data: { campId: id, workoutId } });
-    revalidatePath(`/camps/${id}`);
-  }
-  async function unlinkWorkout(formData: FormData) {
-    "use server";
-    const linkId = String(formData.get("linkId"));
-    await db.workoutCamp.delete({ where: { id: linkId } });
     revalidatePath(`/camps/${id}`);
   }
   async function addClass(formData: FormData) {
@@ -72,6 +91,7 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
         durationMin: Number(formData.get("durationMin")) || 60,
         capacity: Number(formData.get("capacity")) || 12,
         location: String(formData.get("location") ?? "").trim() || null,
+        dropInAllowed: formData.get("dropInAllowed") === "on",
       },
     });
     revalidatePath(`/camps/${id}`);
@@ -80,87 +100,89 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <BackButton fallback="/camps" label="Back" />
-      <header className="mt-3 mb-6">
-        <h1 className="text-3xl font-semibold tracking-tight">{camp.name}</h1>
-        <div className="text-sm text-muted mt-1">{camp.description}</div>
-        <div className="text-sm text-muted mt-2">
-          {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"}
+      <header className="mt-3 mb-6 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight">{camp.name}</h1>
+            <span className={`text-[11px] font-semibold uppercase tracking-wide rounded px-2 py-1 ${camp.division === "pro" ? "bg-accent/10 text-accent" : "bg-zinc-100 text-zinc-600"}`}>
+              {camp.division === "pro" ? "Pro" : "Open"}
+            </span>
+          </div>
+          <div className="text-sm text-muted mt-1">{camp.description}</div>
+          <div className="text-sm text-muted mt-2">
+            {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"}
+          </div>
         </div>
+        <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline shrink-0 mt-1">
+          {edit ? "Cancel" : "Edit camp"}
+        </Link>
       </header>
 
-      <div className="grid grid-cols-2 gap-6 mb-6">
-        <section className="bg-card border border-border rounded-xl p-5">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({camp.members.length})</h2>
-          <ul className="divide-y divide-border -mx-2 mb-3">
-            {camp.members.map((m) => (
-              <li key={m.id} className="flex items-center justify-between px-2 py-2">
-                <Link href={`/customers/${m.customerId}`} className="text-sm font-medium hover:text-accent">{m.customer.name}</Link>
-                <form action={removeMember}>
-                  <input type="hidden" name="memberId" value={m.id} />
-                  <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
-                </form>
-              </li>
-            ))}
-          </ul>
-          <form action={addMember} className="flex gap-2">
-            <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
-              <option value="">+ Add member…</option>
-              {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
+      {edit && (
+        <>
+          <form action={updateCamp} className="bg-card border border-border rounded-xl p-5 mb-3 grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className="block text-xs text-muted mb-1">Name</label>
+              <input name="name" required defaultValue={camp.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs text-muted mb-1">Description</label>
+              <textarea name="description" rows={2} defaultValue={camp.description ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-muted mb-1">Type</label>
+              <select name="division" defaultValue={camp.division} className="w-full rounded-lg border border-border px-3 py-2 text-sm">
+                <option value="open">Open</option>
+                <option value="pro">Pro</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-muted mb-1">Coach</label>
+              <select name="coachId" defaultValue={camp.coachId ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm">
+                <option value="">— unassigned —</option>
+                {coaches.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.role})</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-muted mb-1">Start date</label>
+              <input name="startDate" type="date" required defaultValue={camp.startDate.toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-muted mb-1">End date</label>
+              <input name="endDate" type="date" required defaultValue={camp.endDate.toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+            </div>
+            <div className="col-span-2 flex justify-end gap-2">
+              <Link href={`/camps/${id}`} className="px-3 py-2 text-sm rounded-lg border border-border">Cancel</Link>
+              <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Save</button>
+            </div>
           </form>
-        </section>
+          <form action={deleteCamp} className="mb-6 text-right">
+            <button type="submit" className="text-xs text-muted hover:text-red-600">Delete this camp</button>
+          </form>
+        </>
+      )}
 
-        <section className="bg-card border border-border rounded-xl p-5">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Workouts ({camp.workouts.length})</h2>
-          <div className="space-y-3 mb-3">
-            {camp.workouts.map((w) => (
-              <details key={w.id} className="border border-border rounded-lg group">
-                <summary className="flex items-center justify-between px-3 py-2.5 cursor-pointer list-none">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{w.workout.name}</div>
-                    <div className="text-xs text-muted">{w.workout.items.length} exercises{w.workout.tags ? ` · ${w.workout.tags}` : ""}</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Link href={`/workouts/${w.workoutId}`} className="text-xs text-accent hover:underline flex items-center gap-1">
-                      <Pencil size={11} /> Edit
-                    </Link>
-                    <form action={unlinkWorkout}>
-                      <input type="hidden" name="linkId" value={w.id} />
-                      <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
-                    </form>
-                  </div>
-                </summary>
-                <ul className="border-t border-border divide-y divide-border">
-                  {w.workout.items
-                    .sort((a, b) => a.order - b.order)
-                    .map((it, idx) => {
-                      const { title, details } = formatItem(it as never);
-                      return (
-                        <li key={it.id} className="px-3 py-2 flex items-start gap-2 text-xs">
-                          <span className="text-muted font-mono w-4 text-right shrink-0">{idx + 1}.</span>
-                          <div className="min-w-0">
-                            <span className="font-medium">{title}</span>
-                            {details && <span className="text-muted"> — {details}</span>}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  {w.workout.items.length === 0 && <li className="px-3 py-2 text-xs text-muted">No exercises yet — click Edit to build it.</li>}
-                </ul>
-              </details>
-            ))}
-            {camp.workouts.length === 0 && <div className="text-sm text-muted text-center py-3">No workouts linked yet.</div>}
-          </div>
-          <form action={linkWorkout} className="flex gap-2">
-            <select name="workoutId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
-              <option value="">+ Add workout…</option>
-              {allWorkouts.filter((w) => !workoutIds.has(w.id)).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
-            <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
-          </form>
-        </section>
-      </div>
+      <section className="bg-card border border-border rounded-xl p-5 mb-6">
+        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({camp.members.length})</h2>
+        <ul className="divide-y divide-border -mx-2 mb-3">
+          {camp.members.map((m) => (
+            <li key={m.id} className="flex items-center justify-between px-2 py-2">
+              <Link href={`/customers/${m.customerId}`} className="text-sm font-medium hover:text-accent">{m.customer.name}</Link>
+              <form action={removeMember}>
+                <input type="hidden" name="memberId" value={m.id} />
+                <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+        <form action={addMember} className="flex gap-2">
+          <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
+            <option value="">+ Add member…</option>
+            {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
+        </form>
+      </section>
 
       <section>
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Schedule</h2>
@@ -185,14 +207,18 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
             <label className="block text-xs text-muted mb-1">Location</label>
             <input name="location" placeholder="optional" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
           </div>
+          <label className="flex items-center gap-1.5 text-xs text-muted pb-2 cursor-pointer">
+            <input type="checkbox" name="dropInAllowed" className="rounded border-border" />
+            Allow drop-ins
+          </label>
           <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Add class</button>
         </form>
         <CampSchedule
-          workouts={camp.workouts.map((wc) => ({
-            id: wc.workout.id,
-            name: wc.workout.name,
-            description: wc.workout.description,
-            itemCount: wc.workout.items.length,
+          workouts={allWorkouts.map((w) => ({
+            id: w.id,
+            name: w.name,
+            description: w.description,
+            itemCount: w.items.length,
           }))}
           classes={camp.classes.map((c) => ({
             id: c.id,
@@ -201,6 +227,7 @@ export default async function CampDetail({ params }: { params: Promise<{ id: str
             workouts: c.workouts.map((cw) => ({ id: cw.workout.id, name: cw.workout.name })),
             rosterCount: c.roster.length,
             capacity: c.capacity,
+            dropInAllowed: c.dropInAllowed,
           }))}
         />
       </section>

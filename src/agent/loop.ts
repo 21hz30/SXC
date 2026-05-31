@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { SYSTEM_PROMPT } from "./system";
+import { getSystemPrompt } from "./system";
 import { tools, toAnthropicTools, getTool } from "@/tools/registry";
 import type { Ctx } from "@/domain/types";
 
@@ -21,7 +21,8 @@ export async function runAgent(opts: {
 }): Promise<string> {
   const { ctx, messages, onChunk, customerContext } = opts;
   const maxSteps = opts.maxSteps ?? 4;
-  const system = customerContext ? `${SYSTEM_PROMPT}\n\n---\n\n${customerContext}` : SYSTEM_PROMPT;
+  const basePrompt = await getSystemPrompt();
+  const system = customerContext ? `${basePrompt}\n\n---\n\n${customerContext}` : basePrompt;
 
   const apiKey = process.env.AI_API_KEY;
   const baseURL = process.env.AI_BASE_URL;

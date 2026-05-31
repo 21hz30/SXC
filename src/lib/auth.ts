@@ -7,7 +7,7 @@ import { db } from "./db";
 const COOKIE = "sxc_session";
 export const SESSION_COOKIE = COOKIE;
 
-export type Role = "admin" | "coach";
+export type Role = "admin" | "coach" | "customer";
 export type SessionUser = { id: string; username: string; name: string; role: Role };
 
 function sign(value: string): string {
@@ -52,6 +52,15 @@ export async function requireUser(): Promise<SessionUser> {
 export async function requireAdmin(): Promise<SessionUser> {
   const u = await requireUser();
   if (u.role !== "admin") redirect("/");
+  return u;
+}
+
+/**
+ * Use on coach/admin-only pages. Customer accounts get bounced to /me.
+ */
+export async function requireCoach(): Promise<SessionUser> {
+  const u = await requireUser();
+  if (u.role === "customer") redirect("/me");
   return u;
 }
 

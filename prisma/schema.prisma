@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model User {
@@ -12,7 +12,11 @@ model User {
   username     String   @unique
   passwordHash String
   name         String
-  role         String   // "admin" | "coach"
+  role         String   // "admin" | "coach" | "customer"
+  /// When role = "customer", optionally links this account to the athlete
+  /// record managed by their coach. One Customer ↔ at most one User.
+  customerId   String?  @unique
+  customer     Customer? @relation("CustomerAccount", fields: [customerId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
 
   camps        Camp[]   @relation("CoachCamps")
@@ -73,6 +77,8 @@ model Customer {
   tags          String?
   createdAt     DateTime @default(now())
 
+  /// Reverse side of the optional account link (User.customerId).
+  userAccount   User?         @relation("CustomerAccount")
   benchmarks    Benchmark[]
   rosterEntries RosterEntry[]
   logs          Log[]
@@ -81,6 +87,75 @@ model Customer {
   campMembers   CampMember[]
   chatSessions  ChatSession[]
   performances  Performance[]
+  raceResults   RaceResult[]
+  raceGoals     RaceGoal[]
+}
+
+// A completed Hyrox race (or simulation). Splits are flat — 8 runs + 8 stations
+// — because the Hyrox format is fixed. PB-per-division is derived from this
+// table; no separate PB column on Customer.
+model RaceResult {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  eventName     String
+  eventDate     DateTime
+  division      String   // "open" | "pro" | "doubles" | "relay"
+  totalSec      Int
+  roxzoneSec    Int?     // additive transition time
+
+  // 8 runs (1 km each), in race order
+  run1Sec       Int?
+  run2Sec       Int?
+  run3Sec       Int?
+  run4Sec       Int?
+  run5Sec       Int?
+  run6Sec       Int?
+  run7Sec       Int?
+  run8Sec       Int?
+
+  // 8 stations, in race order
+  skiSec         Int?
+  sledPushSec    Int?
+  sledPullSec    Int?
+  burpeeSec      Int?
+  rowSec         Int?
+  farmersSec     Int?
+  lungesSec      Int?
+  wallballsSec   Int?
+
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([customerId, division, totalSec])
+  @@index([customerId, eventDate])
+}
+
+// Improvement targets per athlete per division. Single row per (customer,
+// division). Per-station targets unlock the radar's "vs goal" mode.
+model RaceGoal {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  division      String   // "open" | "pro" | "doubles" | "relay"
+
+  targetTotalSec   Int?
+  targetDate       DateTime?
+
+  targetSkiSec         Int?
+  targetSledPushSec    Int?
+  targetSledPullSec    Int?
+  targetBurpeeSec      Int?
+  targetRowSec         Int?
+  targetFarmersSec     Int?
+  targetLungesSec      Int?
+  targetWallballsSec   Int?
+  targetRunSec         Int?  // avg run pace target (per 1km)
+
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@unique([customerId, division])
 }
 
 model Benchmark {
@@ -126,6 +201,7 @@ model Camp {
   id          String   @id @default(cuid())
   name        String
   description String?
+  division    String   @default("open")  // "open" | "pro" — camp type
   startDate   DateTime
   endDate     DateTime
   coachId     String?
@@ -134,7 +210,6 @@ model Camp {
 
   members  CampMember[]
   classes  Class[]
-  workouts WorkoutCamp[]
 }
 
 model CampMember {
@@ -157,7 +232,7 @@ model Workout {
 
   items       WorkoutItem[]
   classes     ClassWorkout[]
-  camps       WorkoutCamp[]
+  performances Performance[]
 }
 
 model WorkoutItem {
@@ -192,16 +267,6 @@ model ClassWorkout {
   @@index([classId, order])
 }
 
-model WorkoutCamp {
-  id        String  @id @default(cuid())
-  workoutId String
-  workout   Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
-  campId    String
-  camp      Camp    @relation(fields: [campId], references: [id], onDelete: Cascade)
-
-  @@unique([workoutId, campId])
-}
-
 model Class {
   id          String   @id @default(cuid())
   title       String
@@ -210,6 +275,7 @@ model Class {
   location    String?
   capacity    Int      @default(12)
   notes       String?
+  dropInAllowed Boolean @default(false)  // when true, athletes outside the camp can join
   campId      String?
   camp        Camp?    @relation(fields: [campId], references: [id])
   createdAt   DateTime @default(now())
@@ -239,17 +305,19 @@ model Performance {
   class        Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   customerId   String
   customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  workoutId    String?  // null = legacy class-overall; new rows always set this
+  workout      Workout? @relation(fields: [workoutId], references: [id], onDelete: Cascade)
   status       String   @default("pending") // pending | completed | partial | dnf
   rpe          Int?     // perceived exertion 1-10
   fatiguePct   Int?     // 0-100 (e.g. "80% tired")
   feeling      String?  // short free text, e.g. "legs heavy"
   injuryNote   String?  // injury flag / note — empty means no concern
   notes        String?
-  resultsJson  String?  // per-exercise achieved: { "<itemId>": "achieved value" }
+  resultsJson  String?  // per-exercise achieved: { "<itemId>": "achieved value" } — scoped to this workout
   updatedAt    DateTime @updatedAt
   createdAt    DateTime @default(now())
 
-  @@unique([classId, customerId])
+  @@unique([classId, customerId, workoutId])
   @@index([customerId, createdAt])
 }
 

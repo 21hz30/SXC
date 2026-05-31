@@ -1,8 +1,11 @@
 import { PrismaClient } from "../src/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
+import "dotenv/config";
 import bcrypt from "bcryptjs";
 
-const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL ?? "file:./dev.db" });
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is not set");
+const adapter = new PrismaPg({ connectionString: url });
 const db = new PrismaClient({ adapter });
 
 function daysFromNow(d: number, hour = 7, min = 0) {
@@ -17,12 +20,13 @@ async function main() {
   await db.chatMessage.deleteMany();
   await db.chatSession.deleteMany();
   await db.log.deleteMany();
+  await db.raceResult.deleteMany();
+  await db.raceGoal.deleteMany();
   await db.performance.deleteMany();
   await db.rosterEntry.deleteMany();
   await db.classWorkout.deleteMany();
   await db.class.deleteMany();
   await db.workoutItem.deleteMany();
-  await db.workoutCamp.deleteMany();
   await db.workout.deleteMany();
   await db.video.deleteMany();
   await db.activityData.deleteMany();
@@ -184,49 +188,38 @@ async function main() {
   ]);
 
   // Camps
+  // Two camps only: one Open (general roster, beginners + intermediate) and
+  // one Pro (elite block). Open absorbs what used to be "Hyrox 101 — Beginners".
   const fallCamp = await db.camp.create({
-    data: { name: "Fall Hyrox Prep", description: "8-week build to October race.", startDate: daysFromNow(-21), endDate: daysFromNow(35), coachId: src.id },
-  });
-  const beginnerCamp = await db.camp.create({
-    data: { name: "Hyrox 101 — Beginners", description: "Intro to Hyrox-style training.", startDate: daysFromNow(-7), endDate: daysFromNow(49), coachId: src.id },
+    data: { name: "Fall Hyrox Prep", description: "Open camp — 8-week build to October race. Beginners welcome.", division: "open", startDate: daysFromNow(-21), endDate: daysFromNow(49), coachId: src.id },
   });
   const eliteCamp = await db.camp.create({
-    data: { name: "Pro Team", description: "Elite athletes — pre-season block.", startDate: daysFromNow(-30), endDate: daysFromNow(60), coachId: peter.id },
+    data: { name: "Pro Team", description: "Pro camp — elite athletes, pre-season block.", division: "pro", startDate: daysFromNow(-30), endDate: daysFromNow(60), coachId: peter.id },
   });
 
   await db.campMember.createMany({ data: [
     { campId: fallCamp.id, customerId: customers[0].id },
     { campId: fallCamp.id, customerId: customers[1].id },
     { campId: fallCamp.id, customerId: customers[6].id },
-    { campId: beginnerCamp.id, customerId: customers[4].id },
-    { campId: beginnerCamp.id, customerId: customers[7].id },
-    { campId: beginnerCamp.id, customerId: customers[3].id },
+    { campId: fallCamp.id, customerId: customers[4].id },
+    { campId: fallCamp.id, customerId: customers[7].id },
+    { campId: fallCamp.id, customerId: customers[3].id },
     { campId: eliteCamp.id, customerId: customers[2].id },
     { campId: eliteCamp.id, customerId: customers[5].id },
   ] });
 
-  await db.workoutCamp.createMany({ data: [
-    { workoutId: wHyroxSim.id, campId: fallCamp.id },
-    { workoutId: wCompro.id, campId: fallCamp.id },
-    { workoutId: wPush.id, campId: fallCamp.id },
-    { workoutId: wCompro.id, campId: beginnerCamp.id },
-    { workoutId: wHyroxSim.id, campId: eliteCamp.id },
-    { workoutId: wStrength.id, campId: eliteCamp.id },
-    { workoutId: wPush.id, campId: eliteCamp.id },
-  ] });
-
   // Classes (each can have multiple workouts)
-  const classDefs: { d: number; h: number; title: string; campId: string; workoutIds: string[] }[] = [
+  const classDefs: { d: number; h: number; title: string; campId: string; workoutIds: string[]; dropIn?: boolean }[] = [
     { d: -3, h: 7,  title: "Open Hyrox Class",      campId: fallCamp.id,    workoutIds: [wCompro.id] },
     { d: -2, h: 18, title: "Strength Night",        campId: eliteCamp.id,   workoutIds: [wStrength.id] },
     { d: -1, h: 7,  title: "Open Hyrox Class",      campId: fallCamp.id,    workoutIds: [wHyroxSim.id] },
     { d: 0,  h: 7,  title: "Open Hyrox Class",      campId: fallCamp.id,    workoutIds: [wCompro.id, wPush.id] },
-    { d: 0,  h: 9,  title: "Beginners Intro",       campId: beginnerCamp.id,workoutIds: [wCompro.id] },
-    { d: 0,  h: 18, title: "Evening Engine",        campId: fallCamp.id,    workoutIds: [wCompro.id] },
+    { d: 0,  h: 9,  title: "Beginners Intro",       campId: fallCamp.id,workoutIds: [wCompro.id], dropIn: true },
+    { d: 0,  h: 18, title: "Evening Engine",        campId: fallCamp.id,    workoutIds: [wCompro.id], dropIn: true },
     { d: 1,  h: 7,  title: "Hyrox Simulation",      campId: fallCamp.id,    workoutIds: [wHyroxSim.id] },
     { d: 2,  h: 18, title: "Pro Team Strength",     campId: eliteCamp.id,   workoutIds: [wStrength.id, wPush.id] },
     { d: 3,  h: 7,  title: "Open Hyrox Class",      campId: fallCamp.id,    workoutIds: [wCompro.id] },
-    { d: 3,  h: 9,  title: "Beginners Run + WB",    campId: beginnerCamp.id,workoutIds: [wCompro.id] },
+    { d: 3,  h: 9,  title: "Beginners Run + WB",    campId: fallCamp.id,workoutIds: [wCompro.id] },
     { d: 5,  h: 9,  title: "Saturday Long Session", campId: fallCamp.id,    workoutIds: [wHyroxSim.id] },
     { d: 6,  h: 10, title: "Pro Team Sim",          campId: eliteCamp.id,   workoutIds: [wHyroxSim.id] },
   ];
@@ -240,6 +233,7 @@ async function main() {
         location: "SXC Box — Main Floor",
         capacity: 12,
         campId: cd.campId,
+        dropInAllowed: cd.dropIn ?? false,
       },
     });
     for (let i = 0; i < cd.workoutIds.length; i++) {
@@ -255,22 +249,70 @@ async function main() {
       // Log performance/recovery for past sessions the athlete attended, so the
       // athlete profile shows a fatigue/RPE/feeling trend across weeks.
       if (attended) {
-        const fatigue = 40 + Math.floor(Math.random() * 55); // 40–95%
-        const injury = Math.random() < 0.12 ? "tight L hamstring — monitor" : null;
-        await db.performance.create({
-          data: {
-            classId: cls.id,
-            customerId: m.customerId,
-            status: Math.random() < 0.85 ? "completed" : "partial",
-            rpe: 5 + Math.floor(Math.random() * 5), // 5–9
-            fatiguePct: fatigue,
-            feeling: feelings[Math.floor(Math.random() * feelings.length)],
-            injuryNote: injury,
-          },
-        });
+        // Per-workout feedback: every workout in this class gets its own row.
+        for (const wid of cd.workoutIds) {
+          const fatigue = 40 + Math.floor(Math.random() * 55); // 40–95%
+          const injury = Math.random() < 0.08 ? "tight L hamstring — monitor" : null;
+          await db.performance.create({
+            data: {
+              classId: cls.id,
+              customerId: m.customerId,
+              workoutId: wid,
+              status: Math.random() < 0.85 ? "completed" : "partial",
+              rpe: 5 + Math.floor(Math.random() * 5), // 5–9
+              fatiguePct: fatigue,
+              feeling: feelings[Math.floor(Math.random() * feelings.length)],
+              injuryNote: injury,
+            },
+          });
+        }
       }
     }
   }
+
+  // Sample race results & goals — give a couple of athletes a race history
+  // across divisions so the Race tab demos PB-per-division, splits, radar.
+  const alex = customers.find((c) => c.name === "Alex Chen")!;
+  const jordan = customers.find((c) => c.name === "Jordan Park")!;
+  const maya = customers.find((c) => c.name === "Maya Rodríguez")!;
+
+  await db.raceResult.createMany({
+    data: [
+      // Alex (Pro): two races, second is a PB.
+      { customerId: alex.id, eventName: "Hyrox Berlin", eventDate: daysFromNow(-180), division: "pro", totalSec: 71*60+45, roxzoneSec: 190,
+        run1Sec: 285, run2Sec: 290, run3Sec: 295, run4Sec: 300, run5Sec: 305, run6Sec: 310, run7Sec: 315, run8Sec: 320,
+        skiSec: 245, sledPushSec: 160, sledPullSec: 165, burpeeSec: 280, rowSec: 245, farmersSec: 125, lungesSec: 320, wallballsSec: 390,
+        notes: "Solid base but faded late." },
+      { customerId: alex.id, eventName: "Hyrox London", eventDate: daysFromNow(-60), division: "pro", totalSec: 70*60+12, roxzoneSec: 175,
+        run1Sec: 280, run2Sec: 282, run3Sec: 288, run4Sec: 290, run5Sec: 295, run6Sec: 302, run7Sec: 305, run8Sec: 310,
+        skiSec: 235, sledPushSec: 155, sledPullSec: 160, burpeeSec: 270, rowSec: 240, farmersSec: 120, lungesSec: 305, wallballsSec: 370,
+        notes: "PB. Better sled split." },
+      // Alex Open division (one-off)
+      { customerId: alex.id, eventName: "Hyrox Manchester", eventDate: daysFromNow(-300), division: "open", totalSec: 73*60+30, roxzoneSec: 200,
+        run1Sec: 295, run2Sec: 300, run3Sec: 305, run4Sec: 310, run5Sec: 315, run6Sec: 320, run7Sec: 325, run8Sec: 330,
+        skiSec: 250, sledPushSec: 170, sledPullSec: 175, burpeeSec: 290, rowSec: 255, farmersSec: 130, lungesSec: 330, wallballsSec: 410 },
+      // Jordan (Pro): elite times
+      { customerId: jordan.id, eventName: "Hyrox Berlin", eventDate: daysFromNow(-180), division: "pro", totalSec: 65*60+45, roxzoneSec: 150,
+        run1Sec: 260, run2Sec: 262, run3Sec: 265, run4Sec: 268, run5Sec: 270, run6Sec: 275, run7Sec: 278, run8Sec: 280,
+        skiSec: 215, sledPushSec: 125, sledPullSec: 128, burpeeSec: 245, rowSec: 215, farmersSec: 108, lungesSec: 275, wallballsSec: 340 },
+      // Maya (Open)
+      { customerId: maya.id, eventName: "Hyrox Madrid", eventDate: daysFromNow(-90), division: "open", totalSec: 78*60+30, roxzoneSec: 200,
+        run1Sec: 320, run2Sec: 325, run3Sec: 330, run4Sec: 335, run5Sec: 340, run6Sec: 345, run7Sec: 350, run8Sec: 355,
+        skiSec: 275, sledPushSec: 185, sledPullSec: 185, burpeeSec: 305, rowSec: 275, farmersSec: 138, lungesSec: 335, wallballsSec: 425,
+        notes: "First race — strong pacing." },
+    ],
+  });
+
+  // A target goal for Alex (Pro): trim 3 min off the total
+  await db.raceGoal.create({
+    data: {
+      customerId: alex.id, division: "pro",
+      targetTotalSec: 67*60, targetDate: daysFromNow(120),
+      targetSkiSec: 225, targetSledPushSec: 145, targetSledPullSec: 150,
+      targetBurpeeSec: 260, targetRowSec: 230, targetFarmersSec: 115,
+      targetLungesSec: 290, targetWallballsSec: 355, targetRunSec: 280,
+    },
+  });
 
   // Sample todos
   await db.todo.createMany({ data: [

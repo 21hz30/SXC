@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { requireCoach } from "@/lib/auth";
 import { startOfDay, endOfDay, startOfWeek, startOfMonth, addDays, addMonths, formatTime, sameDay } from "@/lib/utils";
+import { classScope } from "@/lib/access";
 import { ChevronLeft, ChevronRight, CheckSquare } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export default async function CalendarPage({
 }: {
   searchParams: Promise<{ view?: View; d?: string }>;
 }) {
-  const user = await requireUser();
+  const user = await requireCoach();
   const sp = await searchParams;
   const view: View = sp.view ?? "week";
   const cursor = sp.d ? new Date(sp.d) : new Date();
@@ -40,7 +41,7 @@ export default async function CalendarPage({
 
   const [classes, todos] = await Promise.all([
     db.class.findMany({
-      where: { startsAt: { gte: queryStart, lte: queryEnd } },
+      where: { startsAt: { gte: queryStart, lte: queryEnd }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
       include: { roster: true, camp: true },
     }),

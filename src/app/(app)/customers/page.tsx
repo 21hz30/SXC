@@ -4,12 +4,19 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formatSec } from "@/lib/utils";
 import { Plus } from "lucide-react";
+import { requireCoach } from "@/lib/auth";
+import { customerScope } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  const user = await requireCoach();
   const { new: isNew } = await searchParams;
-  const customers = await db.customer.findMany({ orderBy: { name: "asc" }, include: { rosterEntries: true } });
+  const customers = await db.customer.findMany({
+    where: customerScope(user),
+    orderBy: { name: "asc" },
+    include: { rosterEntries: true },
+  });
 
   async function createCustomer(formData: FormData) {
     "use server";
