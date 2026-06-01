@@ -4,13 +4,14 @@ An AI-assisted training dashboard for Hyrox coaches: manage athletes, camps,
 classes, structured workouts, and per-class performance — with a built-in
 AI co-coach for drafting plans and athlete-specific guidance.
 
+**Live app:** https://hybridtraining.cn/
+
 **Stack:** Next.js 16 (App Router) · React 19 · Prisma 7 + PostgreSQL (Supabase) · Tailwind 4 · Anthropic SDK.
 
-> **Project phase:** This is currently in a **demo / validation** phase. The
-> database is hosted on Supabase; auth is a simple cookie-based scheme that
-> covers admin / coach / customer roles. Production hardening (managed auth
-> like Auth.js, object storage for video uploads, CI/CD) is intentionally
-> deferred — see [Deploying to the cloud](#deploying-to-the-cloud).
+> 🇨🇳 中文文档见 [README.zh-CN.md](README.zh-CN.md)
+
+> **Auth:** a simple cookie-based session scheme. Every account is an admin —
+> sign in or create an account from the **Register** page.
 
 ---
 
@@ -29,23 +30,16 @@ npm install
 
 # 2. Create your local environment file
 cp .env.example .env
-#    then open .env and fill in the AI keys (see "Environment variables" below)
+#    then open .env and fill in DATABASE_URL, SESSION_SECRET and (optionally) the AI keys
 
-# 3. Create the database schema and load demo data
+# 3. Create the database schema and load sample data
 npm run db:setup
 
 # 4. Start the dev server
 npm run dev
 ```
 
-Open **http://localhost:3000**.
-
-**Demo accounts** (created by the seed):
-
-| Username | Password   | Role  |
-| -------- | ---------- | ----- |
-| `peter`  | `peter123` | admin |
-| `src`    | `src123`   | coach |
+Open **http://localhost:3000**, then create an account on the **Register** page.
 
 ## Environment variables
 
@@ -70,9 +64,9 @@ The app runs without the AI keys, but the **AI co-coach chat is disabled** until
 | `npm run build`      | Production build.                                     |
 | `npm start`          | Run the production build.                             |
 | `npm run lint`       | Lint with ESLint.                                     |
-| `npm run db:setup`   | Apply migrations + seed demo data (first-time local). |
+| `npm run db:setup`   | Apply migrations + seed sample data (first-time local). |
 | `npm run db:migrate` | Apply pending migrations only (no seed).              |
-| `npm run db:seed`    | (Re)load demo data.                                   |
+| `npm run db:seed`    | (Re)load sample data.                                 |
 
 ## Project structure
 
@@ -94,44 +88,12 @@ Backend (`agent`, `tools`, `domain`, `lib`, `app/api`) and frontend
 (`components`, `app/*/page.tsx`) share one codebase and one set of types — this
 is intentional for a single full-stack Next.js app.
 
----
+## Commit convention
 
-## Deploying to the cloud
+```
+<type>: <short summary>
+```
 
-The architecture (stateless Next.js + Prisma + Supabase) is cloud-ready out
-of the box. Recommended path:
-
-### Now
-Database already lives on **Supabase** (managed PostgreSQL). The app server
-is stateless, so any host works:
-
-- **Vercel** — zero-config for Next.js. Set `DATABASE_URL`, `SESSION_SECRET`,
-  and the `AI_*` vars as platform secrets. Deploy on push.
-- **Railway / Render / Fly.io** — same idea, container-based, also fine.
-- Run `npm run db:migrate` as the release step.
-- **Deploy in the same region as your Supabase project** (currently
-  `ap-southeast-1`). Cross-region adds significant latency to every request.
-
-### Hardening before real users
-1. **Auth:** replace the demo cookie auth with Auth.js (NextAuth) + Prisma
-   adapter; add email verification + password reset.
-2. **File uploads:** move athlete videos from `/public/uploads` to object
-   storage (S3 / Cloudflare R2). Local disk doesn't survive serverless deploys.
-3. **Secrets rotation:** rotate the Supabase DB password and any AI keys that
-   have ever appeared in chat transcripts or repos.
-4. **Rate limits + AI cost caps** on the chat endpoint.
-
-### CI/CD (recommended setup)
-Keep the pipeline boring and repeatable. A typical GitHub Actions flow:
-
-1. **On pull request** — install, `npm run lint`, `npx tsc --noEmit`, `npm run build`.
-2. **On merge to `main`** — build, then run **`npx prisma migrate deploy`**
-   against the target database, then release the new version.
-
-Two rules that keep deploys safe:
-
-- **Always run `prisma migrate deploy` in the pipeline** (never edit the prod DB by hand).
-- **Keep all config in environment secrets**, never in the repo.
-
-This way every push is a candidate release, and promoting to production is just
-"merge to `main`."
+Types: `feat` (new feature) · `fix` (bug fix) · `docs` (documentation) ·
+`style` (formatting only) · `refactor` (no feature/bug change) ·
+`test` (tests) · `chore` (maintenance).
