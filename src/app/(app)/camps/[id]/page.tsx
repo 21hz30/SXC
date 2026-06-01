@@ -187,84 +187,100 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         </>
       )}
 
-      <section className="bg-card border border-border rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({camp.members.length})</h2>
-        <ul className="divide-y divide-border -mx-2 mb-3">
-          {camp.members.map((m) => {
-            const detail = customerDetail(m.customer);
-            return (
-              <li key={m.id} className="flex items-center justify-between px-2 py-2">
-                <Link href={`/customers/${m.customerId}`} className="hover:text-accent">
-                  <span className="text-sm font-medium">{m.customer.name}</span>
-                  {detail && <span className="text-xs text-muted ml-2">{detail}</span>}
-                </Link>
-                <form action={removeMember}>
-                  <input type="hidden" name="memberId" value={m.id} />
-                  <ConfirmSubmit message={`Remove ${m.customer.name} from this camp?`} className="text-xs text-muted hover:text-red-600">Remove</ConfirmSubmit>
-                </form>
-              </li>
-            );
-          })}
-        </ul>
-        <form action={addMember} className="flex gap-2">
-          <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
-            <option value="">+ Add member…</option>
-            {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{customerOptionLabel(c)}</option>)}
-          </select>
-          <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
-        </form>
-      </section>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column — Members, then the add-class form */}
+        <div className="lg:col-span-1 space-y-6">
+          <section>
+            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({camp.members.length})</h2>
+            <div className="bg-card border border-border rounded-xl p-3">
+              {camp.members.length === 0 ? (
+                <div className="text-xs text-muted px-1 py-2">No members yet.</div>
+              ) : (
+                <ul className="divide-y divide-border mb-2 max-h-80 overflow-auto">
+                  {camp.members.map((m) => {
+                    const detail = customerDetail(m.customer);
+                    return (
+                      <li key={m.id} className="flex items-center justify-between gap-2 px-1 py-1.5 group">
+                        <Link href={`/customers/${m.customerId}`} className="min-w-0 hover:text-accent">
+                          <div className="text-sm font-medium truncate">{m.customer.name}</div>
+                          {detail && <div className="text-[11px] text-muted truncate">{detail}</div>}
+                        </Link>
+                        <form action={removeMember} className="shrink-0">
+                          <input type="hidden" name="memberId" value={m.id} />
+                          <ConfirmSubmit message={`Remove ${m.customer.name} from this camp?`} className="text-muted hover:text-red-600 text-base leading-none px-1 opacity-0 group-hover:opacity-100" >×</ConfirmSubmit>
+                        </form>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <form action={addMember} className="flex gap-2 pt-1">
+                <select name="customerId" className="flex-1 min-w-0 rounded-lg border border-border px-2 py-1.5 text-sm">
+                  <option value="">+ Add member…</option>
+                  {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{customerOptionLabel(c)}</option>)}
+                </select>
+                <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm shrink-0">Add</button>
+              </form>
+            </div>
+          </section>
 
-      <section>
-        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Schedule</h2>
-        <form action={addClass} className="bg-card border border-border rounded-xl p-4 mb-4 flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[160px]">
-            <label className="block text-xs text-muted mb-1">Class title</label>
-            <input name="title" required placeholder="e.g. Pro Team Strength" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">Date</label>
-            <input name="date" type="date" required defaultValue={camp.startDate.toISOString().slice(0, 10)} className="rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">Time</label>
-            <input name="time" type="time" defaultValue="07:00" className="rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div className="w-20">
-            <label className="block text-xs text-muted mb-1">Capacity</label>
-            <input name="capacity" type="number" defaultValue={12} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div className="w-32">
-            <label className="block text-xs text-muted mb-1">Location</label>
-            <input name="location" placeholder="optional" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <label className="flex items-center gap-1.5 text-xs text-muted pb-2 cursor-pointer">
-            <input type="checkbox" name="dropInAllowed" className="rounded border-border" />
-            Allow drop-ins
-          </label>
-          <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Add class</button>
-        </form>
-        <CampSchedule
-          workouts={allWorkouts.map((w) => ({
-            id: w.id,
-            name: w.name,
-            description: w.description,
-            itemCount: w.items.length,
-          }))}
-          classes={camp.classes.map((c) => ({
-            id: c.id,
-            title: c.title,
-            startsAtLabel: `${formatDate(c.startsAt)} · ${formatTime(c.startsAt)}`,
-            location: c.location,
-            workouts: c.workouts.map((cw) => ({ id: cw.workout.id, name: cw.workout.name })),
-            rosterCount: c.roster.length,
-            capacity: c.capacity,
-            dropInAllowed: c.dropInAllowed,
-            createdByName: c.createdBy?.name ?? null,
-          }))}
-          onDeleteClass={deleteClass}
-        />
-      </section>
+          <section>
+            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Add a class</h2>
+            <form action={addClass} className="bg-card border border-border rounded-xl p-4 space-y-2.5">
+              <input name="title" required placeholder="Class title (e.g. Pro Team Strength)" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-muted mb-1">Date</label>
+                  <input name="date" type="date" required defaultValue={camp.startDate.toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-muted mb-1">Time</label>
+                  <input name="time" type="time" defaultValue="07:00" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-muted mb-1">Capacity</label>
+                  <input name="capacity" type="number" defaultValue={12} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-muted mb-1">Location</label>
+                  <input name="location" placeholder="optional" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+                  <input type="checkbox" name="dropInAllowed" className="rounded border-border" />
+                  Allow drop-ins
+                </label>
+                <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Add class</button>
+              </div>
+            </form>
+          </section>
+        </div>
+
+        {/* Right column — the class list */}
+        <section className="lg:col-span-2">
+          <CampSchedule
+            workouts={allWorkouts.map((w) => ({
+              id: w.id,
+              name: w.name,
+              description: w.description,
+              itemCount: w.items.length,
+            }))}
+            classes={camp.classes.map((c) => ({
+              id: c.id,
+              title: c.title,
+              startsAtLabel: `${formatDate(c.startsAt)} · ${formatTime(c.startsAt)}`,
+              location: c.location,
+              workouts: c.workouts.map((cw) => ({ id: cw.workout.id, name: cw.workout.name })),
+              rosterCount: c.roster.length,
+              capacity: c.capacity,
+              dropInAllowed: c.dropInAllowed,
+              createdByName: c.createdBy?.name ?? null,
+            }))}
+            onDeleteClass={deleteClass}
+          />
+        </section>
+      </div>
     </div>
   );
 }
