@@ -8,8 +8,6 @@ AI co-coach for drafting plans and athlete-specific guidance.
 
 **Stack:** Next.js 16 (App Router) · React 19 · Prisma 7 + PostgreSQL (Supabase) · Tailwind 4 · Anthropic SDK.
 
-> 🇨🇳 中文文档见 [README.zh-CN.md](README.zh-CN.md)
-
 > **Auth:** a simple cookie-based session scheme. Every account is an admin —
 > sign in or create an account from the **Register** page.
 
@@ -87,13 +85,3 @@ prisma/             # schema.prisma, migrations, seed.ts
 Backend (`agent`, `tools`, `domain`, `lib`, `app/api`) and frontend
 (`components`, `app/*/page.tsx`) share one codebase and one set of types — this
 is intentional for a single full-stack Next.js app.
-
-## Commit convention
-
-```
-<type>: <short summary>
-```
-
-Types: `feat` (new feature) · `fix` (bug fix) · `docs` (documentation) ·
-`style` (formatting only) · `refactor` (no feature/bug change) ·
-`test` (tests) · `chore` (maintenance).
