@@ -19,6 +19,20 @@ export const dynamic = "force-dynamic";
 type View = "training" | "race";
 type EditSection = "identity" | "hyrox" | "body" | "notes";
 
+// Parse "mm:ss" or plain seconds → integer seconds. Empty input → null.
+// Kept at module scope so the "use server" actions below can reference it
+// without capturing it in their closure (which Next.js can't serialize).
+function parseSec(v: FormDataEntryValue | null): number | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (s.includes(":")) {
+    const [m, ss] = s.split(":");
+    return Number(m) * 60 + Number(ss || 0);
+  }
+  return Number(s) || null;
+}
+
 export default async function CustomerDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ editSection?: EditSection; view?: View; logRace?: string; editGoal?: string; logBenchmark?: string; editBenchmark?: string }> }) {
   const user = await requireCoach();
   const { id } = await params;
@@ -172,17 +186,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     revalidatePath(`/customers/${id}`);
   }
 
-  // Parse "mm:ss" or plain seconds → integer seconds. Empty input → null.
-  function parseSec(v: FormDataEntryValue | null): number | null {
-    if (v == null) return null;
-    const s = String(v).trim();
-    if (!s) return null;
-    if (s.includes(":")) {
-      const [m, ss] = s.split(":");
-      return Number(m) * 60 + Number(ss || 0);
-    }
-    return Number(s) || null;
-  }
 
   async function addRaceResult(formData: FormData) {
     "use server";
