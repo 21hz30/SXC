@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { requireCoach } from "@/lib/auth";
 import { campScope } from "@/lib/access";
 import { createTodo } from "@/lib/todos";
+import { flashUrl } from "@/lib/flash";
 import { CalendarPlus, CheckSquare, StickyNote } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export default async function NewItemPage({
         createdById: u.id,
       },
     });
-    redirect(String(formData.get("returnTo") ?? "/calendar?view=month"));
+    redirect(flashUrl(String(formData.get("returnTo") ?? "/calendar?view=month"), `Class "${title}" created`));
   }
 
   async function createTodoOrNote(formData: FormData) {
@@ -62,7 +63,7 @@ export default async function NewItemPage({
     const source = String(formData.get("source") ?? "manual") === "note" ? "note" : "manual";
     if (!title) return;
     await createTodo({ title, dueDate: d ? new Date(`${d}T00:00:00`) : null, source });
-    redirect(String(formData.get("returnTo") ?? "/calendar?view=month"));
+    redirect(flashUrl(String(formData.get("returnTo") ?? "/calendar?view=month"), source === "note" ? "Note added" : "To-do added"));
   }
 
   const dateLabel = new Date(date + "T00:00:00").toLocaleDateString("en-US", {

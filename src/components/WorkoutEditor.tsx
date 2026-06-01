@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2, Check, GripVertical } from "lucide-react";
+import { toast } from "@/components/Toaster";
 import { CATEGORIES, FIELD_META, formatItem, type Category, type FieldKey } from "@/domain/exercises";
 
 export type Item = {
@@ -102,6 +103,7 @@ export default function WorkoutEditor({
     if (res.ok) {
       setDirty(false);
       setSavedAt(Date.now());
+      toast("Workout saved");
       router.refresh();
     } else {
       alert("Save failed.");
@@ -111,6 +113,7 @@ export default function WorkoutEditor({
   async function deleteWorkout() {
     if (!confirm(`Delete workout "${name}"? This cannot be undone.`)) return;
     await fetch(`/api/workouts/${workoutId}`, { method: "DELETE" });
+    toast("Workout deleted");
     router.push("/workouts");
   }
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Check, Trash2, Pencil, Plus, X, Calendar as CalIcon, Sparkles } from "lucide-react";
+import { toast } from "@/components/Toaster";
 
 export type TodoItem = {
   id: string;
@@ -50,6 +51,8 @@ export default function TodoList({ todos: initial }: { todos: TodoItem[] }) {
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) fd.append(k, v);
     await fetch(`/api/todo/${action}`, { method: "POST", body: fd });
+    const msg: Record<string, string> = { create: "To-do added", delete: "To-do deleted", update: "To-do updated" };
+    if (msg[action]) toast(msg[action]);
     await refresh();
   }
 
@@ -144,6 +147,7 @@ export default function TodoList({ todos: initial }: { todos: TodoItem[] }) {
                 <button onClick={() => setEditingId(t.id)} className="p-1.5 text-muted hover:text-foreground"><Pencil size={14} /></button>
                 <button
                   onClick={() => {
+                    if (!confirm(`Delete to-do "${t.title}"?`)) return;
                     setTodos((cur) => cur.filter((x) => x.id !== t.id));
                     callAction("delete", { id: t.id });
                   }}
@@ -173,6 +177,7 @@ export default function TodoList({ todos: initial }: { todos: TodoItem[] }) {
                 <div className="flex-1 text-sm text-muted line-through truncate">{t.title}</div>
                 <button
                   onClick={() => {
+                    if (!confirm(`Delete to-do "${t.title}"?`)) return;
                     setTodos((cur) => cur.filter((x) => x.id !== t.id));
                     callAction("delete", { id: t.id });
                   }}

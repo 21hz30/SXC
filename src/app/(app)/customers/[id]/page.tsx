@@ -9,6 +9,7 @@ import { requireUser, requireCoach } from "@/lib/auth";
 import { Sparkles, Pencil } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
+import { flashUrl } from "@/lib/flash";
 import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
@@ -101,7 +102,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       await db.customer.update({ where: { id }, data });
     }
     revalidatePath(`/customers/${id}`);
-    redirect(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, "Profile saved"));
   }
 
   async function deleteCustomer() {
@@ -112,7 +113,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     // user account is detached (User.customerId → null).
     await db.customer.delete({ where: { id } });
     revalidatePath("/customers");
-    redirect("/customers");
+    redirect(flashUrl("/customers", `${c!.name} deleted`));
   }
 
   // Benchmark add / delete actions
@@ -138,7 +139,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       },
     });
     revalidatePath(`/customers/${id}`);
-    redirect(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, "Benchmark added"));
   }
   async function deleteBenchmark(formData: FormData) {
     "use server";
@@ -146,7 +147,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     if (!bid) return;
     await db.benchmark.delete({ where: { id: bid } });
     revalidatePath(`/customers/${id}`);
-    redirect(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, "Benchmark deleted"));
   }
   async function updateBenchmark(formData: FormData) {
     "use server";
@@ -163,7 +164,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       data: { value, ...(testedAtRaw ? { testedAt: new Date(testedAtRaw) } : {}) },
     });
     revalidatePath(`/customers/${id}`);
-    redirect(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, "Benchmark updated"));
   }
 
   async function addActivity(formData: FormData) {
@@ -184,6 +185,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       },
     });
     revalidatePath(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, "Activity added"));
   }
 
 
@@ -210,7 +212,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       },
     });
     revalidatePath(`/customers/${id}`);
-    redirect(`/customers/${id}?view=race`);
+    redirect(flashUrl(`/customers/${id}?view=race`, "Race result added"));
   }
 
   async function deleteRaceResult(formData: FormData) {
@@ -219,6 +221,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     if (!raceId) return;
     await db.raceResult.delete({ where: { id: raceId } });
     revalidatePath(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}?view=race`, "Race result deleted"));
   }
 
   async function upsertRaceGoal(formData: FormData) {
@@ -244,7 +247,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       update: data,
     });
     revalidatePath(`/customers/${id}`);
-    redirect(`/customers/${id}?view=race`);
+    redirect(flashUrl(`/customers/${id}?view=race`, "Race goal saved"));
   }
 
   const hrPoints = c.activities
@@ -516,7 +519,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                       </Link>
                       <form action={deleteBenchmark}>
                         <input type="hidden" name="benchmarkId" value={b.id} />
-                        <button type="submit" className="text-[12px] leading-none text-muted hover:text-red-600 opacity-0 group-hover:opacity-100" title="Delete">×</button>
+                        <ConfirmSubmit message={`Delete the ${benchmarkLabel(b.metric)} benchmark? This cannot be undone.`} className="text-[12px] leading-none text-muted hover:text-red-600 opacity-0 group-hover:opacity-100">×</ConfirmSubmit>
                       </form>
                     </div>
                   </div>
@@ -713,7 +716,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                   <form key={r.id} action={deleteRaceResult} className="flex justify-between items-center text-xs">
                     <span>{r.eventName} · {new Date(r.eventDate).toLocaleDateString()} · {divisionLabel(r.division)}</span>
                     <input type="hidden" name="raceId" value={r.id} />
-                    <button type="submit" className="text-red-600 hover:underline">Delete</button>
+                    <ConfirmSubmit message={`Delete the ${r.eventName} race result? This cannot be undone.`} className="text-red-600 hover:underline">Delete</ConfirmSubmit>
                   </form>
                 ))}
               </div>

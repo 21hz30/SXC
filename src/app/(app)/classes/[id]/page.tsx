@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { formatTime, formatDate } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
+import { flashUrl } from "@/lib/flash";
 import { formatItem } from "@/domain/exercises";
 import { requireUser, requireCoach } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
@@ -68,6 +69,13 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
 
+  // Existing workouts the coach can attach to this class (excluding ones
+  // already assigned).
+  const assignedWorkoutIds = new Set(cls.workouts.map((cw) => cw.workoutId));
+  const availableWorkouts = (
+    await db.workout.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })
+  ).filter((w) => !assignedWorkoutIds.has(w.id));
+
   async function updateClass(formData: FormData) {
     "use server";
     const title = String(formData.get("title") ?? "").trim();
@@ -86,7 +94,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       },
     });
     revalidatePath(`/classes/${id}`);
-    redirect(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Class updated"));
   }
 
   async function deleteClass() {
@@ -95,9 +103,9 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     await db.class.delete({ where: { id } });
     if (target?.campId) {
       revalidatePath(`/camps/${target.campId}`);
-      redirect(`/camps/${target.campId}`);
+      redirect(flashUrl(`/camps/${target.campId}`, "Class deleted"));
     }
-    redirect("/calendar");
+    redirect(flashUrl("/calendar", "Class deleted"));
   }
 
   async function setAttendance(formData: FormData) {
@@ -106,6 +114,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     const status = String(formData.get("status"));
     await db.rosterEntry.update({ where: { id: entryId }, data: { attendance: status } });
     revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Attendance updated"));
   }
 
   async function addToRoster(formData: FormData) {
@@ -114,6 +123,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     if (!customerId) return;
     await db.rosterEntry.create({ data: { classId: id, customerId } });
     revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Athlete added to roster"));
   }
 
   async function removeFromRoster(formData: FormData) {
@@ -121,6 +131,36 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     const entryId = String(formData.get("entryId") ?? "");
     await db.rosterEntry.delete({ where: { id: entryId } });
     revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Removed from roster"));
+  }
+
+  // Attach an existing workout to this class (appended to the end).
+  async function addWorkoutToClass(formData: FormData) {
+    "use server";
+    await requireCoach();
+    const workoutId = String(formData.get("workoutId") ?? "");
+    if (!workoutId) return;
+    const already = await db.classWorkout.findFirst({ where: { classId: id, workoutId } });
+    if (!already) {
+      const last = await db.classWorkout.findFirst({ where: { classId: id }, orderBy: { order: "desc" } });
+      await db.classWorkout.create({ data: { classId: id, workoutId, order: (last?.order ?? -1) + 1 } });
+    }
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, already ? "Workout already on this class" : "Workout added"));
+  }
+
+  // Create a brand-new workout and attach it to this class in one step.
+  async function createWorkoutForClass(formData: FormData) {
+    "use server";
+    await requireCoach();
+    const name = String(formData.get("name") ?? "").trim();
+    if (!name) return;
+    const description = String(formData.get("description") ?? "").trim() || null;
+    const w = await db.workout.create({ data: { name, description } });
+    const last = await db.classWorkout.findFirst({ where: { classId: id }, orderBy: { order: "desc" } });
+    await db.classWorkout.create({ data: { classId: id, workoutId: w.id, order: (last?.order ?? -1) + 1 } });
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, `Workout "${name}" created and added`));
   }
 
   return (
@@ -201,9 +241,35 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Workouts ({cls.workouts.length})</h2>
           <div className="text-xs text-muted">Each card has the plan + a feedback table for athletes&apos; RPE / fatigue / feeling for THIS workout.</div>
         </div>
+
+        {/* Add an existing workout, or create a new one — both attach to this class */}
+        <div className="bg-card border border-border rounded-xl p-4 mb-4 grid md:grid-cols-2 gap-4">
+          <form action={addWorkoutToClass} className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted uppercase tracking-wide">Add an existing workout</label>
+            <div className="flex gap-2">
+              <select name="workoutId" required defaultValue="" className="flex-1 rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
+                <option value="" disabled>Pick a workout…</option>
+                {availableWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
+              <button type="submit" disabled={availableWorkouts.length === 0} className="rounded-lg bg-foreground text-white px-3 text-sm disabled:opacity-40">Add</button>
+            </div>
+            {availableWorkouts.length === 0 && <span className="text-[11px] text-muted">All workouts are already on this class.</span>}
+          </form>
+
+          <form action={createWorkoutForClass} className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
+            <label className="text-xs font-medium text-muted uppercase tracking-wide">Or create a new workout</label>
+            <input name="name" required placeholder="Workout name" className="rounded-lg border border-border px-2 py-1.5 text-sm" />
+            <div className="flex gap-2">
+              <input name="description" placeholder="Description (optional)" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm" />
+              <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Create &amp; add</button>
+            </div>
+            <span className="text-[11px] text-muted">Stations can be added after it&apos;s created, below.</span>
+          </form>
+        </div>
+
         {cls.workouts.length === 0 ? (
           <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
-            No workout assigned yet. Drag one from the camp page or use &ldquo;+ Add workout&rdquo; there.
+            No workout assigned yet — add an existing one or create a new one above.
           </div>
         ) : (
           <div className="space-y-6">
@@ -283,7 +349,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                 ))}
                 <form action={removeFromRoster} className="ml-1">
                   <input type="hidden" name="entryId" value={r.id} />
-                  <button type="submit" className="text-xs text-muted hover:text-red-600 px-1" title="Remove from roster">Remove</button>
+                  <ConfirmSubmit message={`Remove ${r.customer.name} from this class roster?`} className="text-xs text-muted hover:text-red-600 px-1">Remove</ConfirmSubmit>
                 </form>
               </div>
             </li>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, MessagesSquare, Pencil, Trash2, User as UserIcon, X } from "lucide-react";
+import { toast } from "@/components/Toaster";
 
 type Session = {
   id: string;
@@ -82,6 +83,7 @@ export default function ChatSessionsPanel() {
   async function removeSession(s: Session) {
     if (!confirm(`Delete "${s.title}"?`)) return;
     await fetch(`/api/chat/sessions/${s.id}`, { method: "DELETE" });
+    toast("Chat deleted");
     if (activeId === s.id) {
       const params = new URLSearchParams(Array.from(searchParams.entries()));
       params.delete("chat");

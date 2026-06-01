@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge } from "lucide-react";
 import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
+import Toaster from "@/components/Toaster";
+import { Suspense } from "react";
 
 async function logout() {
   "use server";
@@ -70,6 +72,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="md:pl-60 xl:pr-96 min-h-screen">{children}</main>
 
       <AiSidebar user={{ name: user.name, role: user.role }} />
+      <Suspense fallback={null}><Toaster /></Suspense>
     </div>
   );
 }

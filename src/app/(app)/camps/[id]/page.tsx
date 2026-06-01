@@ -9,6 +9,7 @@ import CampSchedule from "@/components/CampSchedule";
 import { requireCoach, requireUser } from "@/lib/auth";
 import { canAccessCamp } from "@/lib/access";
 import { customerDetail, customerOptionLabel } from "@/domain/customers";
+import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
@@ -59,14 +60,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     });
     revalidatePath(`/camps/${id}`);
     revalidatePath("/camps");
-    redirect(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Camp updated"));
   }
 
   async function deleteCamp() {
     "use server";
     await db.camp.delete({ where: { id } });
     revalidatePath("/camps");
-    redirect("/camps");
+    redirect(flashUrl("/camps", "Camp deleted"));
   }
 
   async function addMember(formData: FormData) {
@@ -74,12 +75,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     const customerId = String(formData.get("customerId"));
     if (customerId) await db.campMember.create({ data: { campId: id, customerId } });
     revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Member added"));
   }
   async function removeMember(formData: FormData) {
     "use server";
     const memberId = String(formData.get("memberId"));
     await db.campMember.delete({ where: { id: memberId } });
     revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Member removed"));
   }
   async function addClass(formData: FormData) {
     "use server";
@@ -101,6 +104,17 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       },
     });
     revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, `Class "${title}" added`));
+  }
+  async function deleteClass(formData: FormData) {
+    "use server";
+    await requireUser();
+    const classId = String(formData.get("classId") ?? "");
+    if (!classId) return;
+    // Roster, assigned workouts and performances cascade via the schema.
+    await db.class.delete({ where: { id: classId } });
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Class deleted"));
   }
 
   return (
@@ -186,7 +200,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
                 </Link>
                 <form action={removeMember}>
                   <input type="hidden" name="memberId" value={m.id} />
-                  <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
+                  <ConfirmSubmit message={`Remove ${m.customer.name} from this camp?`} className="text-xs text-muted hover:text-red-600">Remove</ConfirmSubmit>
                 </form>
               </li>
             );
@@ -241,12 +255,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             id: c.id,
             title: c.title,
             startsAtLabel: `${formatDate(c.startsAt)} · ${formatTime(c.startsAt)}`,
+            location: c.location,
             workouts: c.workouts.map((cw) => ({ id: cw.workout.id, name: cw.workout.name })),
             rosterCount: c.roster.length,
             capacity: c.capacity,
             dropInAllowed: c.dropInAllowed,
             createdByName: c.createdBy?.name ?? null,
           }))}
+          onDeleteClass={deleteClass}
         />
       </section>
     </div>

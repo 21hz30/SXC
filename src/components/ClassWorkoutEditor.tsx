@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Plus, X, Pencil, Trash2, Check, GripVertical } from "lucide-react";
 import { formatItem } from "@/domain/exercises";
 import { ItemForm, type Item } from "./WorkoutEditor";
+import { toast } from "@/components/Toaster";
 
 let tmpCounter = 0;
 const tmpId = () => `ctmp_${Date.now()}_${tmpCounter++}`;
@@ -67,6 +68,7 @@ export default function ClassWorkoutEditor({
     setSaving(false);
     if (res.ok) {
       setEditing(false);
+      toast("Workout updated");
       router.refresh();
     } else {
       alert("Save failed.");

@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { X, ArrowRight } from "lucide-react";
+import { X, ArrowRight, MapPin } from "lucide-react";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
+import { toast } from "@/components/Toaster";
 
 type Workout = { id: string; name: string; description: string | null; itemCount: number };
 type AssignedWorkout = { id: string; name: string };
@@ -10,6 +12,7 @@ type Klass = {
   id: string;
   title: string;
   startsAtLabel: string;
+  location?: string | null;
   workouts: AssignedWorkout[];
   rosterCount: number;
   capacity: number;
@@ -20,9 +23,11 @@ type Klass = {
 export default function CampSchedule({
   workouts,
   classes: initialClasses,
+  onDeleteClass,
 }: {
   workouts: Workout[];
   classes: Klass[];
+  onDeleteClass?: (formData: FormData) => void | Promise<void>;
 }) {
   const [classes, setClasses] = useState<Klass[]>(initialClasses);
 
@@ -51,6 +56,7 @@ export default function CampSchedule({
         body: JSON.stringify({ workoutId: workout.id }),
       });
       if (!res.ok) throw new Error("failed");
+      toast(`"${workout.name}" added`);
     } catch {
       location.reload();
     }
@@ -63,6 +69,7 @@ export default function CampSchedule({
     try {
       const res = await fetch(`/api/class/${classId}/workouts/${workoutId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("failed");
+      toast("Workout removed");
     } catch {
       location.reload();
     }
@@ -91,13 +98,30 @@ export default function CampSchedule({
                         {c.dropInAllowed && <span className="text-[9px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-700">Drop-in</span>}
                       </div>
                       <div className="text-xs text-muted mt-0.5">{c.startsAtLabel} · {c.rosterCount}/{c.capacity}{c.createdByName ? ` · by ${c.createdByName}` : ""}</div>
+                      <div className="text-xs text-muted mt-0.5 flex items-center gap-1">
+                        <MapPin size={11} className="shrink-0" />
+                        {c.location?.trim() ? c.location : "No location set"}
+                      </div>
                     </div>
-                    <Link
-                      href={`/classes/${c.id}`}
-                      className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
-                    >
-                      Detail <ArrowRight size={12} />
-                    </Link>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      <Link
+                        href={`/classes/${c.id}`}
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+                      >
+                        Detail <ArrowRight size={12} />
+                      </Link>
+                      {onDeleteClass && (
+                        <form action={onDeleteClass}>
+                          <input type="hidden" name="classId" value={c.id} />
+                          <ConfirmSubmit
+                            message={`Delete class "${c.title}"? Its roster and assigned workouts will be removed. This cannot be undone.`}
+                            className="inline-flex items-center rounded-lg border border-border px-2 py-1 text-xs text-muted hover:border-red-300 hover:text-red-600"
+                          >
+                            Delete
+                          </ConfirmSubmit>
+                        </form>
+                      )}
+                    </div>
                   </div>
                   {c.workouts.length === 0 ? (
                     <div className="text-xs text-muted italic mb-2">No workouts yet — add one below.</div>

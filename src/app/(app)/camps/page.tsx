@@ -6,6 +6,7 @@ import { requireCoach, requireUser } from "@/lib/auth";
 import { campScope } from "@/lib/access";
 import { formatDate } from "@/lib/utils";
 import { Plus } from "lucide-react";
+import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
       },
     });
     revalidatePath("/camps");
-    redirect(`/camps/${camp.id}`);
+    redirect(flashUrl(`/camps/${camp.id}`, `Camp "${camp.name}" created`));
   }
 
   return (

@@ -6,6 +6,8 @@ import { requireAdmin, hashPassword } from "@/lib/auth";
 import { Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import PasswordInput from "@/components/PasswordInput";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
+import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
@@ -29,15 +31,16 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     // Single-role model for now: every account is an admin.
     await db.user.create({ data: { username, name, role: "admin", passwordHash: await hashPassword(password) } });
     revalidatePath("/coaches");
-    redirect("/coaches");
+    redirect(flashUrl("/coaches", `${name} added`));
   }
 
   async function deleteUser(formData: FormData) {
     "use server";
     await requireAdmin();
     const userId = String(formData.get("userId"));
-    await db.user.delete({ where: { id: userId } });
+    const removed = await db.user.delete({ where: { id: userId } });
     revalidatePath("/coaches");
+    redirect(flashUrl("/coaches", `${removed.name} removed`));
   }
 
   return (
@@ -99,7 +102,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
                 <td className="px-5 py-3 text-right">
                   <form action={deleteUser}>
                     <input type="hidden" name="userId" value={u.id} />
-                    <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
+                    <ConfirmSubmit message={`Delete the account for ${u.name} (${u.username})? This cannot be undone.`} className="text-xs text-muted hover:text-red-600">Remove</ConfirmSubmit>
                   </form>
                 </td>
               </tr>

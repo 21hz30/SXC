@@ -8,6 +8,7 @@ import { requireCoach } from "@/lib/auth";
 import { customerScope } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
+import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       },
     });
     revalidatePath("/customers");
-    redirect(`/customers/${c.id}`);
+    redirect(flashUrl(`/customers/${c.id}`, `${c.name} added`));
   }
 
   async function deleteCustomer(formData: FormData) {
@@ -60,8 +61,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     if (!customerId) return;
     // Related rows (benchmarks, races, goals, activity, videos, roster, camp
     // memberships, performances, logs) cascade; any login account is detached.
-    await db.customer.delete({ where: { id: customerId } });
+    const removed = await db.customer.delete({ where: { id: customerId } });
     revalidatePath("/customers");
+    redirect(flashUrl("/customers", `${removed.name} deleted`));
   }
 
   return (
