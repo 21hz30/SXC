@@ -67,13 +67,17 @@ async function main() {
     )
   );
 
-  // Benchmarks
+  // Benchmarks — the Hyrox race: 1km run + the 8 stations (all timed, seconds).
   const benchSpec = [
-    { metric: "1km_run_sec", unit: "sec", base: 240, spread: 60 },
-    { metric: "wall_ball_unbroken", unit: "reps", base: 35, spread: 30 },
-    { metric: "deadlift_1rm_kg", unit: "kg", base: 130, spread: 50 },
-    { metric: "row_500m_sec", unit: "sec", base: 100, spread: 20 },
-    { metric: "sled_push_kg", unit: "kg", base: 100, spread: 40 },
+    { metric: "1km_run_sec", unit: "sec", base: 255, spread: 60 },
+    { metric: "ski_1000m_sec", unit: "sec", base: 235, spread: 40 },
+    { metric: "sled_push_50m_sec", unit: "sec", base: 155, spread: 50 },
+    { metric: "sled_pull_50m_sec", unit: "sec", base: 160, spread: 50 },
+    { metric: "burpee_broad_jump_80m_sec", unit: "sec", base: 275, spread: 60 },
+    { metric: "row_1000m_sec", unit: "sec", base: 240, spread: 40 },
+    { metric: "farmers_carry_200m_sec", unit: "sec", base: 120, spread: 30 },
+    { metric: "sandbag_lunges_100m_sec", unit: "sec", base: 310, spread: 60 },
+    { metric: "wall_balls_100_sec", unit: "sec", base: 380, spread: 80 },
   ];
   for (const c of customers) {
     for (const b of benchSpec) {
@@ -191,10 +195,10 @@ async function main() {
   // Two camps only: one Open (general roster, beginners + intermediate) and
   // one Pro (elite block). Open absorbs what used to be "Hyrox 101 — Beginners".
   const fallCamp = await db.camp.create({
-    data: { name: "Fall Hyrox Prep", description: "Open camp — 8-week build to October race. Beginners welcome.", division: "open", startDate: daysFromNow(-21), endDate: daysFromNow(49), coachId: src.id },
+    data: { name: "Fall Hyrox Prep", description: "Open camp — 8-week build to October race. Beginners welcome.", division: "open", startDate: daysFromNow(-21), endDate: daysFromNow(49), coachId: src.id, createdById: src.id },
   });
   const eliteCamp = await db.camp.create({
-    data: { name: "Pro Team", description: "Pro camp — elite athletes, pre-season block.", division: "pro", startDate: daysFromNow(-30), endDate: daysFromNow(60), coachId: peter.id },
+    data: { name: "Pro Team", description: "Pro camp — elite athletes, pre-season block.", division: "pro", startDate: daysFromNow(-30), endDate: daysFromNow(60), coachId: peter.id, createdById: peter.id },
   });
 
   await db.campMember.createMany({ data: [
@@ -234,6 +238,7 @@ async function main() {
         capacity: 12,
         campId: cd.campId,
         dropInAllowed: cd.dropIn ?? false,
+        createdById: cd.campId === eliteCamp.id ? peter.id : src.id,
       },
     });
     for (let i = 0; i < cd.workoutIds.length; i++) {

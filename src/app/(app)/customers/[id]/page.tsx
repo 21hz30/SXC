@@ -4,14 +4,11 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
-import { randomUUID } from "crypto";
 import { createSession } from "@/domain/chat";
 import { requireUser, requireCoach } from "@/lib/auth";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Pencil } from "lucide-react";
 import BackButton from "@/components/BackButton";
-import { benchmarkLabel, benchmarkDef, BENCHMARKS, genderLabel, divisionLabel, GENDERS, DIVISIONS } from "@/domain/benchmarks";
+import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
@@ -21,10 +18,10 @@ export const dynamic = "force-dynamic";
 type View = "training" | "race";
 type EditSection = "identity" | "hyrox" | "body" | "notes";
 
-export default async function CustomerDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ editSection?: EditSection; view?: View; logRace?: string; editGoal?: string; logBenchmark?: string }> }) {
+export default async function CustomerDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ editSection?: EditSection; view?: View; logRace?: string; editGoal?: string; logBenchmark?: string; editBenchmark?: string }> }) {
   const user = await requireCoach();
   const { id } = await params;
-  const { editSection: editSectionParam, view: viewParam, logRace, editGoal, logBenchmark } = await searchParams;
+  const { editSection: editSectionParam, view: viewParam, logRace, editGoal, logBenchmark, editBenchmark } = await searchParams;
   const view: View = viewParam === "race" ? "race" : "training";
   const editSection: EditSection | null = (["identity", "hyrox", "body", "notes"] as const).find((s) => s === editSectionParam) ?? null;
   const c = await db.customer.findUnique({
@@ -32,7 +29,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     include: {
       benchmarks: { orderBy: { testedAt: "desc" } },
       activities: { orderBy: { date: "asc" } },
-      videos: { orderBy: { uploadedAt: "desc" } },
       campMembers: { include: { camp: true } },
       userAccount: { select: { id: true } },
       rosterEntries: { include: { class: true }, orderBy: { class: { startsAt: "desc" } } },
@@ -124,6 +120,24 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     if (!bid) return;
     await db.benchmark.delete({ where: { id: bid } });
     revalidatePath(`/customers/${id}`);
+    redirect(`/customers/${id}`);
+  }
+  async function updateBenchmark(formData: FormData) {
+    "use server";
+    const bid = String(formData.get("benchmarkId") ?? "");
+    const valueRaw = String(formData.get("value") ?? "").trim();
+    if (!bid || !valueRaw) return;
+    const value = valueRaw.includes(":")
+      ? (() => { const [m, ss] = valueRaw.split(":"); return Number(m) * 60 + Number(ss || 0); })()
+      : Number(valueRaw);
+    if (!Number.isFinite(value)) return;
+    const testedAtRaw = String(formData.get("testedAt") ?? "").trim();
+    await db.benchmark.update({
+      where: { id: bid },
+      data: { value, ...(testedAtRaw ? { testedAt: new Date(testedAtRaw) } : {}) },
+    });
+    revalidatePath(`/customers/${id}`);
+    redirect(`/customers/${id}`);
   }
 
   async function addActivity(formData: FormData) {
@@ -140,28 +154,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
         avgPaceSec: Number(formData.get("avgPaceSec")) || null,
         avgCadence: Number(formData.get("avgCadence")) || null,
         caloriesKcal: Number(formData.get("caloriesKcal")) || null,
-        notes: String(formData.get("notes") ?? "").trim() || null,
-      },
-    });
-    revalidatePath(`/customers/${id}`);
-  }
-
-  async function uploadVideo(formData: FormData) {
-    "use server";
-    const file = formData.get("file") as File;
-    if (!file || file.size === 0) return;
-    const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase();
-    const filename = `${id}_${randomUUID()}.${ext}`;
-    const uploadDir = path.join(process.cwd(), "public", "uploads");
-    await mkdir(uploadDir, { recursive: true });
-    const buf = Buffer.from(await file.arrayBuffer());
-    await writeFile(path.join(uploadDir, filename), buf);
-    await db.video.create({
-      data: {
-        customerId: id,
-        title: String(formData.get("title") ?? file.name),
-        filePath: `/uploads/${filename}`,
-        exercise: String(formData.get("exercise") ?? "").trim() || null,
         notes: String(formData.get("notes") ?? "").trim() || null,
       },
     });
@@ -447,7 +439,11 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                 <label className="block text-xs text-muted mb-1">Metric</label>
                 <select name="metric" required className="w-full rounded-lg border border-border px-2 py-1.5 text-sm">
                   <option value="">Pick a benchmark…</option>
-                  {BENCHMARKS.map((b) => <option key={b.key} value={b.key}>{b.label} ({b.unit})</option>)}
+                  {benchmarksByGroup().map((g) => (
+                    <optgroup key={g.group} label={g.label}>
+                      {g.items.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
               <div>
@@ -465,17 +461,41 @@ export default async function CustomerDetail({ params, searchParams }: { params:
             <div className="bg-card border border-border border-dashed rounded-xl p-4 text-center text-xs text-muted">No benchmarks logged yet.</div>
           ) : (
             <div className="bg-card border border-border rounded-xl divide-y divide-border">
-              {c.benchmarks.map((b) => (
-                <div key={b.id} className="flex justify-between items-center px-4 py-2.5 group">
-                  <div className="text-sm">{benchmarkLabel(b.metric)}</div>
-                  <div className="flex items-center gap-3">
-                    <div className="font-semibold tabular-nums text-sm">{b.metric.endsWith("_sec") ? formatSec(b.value) : `${b.value} ${b.unit}`}</div>
-                    <form action={deleteBenchmark}>
-                      <input type="hidden" name="benchmarkId" value={b.id} />
-                      <button type="submit" className="text-[10px] text-muted hover:text-red-600 opacity-0 group-hover:opacity-100" title="Delete">×</button>
-                    </form>
+              {[...c.benchmarks].sort((a, b) => benchmarkOrder(a.metric) - benchmarkOrder(b.metric) || +new Date(b.testedAt) - +new Date(a.testedAt)).map((b) => (
+                editBenchmark === b.id ? (
+                  <form key={b.id} action={updateBenchmark} className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-accent/5">
+                    <input type="hidden" name="benchmarkId" value={b.id} />
+                    <div className="text-sm font-medium min-w-[8rem] flex-1">{benchmarkLabel(b.metric)}</div>
+                    <input
+                      name="value"
+                      required
+                      autoFocus
+                      defaultValue={b.metric.endsWith("_sec") ? formatSec(b.value) : String(b.value)}
+                      placeholder={b.metric.endsWith("_sec") ? "mm:ss" : "number"}
+                      className="w-24 rounded-lg border border-border px-2 py-1 text-sm tabular-nums"
+                    />
+                    <button type="submit" className="rounded-lg bg-foreground text-white px-3 py-1 text-xs">Save</button>
+                    <Link href={`/customers/${id}`} className="text-xs text-muted hover:text-foreground">Cancel</Link>
+                  </form>
+                ) : (
+                  <div key={b.id} className="flex justify-between items-center px-4 py-2.5 group">
+                    <div className="text-sm">{benchmarkLabel(b.metric)}</div>
+                    <div className="flex items-center gap-3">
+                      <div className="font-semibold tabular-nums text-sm">{b.metric.endsWith("_sec") ? formatSec(b.value) : `${b.value} ${b.unit}`}</div>
+                      <Link
+                        href={`/customers/${id}?editBenchmark=${b.id}`}
+                        title="Edit"
+                        className="text-muted hover:text-accent opacity-0 group-hover:opacity-100"
+                      >
+                        <Pencil size={12} />
+                      </Link>
+                      <form action={deleteBenchmark}>
+                        <input type="hidden" name="benchmarkId" value={b.id} />
+                        <button type="submit" className="text-[12px] leading-none text-muted hover:text-red-600 opacity-0 group-hover:opacity-100" title="Delete">×</button>
+                      </form>
+                    </div>
                   </div>
-                </div>
+                )
               ))}
             </div>
           )}
@@ -498,26 +518,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
             <button type="submit" className="w-full rounded-lg bg-foreground text-white py-2 text-sm">Add activity</button>
           </form>
         </div>
-      </section>
-
-      <section className="mb-6">
-        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Videos ({c.videos.length})</h2>
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          {c.videos.map((v) => (
-            <div key={v.id} className="bg-card border border-border rounded-xl p-3">
-              <video src={v.filePath} controls className="w-full rounded-lg bg-black mb-2" />
-              <div className="text-sm font-medium">{v.title}</div>
-              <div className="text-xs text-muted">{v.exercise ?? ""} · {formatDate(v.uploadedAt)}</div>
-            </div>
-          ))}
-        </div>
-        <form action={uploadVideo} encType="multipart/form-data" className="bg-card border border-border rounded-xl p-4 grid grid-cols-3 gap-3">
-          <input name="title" placeholder="Title" required className="rounded-lg border border-border px-3 py-2 text-sm" />
-          <input name="exercise" placeholder="Exercise (e.g. wall_ball)" className="rounded-lg border border-border px-3 py-2 text-sm" />
-          <input name="file" type="file" accept="video/*" required className="rounded-lg border border-border px-3 py-2 text-sm" />
-          <input name="notes" placeholder="Notes" className="col-span-2 rounded-lg border border-border px-3 py-2 text-sm" />
-          <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm">Upload</button>
-        </form>
       </section>
 
       <section className="mb-6">

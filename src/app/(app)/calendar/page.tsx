@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { requireCoach } from "@/lib/auth";
 import { startOfDay, endOfDay, startOfWeek, startOfMonth, addDays, addMonths, formatTime, sameDay } from "@/lib/utils";
 import { classScope } from "@/lib/access";
-import { ChevronLeft, ChevronRight, CheckSquare } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckSquare, StickyNote } from "lucide-react";
+import DayQuickAdd from "@/components/DayQuickAdd";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,15 @@ export default async function CalendarPage({
               <Link key={v} href={`/calendar?view=${v}&d=${isoDay(cursor)}`} className={`px-3 py-2 text-sm capitalize ${view === v ? "bg-foreground text-white" : "hover:bg-background"}`}>{v}</Link>
             ))}
           </div>
+          <div className="ml-2">
+            <DayQuickAdd
+              date={isoDay(view === "day" ? cursor : new Date())}
+              returnTo={`/calendar?view=${view}&d=${isoDay(cursor)}`}
+              variant="button"
+              label="New"
+              align="right"
+            />
+          </div>
         </div>
       </header>
 
@@ -94,6 +104,15 @@ function ClassCard({ c }: { c: ClassWithRel }) {
 }
 
 function TodoCard({ t }: { t: TodoRow }) {
+  // Notes are todos with source="note": no done-state, sticky-note styling.
+  if (t.source === "note") {
+    return (
+      <div className="flex items-start gap-2 p-2.5 rounded-lg border bg-sky-50 border-sky-200">
+        <StickyNote size={14} className="mt-0.5 shrink-0 text-sky-600" />
+        <div className="text-xs leading-snug text-foreground">{t.title}</div>
+      </div>
+    );
+  }
   return (
     <div className={`flex items-start gap-2 p-2.5 rounded-lg border ${t.done ? "bg-background border-border opacity-60" : "bg-amber-50 border-amber-200"}`}>
       <CheckSquare size={14} className={`mt-0.5 shrink-0 ${t.done ? "text-emerald-500" : "text-amber-600"}`} />
@@ -121,9 +140,17 @@ function DayView({ classes, todos, cursor }: { classes: ClassWithRel[]; todos: T
         })}
       </div>
       <div>
-        <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Todos due today</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-medium text-muted uppercase tracking-wide">To-dos &amp; notes</h3>
+          <DayQuickAdd
+            date={cursor.toISOString().split("T")[0]}
+            returnTo={`/calendar?view=day&d=${cursor.toISOString().split("T")[0]}`}
+            variant="text"
+            label="Add"
+          />
+        </div>
         <div className="space-y-2">
-          {dayTodos.length === 0 ? <div className="text-xs text-muted">Nothing due.</div> : dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
+          {dayTodos.length === 0 ? <div className="text-xs text-muted">Nothing for this day.</div> : dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
         </div>
       </div>
     </div>
@@ -133,6 +160,8 @@ function DayView({ classes, todos, cursor }: { classes: ClassWithRel[]; todos: T
 function WeekView({ classes, todos, weekStart }: { classes: ClassWithRel[]; todos: TodoRow[]; weekStart: Date }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = new Date();
+  const isoDay = (d: Date) => d.toISOString().split("T")[0];
+  const returnTo = `/calendar?view=week&d=${isoDay(weekStart)}`;
   return (
     <div className="grid grid-cols-7 gap-3">
       {days.map((d) => {
@@ -140,9 +169,14 @@ function WeekView({ classes, todos, weekStart }: { classes: ClassWithRel[]; todo
         const inDay = classes.filter((c) => sameDay(new Date(c.startsAt), d));
         const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), d));
         return (
-          <div key={d.toISOString()} className="min-h-[400px]">
-            <div className={`text-xs font-medium uppercase tracking-wide mb-2 ${isToday ? "text-accent" : "text-muted"}`}>
-              {d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
+          <div key={d.toISOString()} className="group min-h-[400px]">
+            <div className={`flex items-center justify-between mb-2 ${isToday ? "text-accent" : "text-muted"}`}>
+              <span className="text-xs font-medium uppercase tracking-wide">
+                {d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
+              </span>
+              <span className="opacity-0 group-hover:opacity-100 transition">
+                <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
+              </span>
             </div>
             <div className="space-y-2">
               {dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
@@ -160,6 +194,8 @@ function MonthView({ classes, todos, monthStart }: { classes: ClassWithRel[]; to
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const today = new Date();
   const month = monthStart.getMonth();
+  const isoDay = (d: Date) => d.toISOString().split("T")[0];
+  const returnTo = `/calendar?view=month&d=${isoDay(monthStart)}`;
   return (
     <div>
       <div className="grid grid-cols-7 gap-px bg-border border border-border rounded-xl overflow-hidden">
@@ -172,13 +208,24 @@ function MonthView({ classes, todos, monthStart }: { classes: ClassWithRel[]; to
           const isCurMonth = d.getMonth() === month;
           const isToday = sameDay(d, today);
           return (
-            <div key={d.toISOString()} className={`bg-card min-h-[110px] p-2 ${isCurMonth ? "" : "opacity-40"}`}>
-              <div className={`text-xs font-medium mb-1 ${isToday ? "text-accent" : ""}`}>{d.getDate()}</div>
+            <div key={d.toISOString()} className={`group relative bg-card min-h-[110px] p-2 ${isCurMonth ? "" : "opacity-40"}`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-xs font-medium ${isToday ? "text-accent" : ""}`}>{d.getDate()}</span>
+                <span className="opacity-0 group-hover:opacity-100 transition">
+                  <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
+                </span>
+              </div>
               <div className="space-y-1">
                 {dayTodos.slice(0, 2).map((t) => (
-                  <div key={t.id} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${t.done ? "bg-background text-muted line-through" : "bg-amber-100 text-amber-800"}`}>
-                    <CheckSquare size={10} /> {t.title}
-                  </div>
+                  t.source === "note" ? (
+                    <div key={t.id} className="text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 bg-sky-100 text-sky-800">
+                      <StickyNote size={10} /> {t.title}
+                    </div>
+                  ) : (
+                    <div key={t.id} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${t.done ? "bg-background text-muted line-through" : "bg-amber-100 text-amber-800"}`}>
+                      <CheckSquare size={10} /> {t.title}
+                    </div>
+                  )
                 ))}
                 {inDay.slice(0, 2).map((c) => (
                   <Link key={c.id} href={`/classes/${c.id}`} className="block text-[11px] bg-background border border-border rounded px-1.5 py-1 hover:border-accent truncate">
@@ -186,6 +233,11 @@ function MonthView({ classes, todos, monthStart }: { classes: ClassWithRel[]; to
                   </Link>
                 ))}
                 {inDay.length + dayTodos.length > 4 && <div className="text-[10px] text-muted">+{inDay.length + dayTodos.length - 4} more</div>}
+                {inDay.length === 0 && dayTodos.length === 0 && (
+                  <span className="opacity-0 group-hover:opacity-100 transition">
+                    <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="text" label="Add" />
+                  </span>
+                )}
               </div>
             </div>
           );

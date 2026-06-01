@@ -15,7 +15,7 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
   const camps = await db.camp.findMany({
     where: campScope(user),
     orderBy: { startDate: "desc" },
-    include: { members: true, classes: true, coach: true },
+    include: { members: true, classes: true, coach: true, createdBy: true },
   });
   const coaches = user.role === "admin"
     ? await db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } })
@@ -35,6 +35,7 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
         startDate: new Date(String(formData.get("startDate"))),
         endDate: new Date(String(formData.get("endDate"))),
         coachId,
+        createdById: u.id,
       },
     });
     revalidatePath("/camps");
@@ -110,7 +111,10 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
                 </div>
                 <div className="text-sm text-muted mt-0.5">{c.description}</div>
               </div>
-              <div className="text-xs text-muted">{c.coach?.name ?? "Unassigned"}</div>
+              <div className="text-right">
+                <div className="text-xs text-muted">Coach: {c.coach?.name ?? "Unassigned"}</div>
+                <div className="text-[11px] text-muted mt-0.5">Created by {c.createdBy?.name ?? "—"}</div>
+              </div>
             </div>
             <div className="flex gap-6 mt-4 text-sm text-muted">
               <div>📅 {formatDate(c.startDate)} → {formatDate(c.endDate)}</div>

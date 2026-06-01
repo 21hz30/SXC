@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { formatDate, formatTime } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import CampSchedule from "@/components/CampSchedule";
-import { requireCoach } from "@/lib/auth";
+import { requireCoach, requireUser } from "@/lib/auth";
 import { canAccessCamp } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
@@ -18,12 +18,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     where: { id },
     include: {
       coach: true,
+      createdBy: true,
       members: { include: { customer: true } },
       classes: {
         orderBy: { startsAt: "asc" },
         include: {
           workouts: { orderBy: { order: "asc" }, include: { workout: { select: { id: true, name: true } } } },
           roster: true,
+          createdBy: { select: { name: true } },
         },
       },
     },
@@ -79,6 +81,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
   async function addClass(formData: FormData) {
     "use server";
+    const u = await requireUser();
     const title = String(formData.get("title") ?? "").trim();
     const date = String(formData.get("date") ?? "");
     const time = String(formData.get("time") ?? "") || "07:00";
@@ -92,6 +95,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         capacity: Number(formData.get("capacity")) || 12,
         location: String(formData.get("location") ?? "").trim() || null,
         dropInAllowed: formData.get("dropInAllowed") === "on",
+        createdById: u.id,
       },
     });
     revalidatePath(`/camps/${id}`);
@@ -110,7 +114,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
           </div>
           <div className="text-sm text-muted mt-1">{camp.description}</div>
           <div className="text-sm text-muted mt-2">
-            {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"}
+            {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"} · Created by {camp.createdBy?.name ?? "—"}
           </div>
         </div>
         <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline shrink-0 mt-1">
@@ -228,6 +232,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             rosterCount: c.roster.length,
             capacity: c.capacity,
             dropInAllowed: c.dropInAllowed,
+            createdByName: c.createdBy?.name ?? null,
           }))}
         />
       </section>

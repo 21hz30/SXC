@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { login, getSessionUser } from "@/lib/auth";
+import PasswordInput from "@/components/PasswordInput";
 
 export default async function LoginPage({
   searchParams,
@@ -34,13 +35,13 @@ export default async function LoginPage({
           className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3"
         />
         <label className="block text-sm font-medium mb-1.5">Password</label>
-        <input
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent"
-        />
-        {error && <p className="mt-2 text-sm text-red-600">Wrong username or password.</p>}
+        <PasswordInput name="password" autoComplete="current-password" required />
+        {error && (
+          <p className="mt-2 text-sm text-red-600">
+            That username and password don&apos;t match. Check your spelling, or{" "}
+            <Link href="/register" className="underline">create an account</Link>.
+          </p>
+        )}
         <button
           type="submit"
           className="mt-5 w-full rounded-lg bg-foreground text-white py-3 font-medium hover:opacity-90"

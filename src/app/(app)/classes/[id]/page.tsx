@@ -26,6 +26,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       },
       roster: { include: { customer: true }, orderBy: { customer: { name: "asc" } } },
       camp: true,
+      createdBy: { select: { name: true } },
     },
   });
   if (!cls) notFound();
@@ -129,6 +130,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           <div className="text-sm text-muted">
             {formatDate(cls.startsAt)} · {formatTime(cls.startsAt)} · {cls.location ?? "—"} · {cls.durationMin} min
             {cls.camp && (<> · <Link href={`/camps/${cls.campId}`} className="text-accent hover:underline">{cls.camp.name}</Link></>)}
+            {cls.createdBy && (<> · Created by {cls.createdBy.name}</>)}
           </div>
           <div className="flex items-center gap-2 mt-1">
             <h1 className="text-3xl font-semibold tracking-tight">{cls.title}</h1>

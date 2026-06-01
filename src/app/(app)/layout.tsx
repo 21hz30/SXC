@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         { href: "/workouts", label: "Workouts", icon: Dumbbell },
         ...(user.role === "admin"
           ? [
-              { href: "/coaches", label: "Coaches", icon: Shield },
+              { href: "/coaches", label: "Team", icon: Shield },
               { href: "/admin/standards", label: "Standards", icon: Gauge },
             ]
           : []),

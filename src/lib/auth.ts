@@ -49,19 +49,15 @@ export async function requireUser(): Promise<SessionUser> {
   return u;
 }
 
+// Single-role model for now: any logged-in user has full access.
+// These aliases stay so existing call sites compile; they're effectively
+// `requireUser` until we re-introduce role distinctions.
 export async function requireAdmin(): Promise<SessionUser> {
-  const u = await requireUser();
-  if (u.role !== "admin") redirect("/");
-  return u;
+  return requireUser();
 }
 
-/**
- * Use on coach/admin-only pages. Customer accounts get bounced to /me.
- */
 export async function requireCoach(): Promise<SessionUser> {
-  const u = await requireUser();
-  if (u.role === "customer") redirect("/me");
-  return u;
+  return requireUser();
 }
 
 export async function login(username: string, password: string): Promise<SessionUser | null> {

@@ -14,6 +14,7 @@ type Klass = {
   rosterCount: number;
   capacity: number;
   dropInAllowed?: boolean;
+  createdByName?: string | null;
 };
 
 export default function CampSchedule({
@@ -89,7 +90,7 @@ export default function CampSchedule({
                         <Link href={`/classes/${c.id}`} className="text-sm font-semibold hover:text-accent">{c.title}</Link>
                         {c.dropInAllowed && <span className="text-[9px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-700">Drop-in</span>}
                       </div>
-                      <div className="text-xs text-muted mt-0.5">{c.startsAtLabel} · {c.rosterCount}/{c.capacity}</div>
+                      <div className="text-xs text-muted mt-0.5">{c.startsAtLabel} · {c.rosterCount}/{c.capacity}{c.createdByName ? ` · by ${c.createdByName}` : ""}</div>
                     </div>
                   </div>
                   {c.workouts.length === 0 ? (

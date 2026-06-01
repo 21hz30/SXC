@@ -3,6 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { hashPassword, getSessionUser, makeToken, SESSION_COOKIE } from "@/lib/auth";
 import { db } from "@/lib/db";
+import PasswordInput from "@/components/PasswordInput";
 
 export default async function RegisterPage({
   searchParams,
@@ -17,15 +18,17 @@ export default async function RegisterPage({
     const username = String(formData.get("username") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const name = String(formData.get("name") ?? "").trim() || username;
-    const roleRaw = String(formData.get("role") ?? "customer").trim();
-    const role = ["admin", "coach", "customer"].includes(roleRaw) ? roleRaw : "customer";
 
-    if (!username || password.length < 4) redirect("/register?error=invalid");
+    // Password rules: 8+ chars, at least one letter and one number.
+    const passwordOk =
+      password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
+    if (!username || !passwordOk) redirect("/register?error=invalid");
     const exists = await db.user.findUnique({ where: { username } });
     if (exists) redirect("/register?error=taken");
 
+    // Single-role model for now: every new account is an admin.
     const u = await db.user.create({
-      data: { username, name, role, passwordHash: await hashPassword(password) },
+      data: { username, name, role: "admin", passwordHash: await hashPassword(password) },
     });
     // Auto-login the new account
     const jar = await cookies();
@@ -41,7 +44,7 @@ export default async function RegisterPage({
   const errMsg = error === "taken"
     ? "That username is already taken."
     : error === "invalid"
-    ? "Pick a username and a password (4+ characters)."
+    ? "Password must be at least 8 characters and include a letter and a number."
     : null;
 
   return (
@@ -59,14 +62,18 @@ export default async function RegisterPage({
         <input name="name" autoComplete="name" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
 
         <label className="block text-sm font-medium mb-1.5">Password</label>
-        <input name="password" type="password" autoComplete="new-password" required minLength={4} className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
-
-        <label className="block text-sm font-medium mb-1.5">Account type</label>
-        <select name="role" defaultValue="coach" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent">
-          <option value="admin">Admin</option>
-          <option value="coach">Coach</option>
-          <option value="customer">Customer (athlete)</option>
-        </select>
+        <PasswordInput
+          name="password"
+          autoComplete="new-password"
+          required
+          minLength={8}
+          pattern="(?=.*[A-Za-z])(?=.*\d).{8,}"
+          title="At least 8 characters, with one letter and one number."
+        />
+        <p className="mt-1.5 mb-3 text-xs text-muted leading-snug">
+          At least 8 characters, mixing letters and numbers.<br />
+          Tip: a short sentence plus a number is easy to remember and hard to guess.
+        </p>
 
         {errMsg && <p className="mt-3 text-sm text-red-600">{errMsg}</p>}
 

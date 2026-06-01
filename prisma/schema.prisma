@@ -19,9 +19,11 @@ model User {
   customer     Customer? @relation("CustomerAccount", fields: [customerId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
 
-  camps        Camp[]   @relation("CoachCamps")
-  todos        Todo[]
-  chatSessions ChatSession[]
+  camps          Camp[]   @relation("CoachCamps")
+  createdCamps   Camp[]   @relation("CampCreator")
+  createdClasses Class[]  @relation("ClassCreator")
+  todos          Todo[]
+  chatSessions   ChatSession[]
 }
 
 model ChatSession {
@@ -206,6 +208,8 @@ model Camp {
   endDate     DateTime
   coachId     String?
   coach       User?    @relation("CoachCamps", fields: [coachId], references: [id])
+  createdById String?
+  createdBy   User?    @relation("CampCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
 
   members  CampMember[]
@@ -278,6 +282,8 @@ model Class {
   dropInAllowed Boolean @default(false)  // when true, athletes outside the camp can join
   campId      String?
   camp        Camp?    @relation(fields: [campId], references: [id])
+  createdById String?
+  createdBy   User?    @relation("ClassCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
 
   roster       RosterEntry[]
