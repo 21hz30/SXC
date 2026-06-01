@@ -8,6 +8,7 @@ import { createSession } from "@/domain/chat";
 import { requireUser, requireCoach } from "@/lib/auth";
 import { Sparkles, Pencil } from "lucide-react";
 import BackButton from "@/components/BackButton";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
@@ -87,6 +88,17 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     }
     revalidatePath(`/customers/${id}`);
     redirect(`/customers/${id}`);
+  }
+
+  async function deleteCustomer() {
+    "use server";
+    await requireCoach();
+    // Related benchmarks, races, goals, activity, videos, roster, camp
+    // memberships, performances and logs cascade via the schema. Any linked
+    // user account is detached (User.customerId → null).
+    await db.customer.delete({ where: { id } });
+    revalidatePath("/customers");
+    redirect("/customers");
   }
 
   // Benchmark add / delete actions
@@ -295,11 +307,21 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           </div>
         </div>
         <div className="text-right flex flex-col items-end gap-2">
-          <form action={chatAboutCustomer}>
-            <button type="submit" className="flex items-center gap-1.5 rounded-lg bg-foreground text-white px-3 py-2 text-sm font-medium hover:opacity-90">
-              <Sparkles size={14} /> Chat about {c.name.split(" ")[0]}
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            <form action={chatAboutCustomer}>
+              <button type="submit" className="flex items-center gap-1.5 rounded-lg bg-foreground text-white px-3 py-2 text-sm font-medium hover:opacity-90">
+                <Sparkles size={14} /> Chat about {c.name.split(" ")[0]}
+              </button>
+            </form>
+            <form action={deleteCustomer}>
+              <ConfirmSubmit
+                message={`Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`}
+                className="rounded-lg border border-border px-3 py-2 text-sm text-muted hover:border-red-300 hover:text-red-600"
+              >
+                Delete
+              </ConfirmSubmit>
+            </form>
+          </div>
           <div>
             <div className="text-xs text-muted uppercase tracking-wide">Attendance</div>
             <div className="text-2xl font-semibold tabular-nums">{rate}%</div>

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { formatTime, formatDate } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { formatItem } from "@/domain/exercises";
 import { requireUser, requireCoach } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
@@ -185,7 +186,12 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       )}
       {edit && (
         <form action={deleteClass} className="mb-6 text-right">
-          <button type="submit" className="text-xs text-muted hover:text-red-600">Delete this class</button>
+          <ConfirmSubmit
+            message={`Delete class "${cls.title}"? Its roster and assigned workouts will be removed. This cannot be undone.`}
+            className="text-xs text-muted hover:text-red-600"
+          >
+            Delete this class
+          </ConfirmSubmit>
         </form>
       )}
 

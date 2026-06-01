@@ -3,10 +3,11 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formatSec } from "@/lib/utils";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { requireCoach } from "@/lib/auth";
 import { customerScope } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,17 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     });
     revalidatePath("/customers");
     redirect(`/customers/${c.id}`);
+  }
+
+  async function deleteCustomer(formData: FormData) {
+    "use server";
+    await requireCoach();
+    const customerId = String(formData.get("customerId") ?? "");
+    if (!customerId) return;
+    // Related rows (benchmarks, races, goals, activity, videos, roster, camp
+    // memberships, performances, logs) cascade; any login account is detached.
+    await db.customer.delete({ where: { id: customerId } });
+    revalidatePath("/customers");
   }
 
   return (
@@ -103,6 +115,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
               <th className="px-5 py-3 font-medium">Tags</th>
               <th className="px-5 py-3 font-medium">Hyrox PB</th>
               <th className="px-5 py-3 font-medium text-right">Attendance</th>
+              <th className="px-5 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -110,7 +123,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
               const attended = c.rosterEntries.filter((r) => r.attendance === "attended").length;
               const total = c.rosterEntries.filter((r) => r.attendance !== "pending").length;
               return (
-                <tr key={c.id} className="hover:bg-background">
+                <tr key={c.id} className="hover:bg-background group">
                   <td className="px-5 py-4">
                     <Link href={`/customers/${c.id}`} className="font-medium hover:text-accent">{c.name}</Link>
                     <div className="text-xs text-muted">{customerDetail(c) || c.email || "—"}</div>
@@ -118,6 +131,17 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   <td className="px-5 py-4 text-muted">{c.tags ?? "—"}</td>
                   <td className="px-5 py-4 tabular-nums">{formatSec(c.hyroxPbSec)}</td>
                   <td className="px-5 py-4 text-right tabular-nums">{attended}/{total}</td>
+                  <td className="px-5 py-4 text-right">
+                    <form action={deleteCustomer}>
+                      <input type="hidden" name="customerId" value={c.id} />
+                      <ConfirmSubmit
+                        message={`Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`}
+                        className="text-muted hover:text-red-600 opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 size={14} />
+                      </ConfirmSubmit>
+                    </form>
+                  </td>
                 </tr>
               );
             })}

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { formatDate, formatTime } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
 import CampSchedule from "@/components/CampSchedule";
 import { requireCoach, requireUser } from "@/lib/auth";
 import { canAccessCamp } from "@/lib/access";
@@ -162,7 +163,12 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             </div>
           </form>
           <form action={deleteCamp} className="mb-6 text-right">
-            <button type="submit" className="text-xs text-muted hover:text-red-600">Delete this camp</button>
+            <ConfirmSubmit
+              message={`Delete camp "${camp.name}"? Its classes and memberships will be removed. This cannot be undone.`}
+              className="text-xs text-muted hover:text-red-600"
+            >
+              Delete this camp
+            </ConfirmSubmit>
           </form>
         </>
       )}
