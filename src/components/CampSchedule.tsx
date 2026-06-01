@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { X, ArrowRight } from "lucide-react";
 
 type Workout = { id: string; name: string; description: string | null; itemCount: number };
 type AssignedWorkout = { id: string; name: string };
@@ -92,6 +92,12 @@ export default function CampSchedule({
                       </div>
                       <div className="text-xs text-muted mt-0.5">{c.startsAtLabel} · {c.rosterCount}/{c.capacity}{c.createdByName ? ` · by ${c.createdByName}` : ""}</div>
                     </div>
+                    <Link
+                      href={`/classes/${c.id}`}
+                      className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+                    >
+                      Detail <ArrowRight size={12} />
+                    </Link>
                   </div>
                   {c.workouts.length === 0 ? (
                     <div className="text-xs text-muted italic mb-2">No workouts yet — add one below.</div>

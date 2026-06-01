@@ -7,6 +7,7 @@ import BackButton from "@/components/BackButton";
 import CampSchedule from "@/components/CampSchedule";
 import { requireCoach, requireUser } from "@/lib/auth";
 import { canAccessCamp } from "@/lib/access";
+import { customerDetail, customerOptionLabel } from "@/domain/customers";
 
 export const dynamic = "force-dynamic";
 
@@ -169,20 +170,26 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       <section className="bg-card border border-border rounded-xl p-5 mb-6">
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({camp.members.length})</h2>
         <ul className="divide-y divide-border -mx-2 mb-3">
-          {camp.members.map((m) => (
-            <li key={m.id} className="flex items-center justify-between px-2 py-2">
-              <Link href={`/customers/${m.customerId}`} className="text-sm font-medium hover:text-accent">{m.customer.name}</Link>
-              <form action={removeMember}>
-                <input type="hidden" name="memberId" value={m.id} />
-                <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
-              </form>
-            </li>
-          ))}
+          {camp.members.map((m) => {
+            const detail = customerDetail(m.customer);
+            return (
+              <li key={m.id} className="flex items-center justify-between px-2 py-2">
+                <Link href={`/customers/${m.customerId}`} className="hover:text-accent">
+                  <span className="text-sm font-medium">{m.customer.name}</span>
+                  {detail && <span className="text-xs text-muted ml-2">{detail}</span>}
+                </Link>
+                <form action={removeMember}>
+                  <input type="hidden" name="memberId" value={m.id} />
+                  <button type="submit" className="text-xs text-muted hover:text-red-600">Remove</button>
+                </form>
+              </li>
+            );
+          })}
         </ul>
         <form action={addMember} className="flex gap-2">
           <select name="customerId" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm">
             <option value="">+ Add member…</option>
-            {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{customerOptionLabel(c)}</option>)}
           </select>
           <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Add</button>
         </form>

@@ -6,12 +6,13 @@ import { formatSec } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { requireCoach } from "@/lib/auth";
 import { customerScope } from "@/lib/access";
+import { customerDetail } from "@/domain/customers";
 
 export const dynamic = "force-dynamic";
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; error?: string }> }) {
   const user = await requireCoach();
-  const { new: isNew } = await searchParams;
+  const { new: isNew, error } = await searchParams;
   const customers = await db.customer.findMany({
     where: customerScope(user),
     orderBy: { name: "asc" },
@@ -20,17 +21,31 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
 
   async function createCustomer(formData: FormData) {
     "use server";
+    await requireCoach();
     const name = String(formData.get("name") ?? "").trim();
-    if (!name) redirect("/customers");
+    if (!name) redirect("/customers?new=1&error=name");
+    const email = String(formData.get("email") ?? "").trim() || null;
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    const tags = String(formData.get("tags") ?? "").trim() || null;
+
+    // Phone is our human-facing unique handle: if given, it must be unique.
+    if (phone) {
+      const dupePhone = await db.customer.findFirst({ where: { phone } });
+      if (dupePhone) redirect("/customers?new=1&error=phone");
+    }
+    // If the name already exists, require something to tell the two apart.
+    const sameName = await db.customer.findFirst({ where: { name: { equals: name, mode: "insensitive" } } });
+    if (sameName && !phone && !email && !tags) redirect("/customers?new=1&error=dupename");
+
     const c = await db.customer.create({
       data: {
         name,
-        email: String(formData.get("email") ?? "").trim() || null,
-        phone: String(formData.get("phone") ?? "").trim() || null,
+        email,
+        phone,
         age: Number(formData.get("age")) || null,
         weightKg: Number(formData.get("weightKg")) || null,
         heightCm: Number(formData.get("heightCm")) || null,
-        tags: String(formData.get("tags") ?? "").trim() || null,
+        tags,
       },
     });
     revalidatePath("/customers");
@@ -51,12 +66,24 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
 
       {isNew && (
         <form action={createCustomer} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
+          {error && (
+            <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error === "phone"
+                ? "That phone number is already used by another customer."
+                : error === "dupename"
+                ? "A customer with this name already exists. Add a phone, email, or tag to tell them apart."
+                : "Please enter a name."}
+            </div>
+          )}
           <div className="col-span-2">
             <label className="block text-sm font-medium mb-1.5">Name *</label>
             <input name="name" required className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
           </div>
           <div><label className="block text-sm font-medium mb-1.5">Email</label><input name="email" type="email" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div><label className="block text-sm font-medium mb-1.5">Phone</label><input name="phone" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Phone</label>
+            <input name="phone" placeholder="Used to keep customers unique" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
           <div><label className="block text-sm font-medium mb-1.5">Age</label><input name="age" type="number" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Weight (kg)</label><input name="weightKg" type="number" step="0.1" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Height (cm)</label><input name="heightCm" type="number" step="0.1" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
@@ -86,7 +113,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 <tr key={c.id} className="hover:bg-background">
                   <td className="px-5 py-4">
                     <Link href={`/customers/${c.id}`} className="font-medium hover:text-accent">{c.name}</Link>
-                    <div className="text-xs text-muted">{c.email}</div>
+                    <div className="text-xs text-muted">{customerDetail(c) || c.email || "—"}</div>
                   </td>
                   <td className="px-5 py-4 text-muted">{c.tags ?? "—"}</td>
                   <td className="px-5 py-4 tabular-nums">{formatSec(c.hyroxPbSec)}</td>
