@@ -9,8 +9,10 @@ import { flashUrl } from "@/lib/flash";
 import { formatItem } from "@/domain/exercises";
 import { requireUser, requireCoach } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
+import { listWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
 import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
+import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import { canAccessCamp } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +56,13 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
 
   const performances = await listPerformance({ user }, id);
+  const reports = await db.classReport.findMany({
+    where: { classId: id },
+    select: { customerId: true, publishedAt: true, updatedAt: true },
+  });
+  const reportByCustomer = new Map(reports.map((r) => [r.customerId, r]));
+  const perfCustomerIds = new Set(performances.map((p) => p.customerId));
+  const watchData = (await listWatchData({ user }, id)) as WatchRow[];
   // Map each workout to its exercises (for per-workout feedback inputs) and to
   // the subset of performance rows scoped to it.
   const workoutFeedbackData = cls.workouts.map((cw) => ({
@@ -147,6 +156,35 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     }
     revalidatePath(`/classes/${id}`);
     redirect(flashUrl(`/classes/${id}`, already ? "Workout already on this class" : "Workout added"));
+  }
+
+  // Generate AI post-class reports for every rostered athlete who has a
+  // Performance row logged. Coach reviews each one before publishing.
+  async function generateAllReports() {
+    "use server";
+    await requireCoach();
+    const { generateClassReport, upsertReport } = await import("@/domain/reports");
+    const perfCids = await db.performance.findMany({
+      where: { classId: id },
+      select: { customerId: true },
+      distinct: ["customerId"],
+    });
+    let made = 0;
+    let failed = 0;
+    for (const { customerId } of perfCids) {
+      try {
+        const { contentMarkdown, model } = await generateClassReport(id, customerId);
+        await upsertReport(id, customerId, contentMarkdown, model);
+        made++;
+      } catch {
+        failed++;
+      }
+    }
+    revalidatePath(`/classes/${id}`);
+    const msg = failed
+      ? `Generated ${made}, ${failed} failed`
+      : `Generated ${made} report${made === 1 ? "" : "s"}`;
+    redirect(flashUrl(`/classes/${id}`, msg));
   }
 
   // Create a brand-new workout and attach it to this class in one step.
@@ -366,6 +404,82 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
         {cls.campId && rosterCandidates.length === 0 && cls.roster.length > 0 && (
           <div className="text-xs text-muted mt-2">All camp members are on the roster.</div>
         )}
+      </section>
+
+      {/* 3. WATCH DATA — wearable metrics per athlete; feeds the report's analysis */}
+      <section className="bg-card border border-border rounded-xl mb-6 overflow-hidden">
+        <div className="p-6 pb-3">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Sport-watch data</h2>
+          <div className="text-xs text-muted mt-1">
+            Heart rate, calories, time, and HR-zone split per athlete (Garmin / Apple Watch / Whoop).
+            Expand a row for distance, cadence, and zone breakdown. This feeds the post-class report
+            so the AI reasons about real cardiac load, not just RPE.
+          </div>
+        </div>
+        <WatchDataPanel classId={cls.id} members={members} initial={watchData} />
+      </section>
+
+      {/* 4. POST-CLASS REPORTS — AI-drafted, coach-edited, optionally published to athletes */}
+      <section className="bg-card border border-border rounded-xl p-6 mb-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Post-class reports</h2>
+          {perfCustomerIds.size > 0 && (
+            <form action={generateAllReports}>
+              <ConfirmSubmit
+                message={`Generate / regenerate reports for all ${perfCustomerIds.size} athletes with logged performance? Existing reports will be replaced and unpublished.`}
+                className="text-xs rounded-lg bg-foreground text-white px-3 py-2"
+              >
+                Generate for all ({perfCustomerIds.size})
+              </ConfirmSubmit>
+            </form>
+          )}
+        </div>
+        <div className="text-xs text-muted mb-3">
+          One per athlete: what they did, recovery plan to the next class, what to eat,
+          and what to avoid. Coach reviews and publishes; athletes see published ones on their portal.
+        </div>
+        <ul className="divide-y divide-border -mx-2">
+          {cls.roster.map((r) => {
+            const hasPerf = perfCustomerIds.has(r.customerId);
+            const rep = reportByCustomer.get(r.customerId);
+            return (
+              <li key={r.id} className="flex items-center justify-between px-2 py-2.5">
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{r.customer.name}</div>
+                  <div className="text-xs text-muted">
+                    {!hasPerf && !rep && "No performance logged yet"}
+                    {hasPerf && !rep && "Ready to generate"}
+                    {rep && (
+                      <>
+                        Updated {formatDate(rep.updatedAt)}
+                        {rep.publishedAt ? (
+                          <span className="ml-2 inline-block rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-medium">
+                            Published
+                          </span>
+                        ) : (
+                          <span className="ml-2 inline-block rounded px-1.5 py-0.5 bg-zinc-200 text-zinc-700 text-[10px] font-medium">
+                            Draft
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+                <Link
+                  href={`/classes/${id}/reports/${r.customerId}`}
+                  className={`text-xs rounded-lg px-3 py-1.5 ${
+                    rep ? "border border-border" : hasPerf ? "bg-foreground text-white" : "border border-border text-muted"
+                  }`}
+                >
+                  {rep ? "View" : hasPerf ? "Generate" : "Open"}
+                </Link>
+              </li>
+            );
+          })}
+          {cls.roster.length === 0 && (
+            <li className="px-2 py-6 text-center text-sm text-muted">Add athletes to the roster to generate reports.</li>
+          )}
+        </ul>
       </section>
 
     </div>

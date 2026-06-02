@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { clearSession, requireUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge } from "lucide-react";
+import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge, MessageSquare } from "lucide-react";
 import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 import Toaster from "@/components/Toaster";
@@ -28,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           ? [
               { href: "/coaches", label: "Team", icon: Shield },
               { href: "/admin/standards", label: "Standards", icon: Gauge },
+              { href: "/admin/prompts", label: "AI prompts", icon: MessageSquare },
             ]
           : []),
       ];

@@ -91,6 +91,8 @@ model Customer {
   performances  Performance[]
   raceResults   RaceResult[]
   raceGoals     RaceGoal[]
+  classReports  ClassReport[]
+  watchData     ClassWatchData[]
 }
 
 // A completed Hyrox race (or simulation). Splits are flat — 8 runs + 8 stations
@@ -289,6 +291,8 @@ model Class {
   roster       RosterEntry[]
   workouts     ClassWorkout[]
   performances Performance[]
+  reports      ClassReport[]
+  watchData    ClassWatchData[]
 }
 
 model RosterEntry {
@@ -336,4 +340,70 @@ model Log {
   exerciseName  String
   resultJson    String
   createdAt     DateTime    @default(now())
+}
+
+/// AI prompt content, editable from /admin/prompts. `key` is referenced by
+/// code (e.g. "chat.system", "report.postClass"); content can be edited in
+/// the app. If a key has no row yet, the reader falls back to the bundled
+/// `src/prompts/<key>.md` file so the app keeps working on a fresh DB.
+model Prompt {
+  key         String   @id
+  name        String
+  description String?
+  content     String
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  createdAt   DateTime @default(now())
+}
+
+/// AI-generated post-class report for one athlete. One row per (class, customer).
+/// Coach can edit `contentMarkdown` before publishing; athletes only see
+/// reports where `publishedAt` is set.
+model ClassReport {
+  id              String   @id @default(cuid())
+  classId         String
+  class           Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  customerId      String
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contentMarkdown String
+  model           String?
+  generatedAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  publishedAt     DateTime?
+
+  @@unique([classId, customerId])
+  @@index([customerId, generatedAt])
+}
+
+/// Sport-watch / wearable metrics for one athlete in one class. One row per
+/// (class, customer). Entered by the coach (or imported later) off a Garmin /
+/// Apple Watch / Whoop summary. Feeds the post-class report so the AI can
+/// reason about real cardiac load, not just self-reported RPE.
+model ClassWatchData {
+  id           String   @id @default(cuid())
+  classId      String
+  class        Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  durationSec  Int?     // active / moving time
+  distanceM    Int?
+  avgHr        Int?
+  maxHr        Int?
+  caloriesKcal Int?
+  avgCadence   Int?     // spm
+  // Time spent in each HR zone, in seconds — drives aerobic vs anaerobic read.
+  zone1Sec     Int?
+  zone2Sec     Int?
+  zone3Sec     Int?
+  zone4Sec     Int?
+  zone5Sec     Int?
+
+  source       String   @default("manual") // manual | garmin | apple | whoop | polar
+  notes        String?
+  recordedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([classId, customerId])
+  @@index([customerId, recordedAt])
 }

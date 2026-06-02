@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getSystemPrompt } from "./system";
 import { tools, toAnthropicTools, getTool } from "@/tools/registry";
+import { getAIClient, getAIModel } from "@/lib/ai";
 import type { Ctx } from "@/domain/types";
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
@@ -24,12 +25,8 @@ export async function runAgent(opts: {
   const basePrompt = await getSystemPrompt();
   const system = customerContext ? `${basePrompt}\n\n---\n\n${customerContext}` : basePrompt;
 
-  const apiKey = process.env.AI_API_KEY;
-  const baseURL = process.env.AI_BASE_URL;
-  const model = process.env.AI_MODEL ?? "deepseek-v4-pro";
-  if (!apiKey) throw new Error("AI_API_KEY missing in .env");
-
-  const client = new Anthropic({ apiKey, baseURL });
+  const client = getAIClient();
+  const model = getAIModel();
 
   const convo: Anthropic.Messages.MessageParam[] = messages.map((m) => ({
     role: m.role === "user" ? "user" : "assistant",
