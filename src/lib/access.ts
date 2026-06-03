@@ -41,6 +41,16 @@ export function customerScope(u: SessionUser): Record<string, unknown> {
   return { id: "__none__" };
 }
 
+/**
+ * `where` fragment that keeps only "real" athletes out of the staff. Admins and
+ * coaches have their own profile (so their Profile page works) but belong on
+ * the Team page, not in the Customers list. A profile counts as non-staff when
+ * it has no login or its login is a customer-role account.
+ */
+export function nonStaffCustomerWhere(): Record<string, unknown> {
+  return { OR: [{ userAccount: null }, { userAccount: { role: "customer" } }] };
+}
+
 /** Class `where` filter: staff = all, customer = classes in their camps. */
 export function classScope(u: SessionUser): Record<string, unknown> {
   if (isStaff(u)) return {};

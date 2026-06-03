@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { formatSec } from "@/lib/utils";
 import { Plus, Trash2 } from "lucide-react";
 import { requireCoach } from "@/lib/auth";
-import { customerScope } from "@/lib/access";
+import { customerScope, nonStaffCustomerWhere } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
@@ -15,8 +15,9 @@ export const dynamic = "force-dynamic";
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; error?: string }> }) {
   const user = await requireCoach();
   const { new: isNew, error } = await searchParams;
+  // Exclude staff (admin/coach) profiles — they live on the Team page.
   const customers = await db.customer.findMany({
-    where: customerScope(user),
+    where: { ...customerScope(user), ...nonStaffCustomerWhere() },
     orderBy: { name: "asc" },
     include: { rosterEntries: true },
   });

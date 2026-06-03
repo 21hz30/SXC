@@ -5,7 +5,7 @@ import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong }
 import { Calendar, Users, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import { listTodos } from "@/domain/todos";
-import { classScope, customerScope, campScope } from "@/lib/access";
+import { classScope, customerScope, campScope, nonStaffCustomerWhere } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ export default async function Dashboard() {
       take: 5,
       include: { camp: true, roster: true },
     }),
-    db.customer.count({ where: customerScope(user) }),
+    db.customer.count({ where: { ...customerScope(user), ...nonStaffCustomerWhere() } }),
     db.camp.count({ where: campScope(user) }),
     db.workout.count(),
     db.activityData.findMany({ where: { customer: customerScope(user) }, orderBy: { date: "desc" }, take: 5, include: { customer: true } }),
