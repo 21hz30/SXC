@@ -1,14 +1,12 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { listPrompts } from "@/domain/prompts";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function PromptsIndex() {
-  const user = await requireUser();
-  if (user.role === "customer") redirect("/me");
+  await requireAdmin();
 
   const prompts = await listPrompts();
 

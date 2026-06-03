@@ -20,45 +20,47 @@ export function isAdmin(u: SessionUser): boolean { return u.role === "admin"; }
 export function isCoach(u: SessionUser): boolean { return u.role === "coach"; }
 export function isCustomer(u: SessionUser): boolean { return u.role === "customer"; }
 
-/** Camp `where` filter: admin = all, coach = own only, customer = camps they're a member of. */
+// Staff (admin + coach) share one workspace: every coach and admin sees all
+// camps, customers, classes and workouts. Only customers are scoped to their
+// own world. `isStaff` centralises that rule.
+function isStaff(u: SessionUser): boolean {
+  return u.role === "admin" || u.role === "coach";
+}
+
+/** Camp `where` filter: staff = all, customer = camps they're a member of. */
 export function campScope(u: SessionUser): Record<string, unknown> {
-  if (u.role === "admin") return {};
-  if (u.role === "coach") return { coachId: u.id };
+  if (isStaff(u)) return {};
   if (u.role === "customer") return { members: { some: { customer: { userAccount: { id: u.id } } } } };
   return { id: "__none__" }; // unknown role → nothing
 }
 
-/** Customer `where` filter: admin = all, coach = members of own camps, customer = self. */
+/** Customer `where` filter: staff = all, customer = self. */
 export function customerScope(u: SessionUser): Record<string, unknown> {
-  if (u.role === "admin") return {};
-  if (u.role === "coach") return { campMembers: { some: { camp: { coachId: u.id } } } };
+  if (isStaff(u)) return {};
   if (u.role === "customer") return { userAccount: { id: u.id } };
   return { id: "__none__" };
 }
 
-/** Class `where` filter: derived from campScope — classes in camps the user can see. */
+/** Class `where` filter: staff = all, customer = classes in their camps. */
 export function classScope(u: SessionUser): Record<string, unknown> {
-  if (u.role === "admin") return {};
-  if (u.role === "coach") return { camp: { coachId: u.id } };
-  if (u.role === "customer") return { roster: { some: { customer: { userAccount: { id: u.id } } } } };
+  if (isStaff(u)) return {};
+  if (u.role === "customer") return { camp: { members: { some: { customer: { userAccount: { id: u.id } } } } } };
   return { id: "__none__" };
 }
 
-/** Check if a coach/customer can access a specific camp record. */
+/** Check if a user can access a specific camp record. */
 export function canAccessCamp(u: SessionUser, camp: { coachId: string | null; id: string }): boolean {
-  if (u.role === "admin") return true;
-  if (u.role === "coach") return camp.coachId === u.id;
+  if (isStaff(u)) return true;
   // customer access checked at query level via campScope; this is an extra guard
   return false;
 }
 
-/** Check if a coach can access a specific customer record (via shared camp membership). */
+/** Check if a user can access a specific customer record. */
 export function canAccessCustomer(
   u: SessionUser,
   customer: { campMembers: { camp: { coachId: string | null } }[]; userAccount?: { id: string } | null }
 ): boolean {
-  if (u.role === "admin") return true;
-  if (u.role === "coach") return customer.campMembers.some((m) => m.camp.coachId === u.id);
+  if (isStaff(u)) return true;
   if (u.role === "customer") return customer.userAccount?.id === u.id;
   return false;
 }

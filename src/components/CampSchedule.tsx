@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { X, ArrowRight, MapPin } from "lucide-react";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
+import ClassSignupButton from "@/components/ClassSignupButton";
 import { toast } from "@/components/Toaster";
 
 type Workout = { id: string; name: string; description: string | null; itemCount: number };
@@ -18,16 +19,23 @@ type Klass = {
   capacity: number;
   dropInAllowed?: boolean;
   createdByName?: string | null;
+  signedUp?: boolean;
 };
 
 export default function CampSchedule({
   workouts,
   classes: initialClasses,
   onDeleteClass,
+  canEdit = true,
+  showDetail = true,
+  signupEnabled = false,
 }: {
   workouts: Workout[];
   classes: Klass[];
   onDeleteClass?: (formData: FormData) => void | Promise<void>;
+  canEdit?: boolean;
+  showDetail?: boolean;
+  signupEnabled?: boolean;
 }) {
   const [classes, setClasses] = useState<Klass[]>(initialClasses);
 
@@ -94,7 +102,11 @@ export default function CampSchedule({
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Link href={`/classes/${c.id}`} className="text-sm font-semibold hover:text-accent">{c.title}</Link>
+                        {showDetail ? (
+                          <Link href={`/classes/${c.id}`} className="text-sm font-semibold hover:text-accent">{c.title}</Link>
+                        ) : (
+                          <span className="text-sm font-semibold">{c.title}</span>
+                        )}
                         {c.dropInAllowed && <span className="text-[9px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-700">Drop-in</span>}
                       </div>
                       <div className="text-xs text-muted mt-0.5">{c.startsAtLabel} · {c.rosterCount}/{c.capacity}{c.createdByName ? ` · by ${c.createdByName}` : ""}</div>
@@ -104,12 +116,21 @@ export default function CampSchedule({
                       </div>
                     </div>
                     <div className="shrink-0 flex items-center gap-1.5">
-                      <Link
-                        href={`/classes/${c.id}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
-                      >
-                        Detail <ArrowRight size={12} />
-                      </Link>
+                      {signupEnabled && (
+                        <ClassSignupButton
+                          classId={c.id}
+                          signedUp={!!c.signedUp}
+                          isFull={c.rosterCount >= c.capacity}
+                        />
+                      )}
+                      {showDetail && (
+                        <Link
+                          href={`/classes/${c.id}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+                        >
+                          Detail <ArrowRight size={12} />
+                        </Link>
+                      )}
                       {onDeleteClass && (
                         <form action={onDeleteClass}>
                           <input type="hidden" name="classId" value={c.id} />
@@ -130,14 +151,16 @@ export default function CampSchedule({
                       {c.workouts.map((w) => (
                         <span key={w.id} className="inline-flex items-center gap-1 text-xs bg-accent/10 text-accent rounded-full pl-2.5 pr-1 py-0.5">
                           {w.name}
-                          <button onClick={() => removeWorkout(c.id, w.id)} className="hover:bg-accent/20 rounded-full p-0.5" title="Remove">
-                            <X size={10} />
-                          </button>
+                          {canEdit && (
+                            <button onClick={() => removeWorkout(c.id, w.id)} className="hover:bg-accent/20 rounded-full p-0.5" title="Remove">
+                              <X size={10} />
+                            </button>
+                          )}
                         </span>
                       ))}
                     </div>
                   )}
-                  {(() => {
+                  {canEdit && (() => {
                     const assigned = new Set(c.workouts.map((w) => w.id));
                     const available = workouts.filter((w) => !assigned.has(w.id));
                     if (available.length === 0) {

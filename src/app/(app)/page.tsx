@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireCoach } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
 import { Calendar, Users, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
@@ -10,7 +10,8 @@ import { classScope, customerScope, campScope } from "@/lib/access";
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const user = await requireCoach();
+  const user = await requireUser();
+  const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos] = await Promise.all([
     db.class.findMany({
@@ -40,10 +41,10 @@ export default async function Dashboard() {
         <h1 className="text-3xl font-semibold tracking-tight mt-1">Welcome back, {user.name.split(" ")[0]}</h1>
       </header>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className={`grid grid-cols-2 ${isStaff ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-4 mb-8`}>
         <Stat icon={Calendar} label="Classes today" value={todayClasses.length} href="/calendar" />
-        <Stat icon={Tent} label="Active camps" value={campCount} href="/camps" />
-        <Stat icon={Users} label="Customers" value={customerCount} href="/customers" />
+        <Stat icon={Tent} label={isStaff ? "Active camps" : "My camps"} value={campCount} href="/camps" />
+        {isStaff && <Stat icon={Users} label="Customers" value={customerCount} href="/customers" />}
         <Stat icon={Dumbbell} label="Workouts" value={workoutCount} href="/workouts" />
       </div>
 

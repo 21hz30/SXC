@@ -6,43 +6,59 @@ import { formatDate, formatTime } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import CampSchedule from "@/components/CampSchedule";
-import { requireCoach, requireUser } from "@/lib/auth";
-import { canAccessCamp } from "@/lib/access";
+import { requireStaff, requireUser , getMyCustomerId } from "@/lib/auth";
 import { customerDetail, customerOptionLabel } from "@/domain/customers";
 import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
 export default async function CampDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
-  const user = await requireCoach();
+  const user = await requireUser();
+  const isStaff = user.role === "admin" || user.role === "coach";
   const { id } = await params;
-  const { edit } = await searchParams;
-  const camp = await db.camp.findUnique({
-    where: { id },
-    include: {
-      coach: true,
-      createdBy: true,
-      members: { include: { customer: true } },
-      classes: {
-        orderBy: { startsAt: "asc" },
-        include: {
-          workouts: { orderBy: { order: "asc" }, include: { workout: { select: { id: true, name: true } } } },
-          roster: true,
-          createdBy: { select: { name: true } },
+  const { edit: editParam } = await searchParams;
+  const edit = isStaff ? editParam : undefined; // only staff get the edit form
+
+  // All independent reads run in parallel — one DB round-trip instead of four.
+  const [camp, allCustomers, allWorkouts, coaches, myCustomerId] = await Promise.all([
+    db.camp.findUnique({
+      where: { id },
+      include: {
+        coach: true,
+        createdBy: true,
+        members: { include: { customer: true } },
+        classes: {
+          orderBy: { startsAt: "asc" },
+          include: {
+            workouts: { orderBy: { order: "asc" }, include: { workout: { select: { id: true, name: true } } } },
+            roster: true,
+            createdBy: { select: { name: true } },
+          },
         },
       },
-    },
-  });
+    }),
+    isStaff ? db.customer.findMany({ orderBy: { name: "asc" } }) : Promise.resolve([]),
+    isStaff
+      ? db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } })
+      : Promise.resolve([]),
+    edit ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } }) : Promise.resolve([]),
+    isStaff ? Promise.resolve(null) : getMyCustomerId(),
+  ]);
   if (!camp) notFound();
-  if (!canAccessCamp(user, camp)) redirect("/camps");
 
-  const allCustomers = await db.customer.findMany({ orderBy: { name: "asc" } });
-  const allWorkouts = await db.workout.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } });
-  const coaches = edit ? await db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } }) : [];
+  // Active members vs pending applicants.
+  const activeMembers = camp.members.filter((m) => m.status !== "pending");
+  const applicants = camp.members.filter((m) => m.status === "pending");
+
+  const myMembership = myCustomerId ? camp.members.find((m) => m.customerId === myCustomerId) ?? null : null;
+  // A customer only sees the roster + class details once they're an active
+  // member; staff always can. Pending applicants can't yet.
+  const canSeeInside = isStaff || myMembership?.status === "active";
   const memberIds = new Set(camp.members.map((m) => m.customerId));
 
   async function updateCamp(formData: FormData) {
     "use server";
+    await requireStaff();
     const name = String(formData.get("name") ?? "").trim();
     const startDate = String(formData.get("startDate") ?? "");
     const endDate = String(formData.get("endDate") ?? "");
@@ -65,6 +81,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
   async function deleteCamp() {
     "use server";
+    await requireStaff();
     await db.camp.delete({ where: { id } });
     revalidatePath("/camps");
     redirect(flashUrl("/camps", "Camp deleted"));
@@ -72,21 +89,63 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
   async function addMember(formData: FormData) {
     "use server";
+    await requireStaff();
     const customerId = String(formData.get("customerId"));
-    if (customerId) await db.campMember.create({ data: { campId: id, customerId } });
+    // Staff add → an active member straight away (upsert in case they had a
+    // pending application).
+    if (customerId) {
+      await db.campMember.upsert({
+        where: { campId_customerId: { campId: id, customerId } },
+        create: { campId: id, customerId, status: "active" },
+        update: { status: "active" },
+      });
+    }
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Member added"));
   }
   async function removeMember(formData: FormData) {
     "use server";
+    await requireStaff();
     const memberId = String(formData.get("memberId"));
     await db.campMember.delete({ where: { id: memberId } });
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Member removed"));
   }
-  async function addClass(formData: FormData) {
+  async function approveMember(formData: FormData) {
+    "use server";
+    await requireStaff();
+    const memberId = String(formData.get("memberId"));
+    await db.campMember.update({ where: { id: memberId }, data: { status: "active" } });
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Application approved"));
+  }
+  // Customer applies to join — creates a pending membership.
+  async function applyToCamp() {
     "use server";
     const u = await requireUser();
+    const acct = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
+    if (!acct?.customerId) redirect("/profile");
+    await db.campMember.upsert({
+      where: { campId_customerId: { campId: id, customerId: acct.customerId } },
+      create: { campId: id, customerId: acct.customerId, status: "pending" },
+      update: {}, // already applied/member — leave as-is
+    });
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Application submitted — your coach will review it"));
+  }
+  // Customer withdraws their own application / leaves the camp.
+  async function leaveCamp() {
+    "use server";
+    const u = await requireUser();
+    const acct = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
+    if (!acct?.customerId) redirect("/profile");
+    await db.campMember.deleteMany({ where: { campId: id, customerId: acct.customerId } });
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Left the camp"));
+  }
+  async function addClass(formData: FormData) {
+    "use server";
+    const u = await requireStaff();
     const title = String(formData.get("title") ?? "").trim();
     const date = String(formData.get("date") ?? "");
     const time = String(formData.get("time") ?? "") || "07:00";
@@ -108,7 +167,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
   async function deleteClass(formData: FormData) {
     "use server";
-    await requireUser();
+    await requireStaff();
     const classId = String(formData.get("classId") ?? "");
     if (!classId) return;
     // Roster, assigned workouts and performances cascade via the schema.
@@ -133,9 +192,31 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"} · Created by {camp.createdBy?.name ?? "—"}
           </div>
         </div>
-        <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline shrink-0 mt-1">
-          {edit ? "Cancel" : "Edit camp"}
-        </Link>
+        {isStaff ? (
+          <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline shrink-0 mt-1">
+            {edit ? "Cancel" : "Edit camp"}
+          </Link>
+        ) : (
+          <div className="shrink-0">
+            {!myMembership && (
+              <form action={applyToCamp}>
+                <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90">Apply to join</button>
+              </form>
+            )}
+            {myMembership?.status === "pending" && (
+              <div className="text-right">
+                <span className="inline-block rounded-lg bg-amber-100 text-amber-700 px-3 py-2 text-xs font-medium">Application pending</span>
+                <form action={leaveCamp} className="mt-1"><button type="submit" className="text-xs text-muted hover:text-red-600">Withdraw</button></form>
+              </div>
+            )}
+            {myMembership?.status === "active" && (
+              <div className="text-right">
+                <span className="inline-block rounded-lg bg-emerald-100 text-emerald-700 px-3 py-2 text-xs font-medium">You&apos;re a member</span>
+                <form action={leaveCamp} className="mt-1"><button type="submit" className="text-xs text-muted hover:text-red-600">Leave camp</button></form>
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {edit && (
@@ -190,40 +271,94 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column — Members, then the add-class form */}
         <div className="lg:col-span-1 space-y-6">
-          <section>
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({camp.members.length})</h2>
-            <div className="bg-card border border-border rounded-xl p-3">
-              {camp.members.length === 0 ? (
-                <div className="text-xs text-muted px-1 py-2">No members yet.</div>
-              ) : (
-                <ul className="divide-y divide-border mb-2 max-h-80 overflow-auto">
-                  {camp.members.map((m) => {
+          {/* Applicants — staff only, shown above members when present */}
+          {isStaff && applicants.length > 0 && (
+            <section>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Applications ({applicants.length})</h2>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <ul className="divide-y divide-amber-200">
+                  {applicants.map((m) => {
                     const detail = customerDetail(m.customer);
                     return (
-                      <li key={m.id} className="flex items-center justify-between gap-2 px-1 py-1.5 group">
+                      <li key={m.id} className="flex items-center justify-between gap-2 px-1 py-2">
                         <Link href={`/customers/${m.customerId}`} className="min-w-0 hover:text-accent">
                           <div className="text-sm font-medium truncate">{m.customer.name}</div>
                           {detail && <div className="text-[11px] text-muted truncate">{detail}</div>}
                         </Link>
-                        <form action={removeMember} className="shrink-0">
-                          <input type="hidden" name="memberId" value={m.id} />
-                          <ConfirmSubmit message={`Remove ${m.customer.name} from this camp?`} className="text-muted hover:text-red-600 text-base leading-none px-1 opacity-0 group-hover:opacity-100" >×</ConfirmSubmit>
-                        </form>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <form action={approveMember}>
+                            <input type="hidden" name="memberId" value={m.id} />
+                            <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium hover:opacity-90">Approve</button>
+                          </form>
+                          <form action={removeMember}>
+                            <input type="hidden" name="memberId" value={m.id} />
+                            <ConfirmSubmit message={`Reject ${m.customer.name}'s application?`} className="text-xs text-muted hover:text-red-600 px-1">Reject</ConfirmSubmit>
+                          </form>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </section>
+          )}
+
+          {!canSeeInside ? (
+            <section>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members</h2>
+              <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
+                {myMembership?.status === "pending"
+                  ? "Your application is pending. Once your coach approves it, you'll see the members and class details here."
+                  : "Join this camp to see its members and class details."}
+              </div>
+            </section>
+          ) : (
+          <section>
+            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Members ({activeMembers.length})</h2>
+            <div className="bg-card border border-border rounded-xl p-3">
+              {activeMembers.length === 0 ? (
+                <div className="text-xs text-muted px-1 py-2">No members yet.</div>
+              ) : (
+                <ul className="divide-y divide-border mb-2 max-h-80 overflow-auto">
+                  {activeMembers.map((m) => {
+                    const detail = customerDetail(m.customer);
+                    return (
+                      <li key={m.id} className="flex items-center justify-between gap-2 px-1 py-1.5 group">
+                        {isStaff ? (
+                          <Link href={`/customers/${m.customerId}`} className="min-w-0 hover:text-accent">
+                            <div className="text-sm font-medium truncate">{m.customer.name}</div>
+                            {detail && <div className="text-[11px] text-muted truncate">{detail}</div>}
+                          </Link>
+                        ) : (
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">{m.customer.name}</div>
+                          </div>
+                        )}
+                        {isStaff && (
+                          <form action={removeMember} className="shrink-0">
+                            <input type="hidden" name="memberId" value={m.id} />
+                            <ConfirmSubmit message={`Remove ${m.customer.name} from this camp?`} className="text-muted hover:text-red-600 text-base leading-none px-1 opacity-0 group-hover:opacity-100" >×</ConfirmSubmit>
+                          </form>
+                        )}
                       </li>
                     );
                   })}
                 </ul>
               )}
-              <form action={addMember} className="flex gap-2 pt-1">
-                <select name="customerId" className="flex-1 min-w-0 rounded-lg border border-border px-2 py-1.5 text-sm">
-                  <option value="">+ Add member…</option>
-                  {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{customerOptionLabel(c)}</option>)}
-                </select>
-                <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm shrink-0">Add</button>
-              </form>
+              {isStaff && (
+                <form action={addMember} className="flex gap-2 pt-1">
+                  <select name="customerId" className="flex-1 min-w-0 rounded-lg border border-border px-2 py-1.5 text-sm">
+                    <option value="">+ Add member…</option>
+                    {allCustomers.filter((c) => !memberIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{customerOptionLabel(c)}</option>)}
+                  </select>
+                  <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm shrink-0">Add</button>
+                </form>
+              )}
             </div>
           </section>
+          )}
 
+          {isStaff && (
           <section>
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Add a class</h2>
             <form action={addClass} className="bg-card border border-border rounded-xl p-4 space-y-2.5">
@@ -255,6 +390,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
               </div>
             </form>
           </section>
+          )}
         </div>
 
         {/* Right column — the class list */}
@@ -276,8 +412,12 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
               capacity: c.capacity,
               dropInAllowed: c.dropInAllowed,
               createdByName: c.createdBy?.name ?? null,
+              signedUp: myCustomerId ? c.roster.some((r) => r.customerId === myCustomerId) : false,
             }))}
-            onDeleteClass={deleteClass}
+            onDeleteClass={isStaff ? deleteClass : undefined}
+            canEdit={isStaff}
+            showDetail={canSeeInside}
+            signupEnabled={!isStaff && canSeeInside}
           />
         </section>
       </div>

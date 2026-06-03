@@ -2,8 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireCoach, requireUser } from "@/lib/auth";
-import { campScope } from "@/lib/access";
+import { requireStaff, requireUser , getMyCustomerId } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { flashUrl } from "@/lib/flash";
@@ -11,20 +10,31 @@ import { flashUrl } from "@/lib/flash";
 export const dynamic = "force-dynamic";
 
 export default async function CampsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
-  const user = await requireCoach();
+  const user = await requireUser();
+  const isStaff = user.role === "admin" || user.role === "coach";
   const { new: isNew } = await searchParams;
-  const camps = await db.camp.findMany({
-    where: campScope(user),
-    orderBy: { startDate: "desc" },
-    include: { members: true, classes: true, coach: true, createdBy: true },
-  });
-  const coaches = user.role === "admin"
-    ? await db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } })
-    : [];
+  // Everyone sees all camps (staff share them; customers browse to apply).
+  // Camps, the coach list (admin), and the customer's memberships in parallel.
+  const myCustomerId = isStaff ? null : await getMyCustomerId();
+  const [camps, coaches, myMemberships] = await Promise.all([
+    db.camp.findMany({
+      orderBy: { startDate: "desc" },
+      include: { members: true, classes: true, coach: true, createdBy: true },
+    }),
+    user.role === "admin"
+      ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } })
+      : Promise.resolve([]),
+    myCustomerId
+      ? db.campMember.findMany({ where: { customerId: myCustomerId }, select: { campId: true, status: true } })
+      : Promise.resolve([]),
+  ]);
+
+  // For a customer, map campId → their membership status (active | pending).
+  const myStatus = new Map<string, string>(myMemberships.map((m) => [m.campId, m.status]));
 
   async function createCamp(formData: FormData) {
     "use server";
-    const u = await requireUser();
+    const u = await requireStaff();
     // Admins may pick a coach; coaches always auto-own their own camp.
     const pickedCoachId = String(formData.get("coachId") ?? "") || null;
     const coachId = u.role === "admin" ? pickedCoachId : u.id;
@@ -50,12 +60,14 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
           <h1 className="text-3xl font-semibold tracking-tight">Camps</h1>
           <div className="text-sm text-muted mt-1">{camps.length} programs</div>
         </div>
-        <Link href="/camps?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
-          <Plus size={16} /> New camp
-        </Link>
+        {isStaff && (
+          <Link href="/camps?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
+            <Plus size={16} /> New camp
+          </Link>
+        )}
       </header>
 
-      {isNew && (
+      {isStaff && isNew && (
         <form action={createCamp} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
           <div className="col-span-2">
             <label className="block text-sm font-medium mb-1.5">Name</label>
@@ -109,6 +121,12 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
                   <span className={`text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 ${c.division === "pro" ? "bg-accent/10 text-accent" : "bg-zinc-100 text-zinc-600"}`}>
                     {c.division === "pro" ? "Pro" : "Open"}
                   </span>
+                  {!isStaff && myStatus.get(c.id) === "active" && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-700">Member</span>
+                  )}
+                  {!isStaff && myStatus.get(c.id) === "pending" && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-amber-100 text-amber-700">Applied</span>
+                  )}
                 </div>
                 <div className="text-sm text-muted mt-0.5">{c.description}</div>
               </div>

@@ -5,14 +5,22 @@ import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { categoryLabel } from "@/domain/exercises";
-import { requireCoach } from "@/lib/auth";
+import { getMyCustomerId, requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function WorkoutsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
-  await requireCoach();
+  const user = await requireUser();
+  const isStaff = user.role === "admin" || user.role === "coach";
   const { new: isNew } = await searchParams;
+
+  // Staff see the whole shared library. A customer sees ONLY workouts they
+  // built for themselves — the coach library is not shared with athletes.
+  const myCustomerId = isStaff ? null : await getMyCustomerId();
+  const where = isStaff ? { ownerCustomerId: null } : { ownerCustomerId: myCustomerId };
+
   const workouts = await db.workout.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     include: {
       items: { orderBy: { order: "asc" }, take: 6 },
@@ -22,10 +30,18 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
 
   async function createWorkout(formData: FormData) {
     "use server";
+    const u = await requireUser();
     const name = String(formData.get("name") ?? "").trim();
     if (!name) redirect("/workouts");
+    // Staff create shared (library) workouts; a customer creates a private one
+    // owned by themselves.
+    let ownerCustomerId: string | null = null;
+    if (u.role === "customer") {
+      ownerCustomerId = await getMyCustomerId();
+      if (!ownerCustomerId) redirect("/profile");
+    }
     const w = await db.workout.create({
-      data: { name, description: String(formData.get("description") ?? "").trim() || null },
+      data: { name, description: String(formData.get("description") ?? "").trim() || null, ownerCustomerId },
     });
     revalidatePath("/workouts");
     redirect(`/workouts/${w.id}`);
@@ -35,8 +51,10 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
     <div className="p-8 max-w-5xl mx-auto">
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Workouts</h1>
-          <div className="text-sm text-muted mt-1">{workouts.length} templates</div>
+          <h1 className="text-3xl font-semibold tracking-tight">{isStaff ? "Workouts" : "My workouts"}</h1>
+          <div className="text-sm text-muted mt-1">
+            {isStaff ? `${workouts.length} templates` : `${workouts.length} of your own workouts`}
+          </div>
         </div>
         <Link href="/workouts?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
           <Plus size={16} /> New workout
@@ -47,7 +65,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
         <form action={createWorkout} className="bg-card border border-border rounded-xl p-6 mb-6 space-y-4">
           <div><label className="block text-sm font-medium mb-1.5">Name</label><input name="name" required className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div><label className="block text-sm font-medium mb-1.5">Description</label><input name="description" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div className="text-xs text-muted">You&apos;ll add exercises on the next screen. Assign the workout to specific classes from the camp page.</div>
+          <div className="text-xs text-muted">You&apos;ll add exercises on the next screen.{isStaff ? " Assign it to classes from the camp page." : " It's private to you — use it to track your own training."}</div>
           <div className="flex justify-end gap-2">
             <Link href="/workouts" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
             <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Create &amp; edit</button>

@@ -7,7 +7,7 @@ import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
 import { formatItem } from "@/domain/exercises";
-import { requireUser, requireCoach } from "@/lib/auth";
+import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
 import { listWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
@@ -18,7 +18,8 @@ import { canAccessCamp } from "@/lib/access";
 export const dynamic = "force-dynamic";
 
 export default async function ClassDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
-  const user = await requireCoach();
+  const user = await requireUser();
+  const isStaff = user.role === "admin" || user.role === "coach";
   const { id } = await params;
   const { edit } = await searchParams;
   const cls = await db.class.findUnique({
@@ -34,8 +35,130 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     },
   });
   if (!cls) notFound();
-  // A class is accessible if its camp is — coaches can only see their own
-  // camps' classes, customers only see classes they're rostered on (TODO).
+
+  // ---- Customer (athlete) view: read-only plan + self sign-up ----
+  if (!isStaff) {
+    const myCustomerId = await getMyCustomerId();
+    // Access: a drop-in / free-standing class is open; a camp class needs an
+    // active membership in that camp.
+    let allowed = !cls.campId || cls.dropInAllowed;
+    if (!allowed && cls.campId && myCustomerId) {
+      const mem = await db.campMember.findFirst({
+        where: { campId: cls.campId, customerId: myCustomerId, status: "active" },
+      });
+      allowed = !!mem;
+    }
+    if (!allowed) redirect(cls.campId ? `/camps/${cls.campId}` : "/calendar");
+
+    const myEntry = myCustomerId ? cls.roster.find((r) => r.customerId === myCustomerId) ?? null : null;
+    const isFull = cls.roster.length >= cls.capacity;
+
+    async function signUp() {
+      "use server";
+      const u = await requireUser();
+      const a = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
+      if (!a?.customerId) redirect("/profile");
+      const fresh = await db.class.findUnique({ where: { id }, select: { capacity: true, _count: { select: { roster: true } } } });
+      const existing = await db.rosterEntry.findUnique({ where: { classId_customerId: { classId: id, customerId: a.customerId } } });
+      if (!existing && fresh && fresh._count.roster < fresh.capacity) {
+        await db.rosterEntry.create({ data: { classId: id, customerId: a.customerId } });
+      }
+      revalidatePath(`/classes/${id}`);
+      redirect(flashUrl(`/classes/${id}`, existing ? "You're already signed up" : "You're signed up!"));
+    }
+    async function cancelSignUp() {
+      "use server";
+      const u = await requireUser();
+      const a = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
+      if (a?.customerId) await db.rosterEntry.deleteMany({ where: { classId: id, customerId: a.customerId } });
+      revalidatePath(`/classes/${id}`);
+      redirect(flashUrl(`/classes/${id}`, "Sign-up cancelled"));
+    }
+
+    return (
+      <div className="p-8 max-w-3xl mx-auto">
+        <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
+        <header className="mt-3 mb-6">
+          <div className="text-sm text-muted">
+            {formatDate(cls.startsAt)} · {formatTime(cls.startsAt)} · {cls.location ?? "—"} · {cls.durationMin} min
+            {cls.camp && (<> · <Link href={`/camps/${cls.campId}`} className="text-accent hover:underline">{cls.camp.name}</Link></>)}
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight mt-1">{cls.title}</h1>
+          {cls.notes && <p className="text-sm text-muted mt-2 whitespace-pre-wrap">{cls.notes}</p>}
+        </header>
+
+        {/* Sign-up card */}
+        <div className="bg-card border border-border rounded-xl p-5 mb-6 flex items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium">
+              {myEntry ? (
+                <span className="text-emerald-700">✓ You&apos;re signed up</span>
+              ) : isFull ? (
+                <span className="text-muted">Class is full</span>
+              ) : (
+                "Open for sign-up"
+              )}
+            </div>
+            <div className="text-xs text-muted mt-0.5 tabular-nums">{cls.roster.length} / {cls.capacity} spots filled</div>
+          </div>
+          {myEntry ? (
+            <form action={cancelSignUp}>
+              <ConfirmSubmit
+                message={`Cancel your sign-up for "${cls.title}" on ${formatDate(cls.startsAt)}?`}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-muted hover:border-red-300 hover:text-red-600"
+              >
+                Cancel sign-up
+              </ConfirmSubmit>
+            </form>
+          ) : isFull ? (
+            <span className="rounded-lg border border-border px-4 py-2 text-sm text-muted">Full</span>
+          ) : (
+            <form action={signUp}>
+              <ConfirmSubmit
+                message={`Sign up for "${cls.title}" on ${formatDate(cls.startsAt)} at ${formatTime(cls.startsAt)}?`}
+                className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90"
+              >
+                Sign up
+              </ConfirmSubmit>
+            </form>
+          )}
+        </div>
+
+        {/* Exercise plan — read-only */}
+        <section>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Workout plan</h2>
+          {cls.workouts.length === 0 ? (
+            <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
+              No workout posted yet — check back before class.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {cls.workouts.map((cw) => (
+                <div key={cw.id} className="bg-card border border-border rounded-xl p-5">
+                  <div className="font-semibold">{cw.workout.name}</div>
+                  {cw.workout.description && <div className="text-sm text-muted mt-0.5">{cw.workout.description}</div>}
+                  <ul className="mt-3 divide-y divide-border">
+                    {cw.workout.items.map((it) => {
+                      const { title, details } = formatItem(it as never);
+                      return (
+                        <li key={it.id} className="py-2 flex items-baseline justify-between gap-3 text-sm">
+                          <span className="font-medium">{title}</span>
+                          {details && <span className="text-muted text-right">{details}</span>}
+                        </li>
+                      );
+                    })}
+                    {cw.workout.items.length === 0 && <li className="py-2 text-sm text-muted">No exercises listed.</li>}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  // ---- Staff view (full management) ----
   if (cls.camp && !canAccessCamp(user, cls.camp)) redirect("/calendar");
 
   // Candidates to add to the roster:
@@ -44,25 +167,30 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   //  - free-standing classes (no camp) also accept any customer
   const rosteredIds = new Set(cls.roster.map((r) => r.customerId));
   const restrictToCamp = !!cls.campId && !cls.dropInAllowed;
-  const candidates = restrictToCamp
-    ? (
-        await db.campMember.findMany({
-          where: { campId: cls.campId! },
-          include: { customer: { select: { id: true, name: true } } },
-          orderBy: { customer: { name: "asc" } },
-        })
-      ).map((m) => m.customer)
-    : await db.customer.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
-  const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
+  const assignedWorkoutIds = new Set(cls.workouts.map((cw) => cw.workoutId));
 
-  const performances = await listPerformance({ user }, id);
-  const reports = await db.classReport.findMany({
-    where: { classId: id },
-    select: { customerId: true, publishedAt: true, updatedAt: true },
-  });
+  // All the staff-view reads run in parallel — one round-trip instead of five.
+  const [candidates, performances, reports, watchData, allLibraryWorkouts] = await Promise.all([
+    restrictToCamp
+      ? db.campMember
+          .findMany({
+            where: { campId: cls.campId! },
+            include: { customer: { select: { id: true, name: true } } },
+            orderBy: { customer: { name: "asc" } },
+          })
+          .then((rows) => rows.map((m) => m.customer))
+      : db.customer.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    listPerformance({ user }, id),
+    db.classReport.findMany({
+      where: { classId: id },
+      select: { customerId: true, publishedAt: true, updatedAt: true },
+    }),
+    listWatchData({ user }, id) as Promise<WatchRow[]>,
+    db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+  ]);
+  const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
   const reportByCustomer = new Map(reports.map((r) => [r.customerId, r]));
   const perfCustomerIds = new Set(performances.map((p) => p.customerId));
-  const watchData = (await listWatchData({ user }, id)) as WatchRow[];
   // Map each workout to its exercises (for per-workout feedback inputs) and to
   // the subset of performance rows scoped to it.
   const workoutFeedbackData = cls.workouts.map((cw) => ({
@@ -78,12 +206,9 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
 
-  // Existing workouts the coach can attach to this class (excluding ones
+  // Shared-library workouts the coach can attach to this class (excluding ones
   // already assigned).
-  const assignedWorkoutIds = new Set(cls.workouts.map((cw) => cw.workoutId));
-  const availableWorkouts = (
-    await db.workout.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })
-  ).filter((w) => !assignedWorkoutIds.has(w.id));
+  const availableWorkouts = allLibraryWorkouts.filter((w) => !assignedWorkoutIds.has(w.id));
 
   async function updateClass(formData: FormData) {
     "use server";

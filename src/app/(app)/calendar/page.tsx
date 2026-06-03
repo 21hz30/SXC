@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireCoach } from "@/lib/auth";
+import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { startOfDay, endOfDay, startOfWeek, startOfMonth, addDays, addMonths, formatTime, sameDay } from "@/lib/utils";
 import { classScope } from "@/lib/access";
 import { ChevronLeft, ChevronRight, CheckSquare, StickyNote } from "lucide-react";
 import DayQuickAdd from "@/components/DayQuickAdd";
+import ClassSignupButton from "@/components/ClassSignupButton";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,8 @@ export default async function CalendarPage({
 }: {
   searchParams: Promise<{ view?: View; d?: string }>;
 }) {
-  const user = await requireCoach();
+  const user = await requireUser();
+  const isStaff = user.role === "admin" || user.role === "coach";
   const sp = await searchParams;
   const view: View = sp.view ?? "week";
   const cursor = sp.d ? new Date(sp.d) : new Date();
@@ -54,6 +56,15 @@ export default async function CalendarPage({
 
   const isoDay = (d: Date) => d.toISOString().split("T")[0];
 
+  // Customer self sign-up context: which of the shown classes they're on.
+  const myCustomerId = isStaff ? null : await getMyCustomerId();
+  const signedUpIds = new Set<string>(
+    myCustomerId
+      ? classes.filter((c) => c.roster.some((r) => r.customerId === myCustomerId)).map((c) => c.id)
+      : [],
+  );
+  const canSignUp = !isStaff && !!myCustomerId;
+
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <header className="mb-5 flex items-center justify-between">
@@ -70,21 +81,23 @@ export default async function CalendarPage({
               <Link key={v} href={`/calendar?view=${v}&d=${isoDay(cursor)}`} className={`px-3 py-2 text-sm capitalize ${view === v ? "bg-foreground text-white" : "hover:bg-background"}`}>{v}</Link>
             ))}
           </div>
-          <div className="ml-2">
-            <DayQuickAdd
-              date={isoDay(view === "day" ? cursor : new Date())}
-              returnTo={`/calendar?view=${view}&d=${isoDay(cursor)}`}
-              variant="button"
-              label="New"
-              align="right"
-            />
-          </div>
+          {isStaff && (
+            <div className="ml-2">
+              <DayQuickAdd
+                date={isoDay(view === "day" ? cursor : new Date())}
+                returnTo={`/calendar?view=${view}&d=${isoDay(cursor)}`}
+                variant="button"
+                label="New"
+                align="right"
+              />
+            </div>
+          )}
         </div>
       </header>
 
-      {view === "day" && <DayView classes={classes} todos={todos} cursor={cursor} />}
-      {view === "week" && <WeekView classes={classes} todos={todos} weekStart={rangeStart} />}
-      {view === "month" && <MonthView classes={classes} todos={todos} monthStart={rangeStart} />}
+      {view === "day" && <DayView classes={classes} todos={todos} cursor={cursor} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
+      {view === "week" && <WeekView classes={classes} todos={todos} weekStart={rangeStart} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
+      {view === "month" && <MonthView classes={classes} todos={todos} monthStart={rangeStart} canAdd={isStaff} />}
     </div>
   );
 }
@@ -92,13 +105,18 @@ export default async function CalendarPage({
 type ClassWithRel = Awaited<ReturnType<typeof db.class.findMany>>[number] & { roster: { attendance: string }[]; camp: { name: string } | null };
 type TodoRow = Awaited<ReturnType<typeof db.todo.findMany>>[number];
 
-function ClassCard({ c }: { c: ClassWithRel }) {
+function ClassCard({ c, canSignUp = false, signedUp = false }: { c: ClassWithRel; canSignUp?: boolean; signedUp?: boolean }) {
   const attended = c.roster.filter((r) => r.attendance === "attended").length;
   return (
     <Link href={`/classes/${c.id}`} className="block bg-card border border-border rounded-lg p-3 hover:border-accent transition">
       <div className="text-xs font-semibold text-accent">{formatTime(c.startsAt)}</div>
       <div className="text-sm font-medium leading-tight mt-0.5">{c.title}</div>
       <div className="text-xs text-muted mt-1">{c.camp?.name ?? "—"} · {c.roster.length}/{c.capacity}{attended > 0 && ` · ${attended} ✓`}</div>
+      {canSignUp && (
+        <div className="mt-2">
+          <ClassSignupButton classId={c.id} signedUp={signedUp} isFull={c.roster.length >= c.capacity} size="xs" />
+        </div>
+      )}
     </Link>
   );
 }
@@ -121,7 +139,7 @@ function TodoCard({ t }: { t: TodoRow }) {
   );
 }
 
-function DayView({ classes, todos, cursor }: { classes: ClassWithRel[]; todos: TodoRow[]; cursor: Date }) {
+function DayView({ classes, todos, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
   const hours = Array.from({ length: 16 }, (_, i) => i + 6);
   return (
@@ -133,7 +151,7 @@ function DayView({ classes, todos, cursor }: { classes: ClassWithRel[]; todos: T
             <div key={h} className="flex">
               <div className="w-20 px-4 py-4 text-xs text-muted">{h}:00</div>
               <div className="flex-1 p-2 space-y-2 min-h-[60px]">
-                {inHour.map((c) => <ClassCard key={c.id} c={c} />)}
+                {inHour.map((c) => <ClassCard key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}
               </div>
             </div>
           );
@@ -142,12 +160,14 @@ function DayView({ classes, todos, cursor }: { classes: ClassWithRel[]; todos: T
       <div>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-medium text-muted uppercase tracking-wide">To-dos &amp; notes</h3>
-          <DayQuickAdd
-            date={cursor.toISOString().split("T")[0]}
-            returnTo={`/calendar?view=day&d=${cursor.toISOString().split("T")[0]}`}
-            variant="text"
-            label="Add"
-          />
+          {canAdd && (
+            <DayQuickAdd
+              date={cursor.toISOString().split("T")[0]}
+              returnTo={`/calendar?view=day&d=${cursor.toISOString().split("T")[0]}`}
+              variant="text"
+              label="Add"
+            />
+          )}
         </div>
         <div className="space-y-2">
           {dayTodos.length === 0 ? <div className="text-xs text-muted">Nothing for this day.</div> : dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
@@ -157,7 +177,7 @@ function DayView({ classes, todos, cursor }: { classes: ClassWithRel[]; todos: T
   );
 }
 
-function WeekView({ classes, todos, weekStart }: { classes: ClassWithRel[]; todos: TodoRow[]; weekStart: Date }) {
+function WeekView({ classes, todos, weekStart, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; weekStart: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = new Date();
   const isoDay = (d: Date) => d.toISOString().split("T")[0];
@@ -174,13 +194,15 @@ function WeekView({ classes, todos, weekStart }: { classes: ClassWithRel[]; todo
               <span className="text-xs font-medium uppercase tracking-wide">
                 {d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
               </span>
-              <span className="opacity-0 group-hover:opacity-100 transition">
-                <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
-              </span>
+              {canAdd && (
+                <span className="opacity-0 group-hover:opacity-100 transition">
+                  <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
+                </span>
+              )}
             </div>
             <div className="space-y-2">
               {dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
-              {inDay.map((c) => <ClassCard key={c.id} c={c} />)}
+              {inDay.map((c) => <ClassCard key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}
             </div>
           </div>
         );
@@ -189,7 +211,7 @@ function WeekView({ classes, todos, weekStart }: { classes: ClassWithRel[]; todo
   );
 }
 
-function MonthView({ classes, todos, monthStart }: { classes: ClassWithRel[]; todos: TodoRow[]; monthStart: Date }) {
+function MonthView({ classes, todos, monthStart, canAdd }: { classes: ClassWithRel[]; todos: TodoRow[]; monthStart: Date; canAdd: boolean }) {
   const gridStart = startOfWeek(monthStart);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const today = new Date();
@@ -211,9 +233,11 @@ function MonthView({ classes, todos, monthStart }: { classes: ClassWithRel[]; to
             <div key={d.toISOString()} className={`group relative bg-card min-h-[110px] p-2 ${isCurMonth ? "" : "opacity-40"}`}>
               <div className="flex items-center justify-between mb-1">
                 <span className={`text-xs font-medium ${isToday ? "text-accent" : ""}`}>{d.getDate()}</span>
-                <span className="opacity-0 group-hover:opacity-100 transition">
-                  <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
-                </span>
+                {canAdd && (
+                  <span className="opacity-0 group-hover:opacity-100 transition">
+                    <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
+                  </span>
+                )}
               </div>
               <div className="space-y-1">
                 {dayTodos.slice(0, 2).map((t) => (
@@ -233,7 +257,7 @@ function MonthView({ classes, todos, monthStart }: { classes: ClassWithRel[]; to
                   </Link>
                 ))}
                 {inDay.length + dayTodos.length > 4 && <div className="text-[10px] text-muted">+{inDay.length + dayTodos.length - 4} more</div>}
-                {inDay.length === 0 && dayTodos.length === 0 && (
+                {canAdd && inDay.length === 0 && dayTodos.length === 0 && (
                   <span className="opacity-0 group-hover:opacity-100 transition">
                     <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="text" label="Add" />
                   </span>

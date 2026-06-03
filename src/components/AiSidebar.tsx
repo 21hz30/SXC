@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon, MessagesSquare } from "lucide-react";
 import Markdown from "./Markdown";
+import { useAiPanel } from "@/lib/stores/aiPanel";
+import { cn } from "@/lib/utils";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Session = {
@@ -36,7 +38,8 @@ function parseSlashLine(text: string) {
 }
 
 export default function AiSidebar({ user: _user }: { user: { name: string; role: string } }) {
-  const [open, setOpen] = useState(false);
+  const open = useAiPanel((s) => s.open);
+  const setOpen = useAiPanel((s) => s.setOpen);
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -48,13 +51,14 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
   const searchParams = useSearchParams();
   const activeId = searchParams.get("chat");
 
-  // Default open on xl+
+  // Default open on xl+, and let other UI (e.g. the chat list) open the panel
+  // via a custom event. Open/close state itself lives in the Zustand store.
   useEffect(() => {
-    if (typeof window !== "undefined" && window.matchMedia("(min-width: 1280px)").matches) setOpen(true);
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) setOpen(true);
     const opener = () => setOpen(true);
     window.addEventListener("sxc:open-ai", opener);
     return () => window.removeEventListener("sxc:open-ai", opener);
-  }, []);
+  }, [setOpen]);
 
   // Load the active session whenever ?chat=ID changes
   useEffect(() => {
@@ -153,22 +157,38 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
     }
   }
 
-  if (!open) {
-    return (
+  return (
+    <>
+      {/* Floating open button — shown when the panel is closed */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed right-4 bottom-4 w-12 h-12 rounded-full bg-foreground text-white shadow-lg flex items-center justify-center hover:opacity-90 z-50"
+        className={cn(
+          "fixed right-4 bottom-4 w-12 h-12 rounded-full bg-foreground text-white shadow-lg flex items-center justify-center hover:opacity-90 z-50 transition-opacity duration-200",
+          open ? "opacity-0 pointer-events-none" : "opacity-100",
+        )}
         aria-label="Open AI Co-Coach"
       >
         <Sparkles size={20} />
       </button>
-    );
-  }
 
-  return (
-    <>
-      <div onClick={() => setOpen(false)} className="xl:hidden fixed inset-0 bg-black/30 z-40" aria-hidden />
-      <aside className="fixed inset-y-0 right-0 w-full sm:w-96 bg-white border-l border-border flex flex-col z-40">
+      {/* Mobile overlay — only while open, below xl */}
+      <div
+        onClick={() => setOpen(false)}
+        className={cn(
+          "xl:hidden fixed inset-0 bg-black/30 z-40 transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0 pointer-events-none",
+        )}
+        aria-hidden
+      />
+
+      {/* The panel — always mounted, slides in/out from the right */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 right-0 w-full sm:w-96 bg-white border-l border-border flex flex-col z-40 transition-transform duration-300 ease-in-out will-change-transform",
+          open ? "translate-x-0" : "translate-x-full",
+        )}
+        aria-hidden={!open}
+      >
         {/* Header */}
         <div className="px-4 py-3 border-b border-border flex items-center gap-2">
           <Sparkles size={16} className="text-accent shrink-0" />

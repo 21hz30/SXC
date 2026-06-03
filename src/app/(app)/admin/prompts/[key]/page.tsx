@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { flashUrl } from "@/lib/flash";
 import { formatDateLong } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
@@ -24,8 +24,7 @@ export default async function PromptEditor({
   params: Promise<{ key: string }>;
   searchParams: Promise<{ preview?: string }>;
 }) {
-  const user = await requireUser();
-  if (user.role === "customer") redirect("/me");
+  await requireAdmin();
 
   const { key: rawKey } = await params;
   const { preview } = await searchParams;
@@ -36,8 +35,7 @@ export default async function PromptEditor({
 
   async function save(formData: FormData) {
     "use server";
-    const u = await requireUser();
-    if (u.role === "customer") redirect("/me");
+    const u = await requireAdmin();
     const content = String(formData.get("content") ?? "");
     if (!content.trim()) return;
     await savePrompt(key, content, u.id);
@@ -48,8 +46,7 @@ export default async function PromptEditor({
 
   async function reset() {
     "use server";
-    const u = await requireUser();
-    if (u.role === "customer") redirect("/me");
+    const u = await requireAdmin();
     await resetPrompt(key);
     revalidatePath(`/admin/prompts/${rawKey}`);
     revalidatePath(`/admin/prompts`);

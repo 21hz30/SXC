@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { getWorkout } from "@/domain/workouts";
 import BackButton from "@/components/BackButton";
 import WorkoutEditor, { type Item } from "@/components/WorkoutEditor";
@@ -11,6 +11,9 @@ export default async function WorkoutDetail({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const w = await getWorkout({ user }, id);
   if (!w) notFound();
+  // Staff see shared-library workouts; a customer only their own private ones.
+  const isStaff = user.role === "admin" || user.role === "coach";
+  if (isStaff ? w.ownerCustomerId !== null : w.ownerCustomerId !== (await getMyCustomerId())) notFound();
 
   return (
     <div className="p-8 max-w-3xl mx-auto">

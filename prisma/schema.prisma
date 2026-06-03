@@ -77,6 +77,9 @@ model Customer {
   hyroxPbSec    Int?
   notes         String?
   tags          String?
+  /// Set once the athlete completes the first-login onboarding modal. Null =
+  /// show onboarding. Coach-created profiles also start null until claimed.
+  onboardedAt   DateTime?
   createdAt     DateTime @default(now())
 
   /// Reverse side of the optional account link (User.customerId).
@@ -93,6 +96,70 @@ model Customer {
   raceGoals     RaceGoal[]
   classReports  ClassReport[]
   watchData     ClassWatchData[]
+  ownedWorkouts Workout[]     @relation("CustomerOwnedWorkouts")
+  racePlans     RacePlan[]
+  assignments   WorkoutAssignment[]
+  adviceItems   CoachAdvice[]
+}
+
+/// A workout for one athlete to do OUTSIDE of a class — either pushed by a
+/// coach or self-created by the athlete. Carries the athlete's completion log
+/// (status / RPE / feeling / per-exercise results) and optional per-workout
+/// coach guidance (a training suggestion + food advice).
+model WorkoutAssignment {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  workoutId     String
+  workout       Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  /// User who assigned it (coach/admin). Null = the athlete created it for themselves.
+  assignedById  String?
+  scheduledDate DateTime?
+  status        String   @default("assigned") // assigned | completed | skipped
+  completedAt   DateTime?
+  rpe           Int?
+  feeling       String?
+  notes         String?
+  resultsJson   String?  // per-exercise achieved: { "<itemId>": "value" }
+  coachSuggestion String?
+  foodAdvice    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([customerId, status])
+  @@index([customerId, scheduledDate])
+}
+
+/// Standing coach-to-athlete guidance, not tied to a single workout — a running
+/// feed of training suggestions and nutrition advice the athlete can read.
+model CoachAdvice {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  authorId   String?  // coach/admin who wrote it
+  kind       String   @default("general") // general | training | nutrition
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+/// A race the athlete plans to attend, in a specific division. Sourced from
+/// the curated UPCOMING_RACES schedule (raceId/raceName/raceDate are
+/// denormalized from that list). One row per (customer, race, division), so an
+/// athlete can plan several races and several divisions per race.
+model RacePlan {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  raceId     String   // key from UPCOMING_RACES, e.g. "hangzhou"
+  raceName   String   // denormalized label, e.g. "Hangzhou"
+  raceDate   DateTime // race start date
+  division   String   // "open" | "pro" | "doubles" | "relay"
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, raceId, division])
+  @@index([customerId, raceDate])
 }
 
 // A completed Hyrox race (or simulation). Splits are flat — 8 runs + 8 stations
@@ -224,6 +291,9 @@ model CampMember {
   camp       Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  /// "active" = a member; "pending" = the customer applied and awaits approval.
+  /// Staff add → active; customer applies → pending; approve → active.
+  status     String   @default("active")
   joinedAt   DateTime @default(now())
 
   @@unique([campId, customerId])
@@ -234,11 +304,16 @@ model Workout {
   name        String
   description String?
   tags        String?  // comma-separated, e.g. "pro team,strength"
+  /// When set, this is a private workout a customer built for themselves —
+  /// visible only to them, not in the shared coach library. Null = shared.
+  ownerCustomerId String?
+  owner       Customer? @relation("CustomerOwnedWorkouts", fields: [ownerCustomerId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
 
   items       WorkoutItem[]
   classes     ClassWorkout[]
   performances Performance[]
+  assignments WorkoutAssignment[]
 }
 
 model WorkoutItem {

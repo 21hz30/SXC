@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createHmac, timingSafeEqual } from "crypto";
 import bcrypt from "bcryptjs";
 import { db } from "./db";
@@ -34,13 +35,38 @@ export function decodeToken(token: string | undefined): string | null {
   }
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+export type Account = SessionUser & { customerId: string | null; onboardedAt: Date | null };
+
+// One cached account lookup per request. The layout, each page's requireUser,
+// nested guard helpers, and the many "what's my customerId?" lookups all funnel
+// through this, so a single render hits the users table exactly once.
+export const getAccount = cache(async function getAccount(): Promise<Account | null> {
   const jar = await cookies();
   const userId = decodeToken(jar.get(COOKIE)?.value);
   if (!userId) return null;
-  const u = await db.user.findUnique({ where: { id: userId } });
+  const u = await db.user.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true, name: true, role: true, customerId: true, customer: { select: { onboardedAt: true } } },
+  });
   if (!u) return null;
-  return { id: u.id, username: u.username, name: u.name, role: u.role as Role };
+  return {
+    id: u.id,
+    username: u.username,
+    name: u.name,
+    role: u.role as Role,
+    customerId: u.customerId,
+    onboardedAt: u.customer?.onboardedAt ?? null,
+  };
+});
+
+export async function getSessionUser(): Promise<SessionUser | null> {
+  const a = await getAccount();
+  return a ? { id: a.id, username: a.username, name: a.name, role: a.role } : null;
+}
+
+/** The signed-in user's linked customer id (cached). */
+export async function getMyCustomerId(): Promise<string | null> {
+  return (await getAccount())?.customerId ?? null;
 }
 
 export async function requireUser(): Promise<SessionUser> {
@@ -49,15 +75,35 @@ export async function requireUser(): Promise<SessionUser> {
   return u;
 }
 
-// Single-role model for now: any logged-in user has full access.
-// These aliases stay so existing call sites compile; they're effectively
-// `requireUser` until we re-introduce role distinctions.
-export async function requireAdmin(): Promise<SessionUser> {
-  return requireUser();
+/**
+ * Role gates. The customer role is read-mostly: it can view shared pages but
+ * not run staff mutations, so staff-only actions/pages funnel through these.
+ *
+ *   requireUser  → any logged-in account (viewing pages everyone can see)
+ *   requireStaff → admin or coach (manage camps, classes, workouts, athletes)
+ *   requireAdmin → admin only (team, standards, prompts)
+ *
+ * A blocked customer is bounced to "/profile" (always accessible to them),
+ * never to a page they also can't see — so there's no redirect loop.
+ */
+export async function requireStaff(): Promise<SessionUser> {
+  const u = await requireUser();
+  if (u.role !== "admin" && u.role !== "coach") redirect("/profile");
+  return u;
 }
 
+export async function requireAdmin(): Promise<SessionUser> {
+  const u = await requireUser();
+  if (u.role !== "admin") redirect("/profile");
+  return u;
+}
+
+/**
+ * @deprecated Historical name for "staff" — kept so the many existing call
+ * sites that guard mutations keep blocking customers. Prefer `requireStaff`.
+ */
 export async function requireCoach(): Promise<SessionUser> {
-  return requireUser();
+  return requireStaff();
 }
 
 export async function login(username: string, password: string): Promise<SessionUser | null> {

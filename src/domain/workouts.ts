@@ -1,7 +1,25 @@
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { getMyCustomerId } from "@/lib/auth";
 import type { Ctx } from "./types";
 import type { Category, WorkoutItemInput } from "./exercises";
+
+/**
+ * Guard for editing/deleting a workout: staff may touch shared library
+ * workouts; a customer may touch only their own private workouts. Throws if
+ * the workout doesn't exist or the caller isn't allowed.
+ */
+export async function assertCanEditWorkout(ctx: Ctx, workoutId: string): Promise<void> {
+  const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true } });
+  if (!w) throw new Error("workout not found");
+  const staff = ctx.user.role === "admin" || ctx.user.role === "coach";
+  if (staff) {
+    if (w.ownerCustomerId !== null) throw new Error("forbidden: athlete-owned workout");
+    return;
+  }
+  const myCid = await getMyCustomerId();
+  if (w.ownerCustomerId !== myCid) throw new Error("forbidden");
+}
 
 export type WorkoutItemDTO = {
   id: string;
@@ -23,6 +41,7 @@ export type WorkoutDTO = {
   name: string;
   description: string | null;
   tags: string | null;
+  ownerCustomerId: string | null;
   items: WorkoutItemDTO[];
 };
 
@@ -69,6 +88,7 @@ export async function getWorkout(_ctx: Ctx, id: string): Promise<WorkoutDTO | nu
     name: w.name,
     description: w.description,
     tags: w.tags,
+    ownerCustomerId: w.ownerCustomerId,
     items: w.items.map(toItemDTO),
   };
 }
@@ -78,10 +98,11 @@ export async function getWorkout(_ctx: Ctx, id: string): Promise<WorkoutDTO | nu
  * with the provided ordered list. Used by the editor's Save button.
  */
 export async function saveWorkout(
-  _ctx: Ctx,
+  ctx: Ctx,
   id: string,
   input: { name: string; description?: string | null; tags?: string | null; items: WorkoutItemInput[] }
 ) {
+  await assertCanEditWorkout(ctx, id);
   await db.$transaction([
     db.workout.update({
       where: { id },
@@ -193,7 +214,8 @@ export async function updateWorkoutMeta(_ctx: Ctx, id: string, input: { name?: s
   bust(id);
 }
 
-export async function deleteWorkout(_ctx: Ctx, id: string) {
+export async function deleteWorkout(ctx: Ctx, id: string) {
+  await assertCanEditWorkout(ctx, id);
   await db.workout.delete({ where: { id } });
   bust();
 }

@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { hashPassword, getSessionUser, makeToken, SESSION_COOKIE } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { getSessionUser, makeToken, SESSION_COOKIE } from "@/lib/auth";
+import { createAccount, AccountError } from "@/domain/accounts";
 import PasswordInput from "@/components/PasswordInput";
 
 export default async function RegisterPage({
@@ -18,31 +18,42 @@ export default async function RegisterPage({
     const username = String(formData.get("username") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const name = String(formData.get("name") ?? "").trim() || username;
+    const email = String(formData.get("email") ?? "").trim() || null;
 
+    // Username: this is the LOGIN name. English letters and numbers only —
+    // no spaces or special characters — so it's safe and easy to type.
+    if (!/^[a-z0-9]{3,}$/.test(username)) redirect("/register?error=username");
     // Password rules: 8+ chars, at least one letter and one number.
     const passwordOk =
       password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
-    if (!username || !passwordOk) redirect("/register?error=invalid");
-    const exists = await db.user.findUnique({ where: { username } });
-    if (exists) redirect("/register?error=taken");
+    if (!passwordOk) redirect("/register?error=invalid");
 
-    // Single-role model for now: every new account is an admin.
-    const u = await db.user.create({
-      data: { username, name, role: "admin", passwordHash: await hashPassword(password) },
-    });
-    // Auto-login the new account
+    // Public sign-up creates an athlete (customer) account: a login + a linked
+    // profile. Staff accounts are created by an admin from the Team page.
+    let userId: string;
+    try {
+      const res = await createAccount({ username, password, name, email, role: "customer" });
+      userId = res.userId;
+    } catch (e) {
+      if (e instanceof AccountError) redirect("/register?error=taken");
+      throw e;
+    }
+
+    // Auto-login, then land on the profile where onboarding pops up.
     const jar = await cookies();
-    jar.set(SESSION_COOKIE, makeToken(u.id), {
+    jar.set(SESSION_COOKIE, makeToken(userId), {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     });
-    redirect("/");
+    redirect("/profile");
   }
 
   const errMsg = error === "taken"
     ? "That username is already taken."
+    : error === "username"
+    ? "Username must be English letters and numbers only (at least 3, no spaces or symbols)."
     : error === "invalid"
     ? "Password must be at least 8 characters and include a letter and a number."
     : null;
@@ -52,14 +63,34 @@ export default async function RegisterPage({
       <form action={doRegister} className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 shadow-sm">
         <div className="mb-6">
           <div className="text-3xl font-semibold tracking-tight">SXC</div>
-          <div className="text-sm text-muted mt-1">Create your account</div>
+          <div className="text-sm text-muted mt-1">Create your athlete account</div>
         </div>
 
-        <label className="block text-sm font-medium mb-1.5">Username</label>
-        <input name="username" autoFocus autoComplete="username" required className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
+        <label className="block text-sm font-medium mb-1.5">
+          Username <span className="text-accent font-semibold">· your login name</span>
+        </label>
+        <input
+          name="username"
+          autoFocus
+          autoComplete="username"
+          required
+          pattern="[A-Za-z0-9]{3,}"
+          minLength={3}
+          title="English letters and numbers only — no spaces or special characters."
+          placeholder="e.g. mayarod"
+          className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent"
+        />
+        <p className="mt-1.5 mb-3 text-xs text-muted leading-snug">
+          What you&apos;ll sign in with. English letters and numbers only — no spaces or special characters.
+        </p>
 
-        <label className="block text-sm font-medium mb-1.5">Display name (optional)</label>
-        <input name="name" autoComplete="name" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
+        <label className="block text-sm font-medium mb-1.5">
+          Full name <span className="text-muted font-normal">· your real name</span>
+        </label>
+        <input name="name" autoComplete="name" placeholder="e.g. Maya Rodríguez" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
+
+        <label className="block text-sm font-medium mb-1.5">Email <span className="text-muted font-normal">(so your coach can link your profile)</span></label>
+        <input name="email" type="email" autoComplete="email" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
 
         <label className="block text-sm font-medium mb-1.5">Password</label>
         <PasswordInput

@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { clearSession, requireUser } from "@/lib/auth";
+import { clearSession, getAccount } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge, MessageSquare } from "lucide-react";
+import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge, MessageSquare, User } from "lucide-react";
 import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 import Toaster from "@/components/Toaster";
+import OnboardingModal from "@/components/OnboardingModal";
+import MainShell from "@/components/MainShell";
 import { Suspense } from "react";
 
 async function logout() {
@@ -14,24 +16,33 @@ async function logout() {
 }
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const user = await requireUser();
+  const account = await getAccount();
+  if (!account) redirect("/login");
+  const user = account;
 
-  const nav = user.role === "customer"
-    ? [{ href: "/me", label: "My profile", icon: Home }]
-    : [
-        { href: "/", label: "Dashboard", icon: Home },
-        { href: "/calendar", label: "Calendar", icon: Calendar },
-        { href: "/camps", label: "Camps", icon: Tent },
-        { href: "/customers", label: "Customers", icon: Users },
-        { href: "/workouts", label: "Workouts", icon: Dumbbell },
-        ...(user.role === "admin"
-          ? [
-              { href: "/coaches", label: "Team", icon: Shield },
-              { href: "/admin/standards", label: "Standards", icon: Gauge },
-              { href: "/admin/prompts", label: "AI prompts", icon: MessageSquare },
-            ]
-          : []),
-      ];
+  // First-login onboarding: show the welcome modal until the athlete has
+  // completed (or skipped) it once. `onboardedAt` comes from the same cached
+  // account lookup — no extra query.
+  const needsOnboarding = account.customerId != null && account.onboardedAt === null;
+
+  const isStaff = user.role === "admin" || user.role === "coach";
+  const nav = [
+    // Shared pages — everyone sees these (customers get a scoped, read-only view).
+    { href: "/", label: "Dashboard", icon: Home },
+    { href: "/calendar", label: "Calendar", icon: Calendar },
+    { href: "/camps", label: "Camps", icon: Tent },
+    // Customers list is staff-only; athletes only ever see their own Profile.
+    ...(isStaff ? [{ href: "/customers", label: "Customers", icon: Users }] : []),
+    { href: "/workouts", label: "Workouts", icon: Dumbbell },
+    { href: "/profile", label: "Profile", icon: User },
+    ...(user.role === "admin"
+      ? [
+          { href: "/coaches", label: "Team", icon: Shield },
+          { href: "/admin/standards", label: "Standards", icon: Gauge },
+          { href: "/admin/prompts", label: "AI prompts", icon: MessageSquare },
+        ]
+      : []),
+  ];
 
   return (
     <div className="min-h-screen">
@@ -70,10 +81,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      <main className="md:pl-60 xl:pr-96 min-h-screen">{children}</main>
+      <MainShell>{children}</MainShell>
 
       <AiSidebar user={{ name: user.name, role: user.role }} />
       <Suspense fallback={null}><Toaster /></Suspense>
+      {needsOnboarding && <OnboardingModal firstName={user.name.split(" ")[0]} />}
     </div>
   );
 }

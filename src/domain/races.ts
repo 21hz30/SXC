@@ -9,6 +9,29 @@
  * should import from here rather than re-declare keys.
  */
 
+// ----- Upcoming race schedule -------------------------------------------------
+
+/**
+ * The published Hyrox China season. Athletes pick from these during onboarding
+ * (and later) to declare which races + divisions they plan to attend. Edit
+ * this list as the calendar changes — it's the single source of truth for the
+ * race picker. `start` doubles as the athlete's next-race date.
+ */
+export type UpcomingRace = { id: string; city: string; dates: string; start: string; end: string };
+export const UPCOMING_RACES: UpcomingRace[] = [
+  { id: "hangzhou",  city: "Hangzhou",  dates: "Jul 4–5",        start: "2026-07-04", end: "2026-07-05" },
+  { id: "chengdu",   city: "Chengdu",   dates: "Aug 1–2",        start: "2026-08-01", end: "2026-08-02" },
+  { id: "shenzhen",  city: "Shenzhen",  dates: "Aug 15–16",      start: "2026-08-15", end: "2026-08-16" },
+  { id: "beijing",   city: "Beijing",   dates: "Sep 12–13",      start: "2026-09-12", end: "2026-09-13" },
+  { id: "shanghai",  city: "Shanghai",  dates: "Oct 31 – Nov 1", start: "2026-10-31", end: "2026-11-01" },
+  { id: "guangzhou", city: "Guangzhou", dates: "Nov 21–22",      start: "2026-11-21", end: "2026-11-22" },
+  { id: "sanya",     city: "Sanya",     dates: "Dec 5–6",        start: "2026-12-05", end: "2026-12-06" },
+];
+
+export function findRace(id: string): UpcomingRace | undefined {
+  return UPCOMING_RACES.find((r) => r.id === id);
+}
+
 // ----- Station & run keys -----------------------------------------------------
 
 /**
