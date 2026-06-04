@@ -9,6 +9,7 @@ import TodoList from "@/components/TodoList";
 import { listTodos } from "@/domain/todos";
 import { formatItem } from "@/domain/exercises";
 import { flashUrl } from "@/lib/flash";
+import PlanCheckIn from "@/components/PlanCheckIn";
 import { classScope, customerScope, campScope, nonStaffCustomerWhere } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
@@ -44,9 +45,10 @@ export default async function Dashboard() {
           orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
-    // The athlete's own private workouts, for self-adding to their plan.
+    // Workouts the athlete can self-add: customers see their own private ones,
+    // staff pick from the shared library (for their own routine).
     myCustomerId
-      ? db.workout.findMany({ where: { ownerCustomerId: myCustomerId }, orderBy: { name: "asc" }, select: { id: true, name: true } })
+      ? db.workout.findMany({ where: isStaff ? { ownerCustomerId: null } : { ownerCustomerId: myCustomerId }, orderBy: { name: "asc" }, select: { id: true, name: true } })
       : Promise.resolve([]),
     // Classes the athlete was on the roster for in the past 2 weeks — to prompt
     // for post-class feedback.
@@ -73,37 +75,22 @@ export default async function Dashboard() {
   // have something assigned — they manage plans elsewhere).
   const showPlan = !!myCustomerId && (myAssignments.length > 0 || !isStaff);
 
-  // Athlete logs a plan workout done — scoped to their own assignment only.
-  async function logMyAssignment(formData: FormData) {
-    "use server";
-    const mine = await getMyCustomerId();
-    if (!mine) redirect("/profile");
-    const assignmentId = String(formData.get("assignmentId") ?? "");
-    if (!assignmentId) return;
-    const status = String(formData.get("status") ?? "completed");
-    const rpeRaw = String(formData.get("rpe") ?? "").trim();
-    await db.workoutAssignment.updateMany({
-      where: { id: assignmentId, customerId: mine },
-      data: {
-        status,
-        completedAt: status === "completed" ? new Date() : null,
-        rpe: rpeRaw ? Number(rpeRaw) : null,
-        feeling: String(formData.get("feeling") ?? "").trim() || null,
-        notes: String(formData.get("notes") ?? "").trim() || null,
-      },
-    });
-    revalidatePath("/");
-    redirect(flashUrl("/", "Workout logged"));
-  }
-  // Athlete adds one of their own workouts to their plan.
+  // Per-exercise check-in + completion is handled client-side by the PlanCheckIn
+  // component via PATCH /api/assignment/[id] (scoped to the caller's own row).
+
+  // Athlete adds a workout to their own plan. Customers pick their own private
+  // workouts; staff (who train on their own routine) pick from the shared library.
   async function addToMyPlan(formData: FormData) {
     "use server";
-    const mine = await getMyCustomerId();
+    const u = await requireUser();
+    const mine = (await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } }))?.customerId;
     if (!mine) redirect("/profile");
     const workoutId = String(formData.get("workoutId") ?? "");
     if (!workoutId) return;
     const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true } });
-    if (!w || w.ownerCustomerId !== mine) return; // only your own private workouts
+    const staff = u.role === "admin" || u.role === "coach";
+    const ok = w && (w.ownerCustomerId === mine || (staff && w.ownerCustomerId === null));
+    if (!ok) return;
     const dateRaw = String(formData.get("scheduledDate") ?? "").trim();
     await db.workoutAssignment.create({
       data: { customerId: mine, workoutId, assignedById: null, scheduledDate: dateRaw ? new Date(dateRaw) : null },
@@ -166,50 +153,38 @@ export default async function Dashboard() {
                                 })}
                               </div>
                             )}
-                            {(a.coachSuggestion || a.foodAdvice) && (
+                            {(a.coachSuggestion || a.foodAdvice || a.restAdvice) && (
                               <div className="mt-1.5 space-y-0.5">
-                                {a.coachSuggestion && <div className="text-xs"><span className="font-medium text-accent">Coach:</span> {a.coachSuggestion}</div>}
-                                {a.foodAdvice && <div className="text-xs"><span className="font-medium text-emerald-700">Food:</span> {a.foodAdvice}</div>}
+                                {a.coachSuggestion && <div className="text-xs"><span className="font-medium text-accent">Training:</span> {a.coachSuggestion}</div>}
+                                {a.foodAdvice && <div className="text-xs"><span className="font-medium text-emerald-700">Eat:</span> {a.foodAdvice}</div>}
+                                {a.restAdvice && <div className="text-xs"><span className="font-medium text-sky-700">Rest:</span> {a.restAdvice}</div>}
                               </div>
-                            )}
-                            {done && (a.rpe != null || a.feeling) && (
-                              <div className="mt-1 text-xs text-muted">{a.rpe != null ? `RPE ${a.rpe}` : ""}{a.feeling ? ` · ${a.feeling}` : ""}</div>
                             )}
                           </div>
                         </div>
 
-                        {!done && (
-                          <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-                            <input type="hidden" name="assignmentId" value={a.id} />
-                            <input type="hidden" name="status" value="completed" />
-                            <div>
-                              <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
-                              <input name="rpe" type="number" min={1} max={10} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
-                              <input name="feeling" placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="block text-[10px] text-muted mb-0.5">Notes</label>
-                              <input name="notes" placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                            </div>
-                            <div className="col-span-2 sm:col-span-4 flex justify-end">
-                              <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
-                            </div>
-                          </form>
-                        )}
+                        <PlanCheckIn
+                          assignmentId={a.id}
+                          exercises={a.workout.items.map((it) => {
+                            const { title, details } = formatItem(it as never);
+                            return { id: it.id, label: details ? `${title} (${details})` : title };
+                          })}
+                          initialResults={a.resultsJson ? (JSON.parse(a.resultsJson) as Record<string, string>) : {}}
+                          initialStatus={a.status}
+                          initialRpe={a.rpe}
+                          initialFeeling={a.feeling}
+                        />
                       </li>
                     );
                   })}
                 </ul>
               )}
 
-              {/* Self-add one of your own workouts */}
-              {!isStaff && myWorkouts.length > 0 && (
+              {/* Self-add a workout to your own plan (don't have to follow the assigned one) */}
+              {myWorkouts.length > 0 && (
                 <form action={addToMyPlan} className="mt-3 bg-card border border-border rounded-xl p-3 flex flex-wrap gap-2 items-end">
                   <div className="flex-1 min-w-[10rem]">
-                    <label className="block text-[11px] text-muted mb-1">Add your own workout</label>
+                    <label className="block text-[11px] text-muted mb-1">{isStaff ? "Add a workout to your plan" : "Add your own workout"}</label>
                     <select name="workoutId" required defaultValue="" className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
                       <option value="" disabled>Pick a workout…</option>
                       {myWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
