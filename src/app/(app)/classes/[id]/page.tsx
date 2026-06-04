@@ -208,9 +208,11 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
 
-  // Shared-library workouts the coach can attach to this class (excluding ones
-  // already assigned).
-  const availableWorkouts = allLibraryWorkouts.filter((w) => !assignedWorkoutIds.has(w.id));
+  // The whole shared library is shown in the picker; ones already on this class
+  // are flagged (and disabled) rather than hidden, so a coach can always see
+  // their full library. To repeat a workout, bump its "rounds" on its card.
+  const libraryOptions = allLibraryWorkouts.map((w) => ({ ...w, assigned: assignedWorkoutIds.has(w.id) }));
+  const anyAddable = libraryOptions.some((w) => !w.assigned);
 
   async function updateClass(formData: FormData) {
     "use server";
@@ -400,11 +402,13 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             <div className="flex gap-2">
               <select name="workoutId" required defaultValue="" className="flex-1 rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
                 <option value="" disabled>Pick a workout…</option>
-                {availableWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                {libraryOptions.map((w) => <option key={w.id} value={w.id} disabled={w.assigned}>{w.name}{w.assigned ? " — already on this class" : ""}</option>)}
               </select>
-              <button type="submit" disabled={availableWorkouts.length === 0} className="rounded-lg bg-foreground text-white px-3 text-sm disabled:opacity-40">Add</button>
+              <button type="submit" disabled={!anyAddable} className="rounded-lg bg-foreground text-white px-3 text-sm disabled:opacity-40">Add</button>
             </div>
-            {availableWorkouts.length === 0 && <span className="text-[11px] text-muted">All workouts are already on this class.</span>}
+            {libraryOptions.length === 0
+              ? <span className="text-[11px] text-muted">No workouts in your library yet — create one on the right.</span>
+              : !anyAddable && <span className="text-[11px] text-muted">All your workouts are already on this class. To repeat one, raise its “Rounds” on its card below.</span>}
           </form>
 
           <div className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
