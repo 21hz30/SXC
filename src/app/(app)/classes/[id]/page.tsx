@@ -11,6 +11,7 @@ import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
 import { listWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
+import WorkoutCreateDrawer from "@/components/WorkoutCreateDrawer";
 import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
 import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import { canAccessCamp } from "@/lib/access";
@@ -384,20 +385,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     redirect(flashUrl(`/classes/${id}`, msg));
   }
 
-  // Create a brand-new workout and attach it to this class in one step.
-  async function createWorkoutForClass(formData: FormData) {
-    "use server";
-    await requireCoach();
-    const name = String(formData.get("name") ?? "").trim();
-    if (!name) return;
-    const description = String(formData.get("description") ?? "").trim() || null;
-    const w = await db.workout.create({ data: { name, description } });
-    const last = await db.classWorkout.findFirst({ where: { classId: id }, orderBy: { order: "desc" } });
-    await db.classWorkout.create({ data: { classId: id, workoutId: w.id, order: (last?.order ?? -1) + 1 } });
-    revalidatePath(`/classes/${id}`);
-    redirect(flashUrl(`/classes/${id}`, `"${name}" added to this class & saved to your workout library — add its exercises below`));
-  }
-
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
@@ -491,15 +478,11 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             {availableWorkouts.length === 0 && <span className="text-[11px] text-muted">All workouts are already on this class.</span>}
           </form>
 
-          <form action={createWorkoutForClass} className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
+          <div className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
             <label className="text-xs font-medium text-muted uppercase tracking-wide">Or create a new workout</label>
-            <input name="name" required placeholder="Workout name" className="rounded-lg border border-border px-2 py-1.5 text-sm" />
-            <div className="flex gap-2">
-              <input name="description" placeholder="Description (optional)" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm" />
-              <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Create &amp; add</button>
-            </div>
-            <span className="text-[11px] text-muted">Saved to your workout library and added to this class — then add its exercises in the card below.</span>
-          </form>
+            <WorkoutCreateDrawer classId={cls.id} />
+            <span className="text-[11px] text-muted">Build its exercises in the panel, then save — it&apos;s added here and saved to your workout library.</span>
+          </div>
         </div>
 
         {cls.workouts.length === 0 ? (
