@@ -141,21 +141,101 @@ function TodoCard({ t }: { t: TodoRow }) {
 
 function DayView({ classes, todos, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
-  const hours = Array.from({ length: 16 }, (_, i) => i + 6);
+  const PX_PER_HOUR = 64;
+
+  // Each class as a positioned block: minute offset from midnight + duration.
+  const events = classes
+    .filter((c) => sameDay(new Date(c.startsAt), cursor))
+    .map((c) => {
+      const s = new Date(c.startsAt);
+      const startMin = s.getHours() * 60 + s.getMinutes();
+      return { c, startMin, endMin: startMin + (c.durationMin || 60), col: 0, cols: 1 };
+    })
+    .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+
+  // Visible window: default 06:00–22:00, widened to fit any out-of-range class.
+  let startHour = 6, endHour = 22;
+  for (const e of events) {
+    startHour = Math.min(startHour, Math.floor(e.startMin / 60));
+    endHour = Math.max(endHour, Math.ceil(e.endMin / 60));
+  }
+  const hours = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i);
+  const gridStartMin = startHour * 60;
+  const height = (endHour - startHour) * PX_PER_HOUR;
+
+  // Lay overlapping events side by side: assign each a column, then size each
+  // overlapping cluster by how many columns it spans.
+  const colEnds: number[] = [];
+  for (const e of events) {
+    let col = colEnds.findIndex((end) => e.startMin >= end);
+    if (col === -1) { col = colEnds.length; colEnds.push(e.endMin); } else colEnds[col] = e.endMin;
+    e.col = col;
+  }
+  for (let i = 0; i < events.length; ) {
+    let j = i, maxEnd = events[i].endMin, maxCol = events[i].col;
+    while (j + 1 < events.length && events[j + 1].startMin < maxEnd) {
+      j++; maxEnd = Math.max(maxEnd, events[j].endMin); maxCol = Math.max(maxCol, events[j].col);
+    }
+    for (let k = i; k <= j; k++) events[k].cols = maxCol + 1;
+    i = j + 1;
+  }
+
+  const now = new Date();
+  const nowTop = ((now.getHours() * 60 + now.getMinutes()) - gridStartMin) / 60 * PX_PER_HOUR;
+  const showNow = sameDay(cursor, now) && nowTop >= 0 && nowTop <= height;
+
   return (
     <div className="grid grid-cols-4 gap-6">
-      <div className="col-span-3 bg-card border border-border rounded-xl divide-y divide-border">
-        {hours.map((h) => {
-          const inHour = classes.filter((c) => sameDay(new Date(c.startsAt), cursor) && new Date(c.startsAt).getHours() === h);
-          return (
-            <div key={h} className="flex">
-              <div className="w-20 px-4 py-4 text-xs text-muted">{h}:00</div>
-              <div className="flex-1 p-2 space-y-2 min-h-[60px]">
-                {inHour.map((c) => <ClassCard key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}
-              </div>
+      <div className="col-span-3 bg-card border border-border rounded-xl p-3">
+        <div className="relative" style={{ height }}>
+          {/* Hour gridlines + labels — the line sits exactly at its offset and
+              the label is centered on it, so event blocks line up with it. */}
+          {hours.map((h, idx) => (
+            <div key={h}>
+              <div className="absolute left-12 right-1 border-t border-border" style={{ top: idx * PX_PER_HOUR }} />
+              <span className="absolute left-0 w-12 -translate-y-1/2 pr-2 text-right text-[11px] text-muted tabular-nums" style={{ top: idx * PX_PER_HOUR }}>{String(h).padStart(2, "0")}:00</span>
             </div>
-          );
-        })}
+          ))}
+
+          {/* Current-time indicator (Apple-style red line) */}
+          {showNow && (
+            <div className="absolute left-12 right-1 z-20 flex items-center -translate-y-1/2 pointer-events-none" style={{ top: nowTop }}>
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 -ml-0.5" />
+              <div className="flex-1 border-t border-red-500" />
+            </div>
+          )}
+
+          {/* Event blocks, filling their time slot */}
+          <div className="absolute left-12 right-1 top-0 bottom-0">
+            {events.length === 0 && (
+              <div className="absolute inset-x-0 top-2 text-center text-xs text-muted">No classes scheduled.</div>
+            )}
+            {events.map((e) => {
+              const c = e.c;
+              const top = (e.startMin - gridStartMin) / 60 * PX_PER_HOUR;
+              const blockH = Math.max((e.endMin - e.startMin) / 60 * PX_PER_HOUR - 2, 26);
+              const attended = c.roster.filter((r) => r.attendance === "attended").length;
+              const showSignup = canSignUp && blockH >= 78;
+              return (
+                <Link
+                  key={c.id}
+                  href={`/classes/${c.id}`}
+                  className="absolute rounded-lg border border-accent/30 border-l-[3px] border-l-accent bg-accent/10 hover:bg-accent/20 hover:border-accent transition overflow-hidden px-2 py-1"
+                  style={{ top, height: blockH, left: `${(e.col / e.cols) * 100}%`, width: `calc(${(1 / e.cols) * 100}% - 4px)` }}
+                >
+                  <div className="text-[11px] font-semibold text-accent leading-none">{formatTime(c.startsAt)}</div>
+                  <div className="text-xs font-medium leading-tight mt-0.5 truncate">{c.title}</div>
+                  <div className="text-[11px] text-muted mt-0.5 truncate">{c.camp?.name ?? "—"} · {c.roster.length}/{c.capacity}{attended > 0 ? ` · ${attended} ✓` : ""}</div>
+                  {showSignup && (
+                    <div className="mt-1.5">
+                      <ClassSignupButton classId={c.id} signedUp={signedUpIds.has(c.id)} isFull={c.roster.length >= c.capacity} size="xs" />
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       </div>
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -183,16 +263,22 @@ function WeekView({ classes, todos, weekStart, canAdd, canSignUp, signedUpIds }:
   const isoDay = (d: Date) => d.toISOString().split("T")[0];
   const returnTo = `/calendar?view=week&d=${isoDay(weekStart)}`;
   return (
-    <div className="grid grid-cols-7 gap-3">
+    // A bordered 7-column grid (gap-px over a border background draws the grid
+    // lines) so each day reads as its own cell, with a header strip on top —
+    // matching the month view's structure.
+    <div className="grid grid-cols-7 gap-px bg-border border border-border rounded-xl overflow-hidden">
       {days.map((d) => {
         const isToday = sameDay(d, today);
         const inDay = classes.filter((c) => sameDay(new Date(c.startsAt), d));
         const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), d));
+        const empty = inDay.length === 0 && dayTodos.length === 0;
         return (
-          <div key={d.toISOString()} className="group min-h-[400px]">
-            <div className={`flex items-center justify-between mb-2 ${isToday ? "text-accent" : "text-muted"}`}>
-              <span className="text-xs font-medium uppercase tracking-wide">
-                {d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
+          <div key={d.toISOString()} className="group bg-card min-h-[460px] flex flex-col">
+            {/* Day header */}
+            <div className={`flex items-center justify-between px-2 py-2 border-b border-border ${isToday ? "bg-accent/10" : "bg-background"}`}>
+              <span className={`text-xs font-medium uppercase tracking-wide ${isToday ? "text-accent" : "text-muted"}`}>
+                {d.toLocaleDateString("en-US", { weekday: "short" })}{" "}
+                <span className={`text-sm ${isToday ? "font-bold" : "font-semibold text-foreground"}`}>{d.getDate()}</span>
               </span>
               {canAdd && (
                 <span className="opacity-0 group-hover:opacity-100 transition">
@@ -200,9 +286,19 @@ function WeekView({ classes, todos, weekStart, canAdd, canSignUp, signedUpIds }:
                 </span>
               )}
             </div>
-            <div className="space-y-2">
+            {/* Day body */}
+            <div className="flex-1 p-2 space-y-2">
               {dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
               {inDay.map((c) => <ClassCard key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}
+              {empty && (
+                canAdd ? (
+                  <span className="opacity-0 group-hover:opacity-100 transition block">
+                    <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="text" label="Add" />
+                  </span>
+                ) : (
+                  <div className="text-[11px] text-muted/60">—</div>
+                )
+              )}
             </div>
           </div>
         );
