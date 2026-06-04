@@ -103,10 +103,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     await requireCoach();
     const customerId = String(formData.get("customerId") ?? "");
     if (!customerId) return;
-    // Related rows (benchmarks, races, goals, activity, videos, roster, camp
-    // memberships, performances, logs) cascade; any login account is detached.
+    // Remove the whole person: their profile (related rows — benchmarks, races,
+    // goals, activity, roster, camp memberships, performances, logs — cascade)
+    // AND any linked login account, so no orphaned login is left behind.
+    const linked = await db.user.findFirst({ where: { customerId }, select: { id: true } });
     const removed = await db.customer.delete({ where: { id: customerId } });
+    if (linked) await db.user.delete({ where: { id: linked.id } }).catch(() => {});
     revalidatePath("/customers");
+    revalidatePath("/coaches");
     redirect(flashUrl("/customers", `${removed.name} deleted`));
   }
 

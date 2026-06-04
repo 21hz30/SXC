@@ -106,9 +106,15 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     "use server";
     await requireAdmin();
     const userId = String(formData.get("userId"));
-    const removed = await db.user.delete({ where: { id: userId } });
+    // Remove the whole person: the login AND their linked athlete profile, so
+    // they no longer appear anywhere (e.g. a camp's "add member" picker). The
+    // profile's related rows (camp memberships, assignments, …) cascade.
+    const u = await db.user.findUnique({ where: { id: userId }, select: { name: true, customerId: true } });
+    await db.user.delete({ where: { id: userId } });
+    if (u?.customerId) await db.customer.delete({ where: { id: u.customerId } }).catch(() => {});
     revalidatePath("/coaches");
-    redirect(flashUrl("/coaches", `${removed.name} removed`));
+    revalidatePath("/customers");
+    redirect(flashUrl("/coaches", `${u?.name ?? "User"} removed`));
   }
 
   return (
