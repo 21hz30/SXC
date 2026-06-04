@@ -1,8 +1,11 @@
-import { redirect } from "next/navigation";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { db } from "@/lib/db";
+import CustomerDetail from "../customers/[id]/page";
 
 export const dynamic = "force-dynamic";
+
+type View = "training" | "race";
+type EditSection = "identity" | "hyrox" | "body" | "notes";
 
 /**
  * "Profile" in the sidebar = your own athlete detail page. Everyone — admin,
@@ -13,7 +16,11 @@ export const dynamic = "force-dynamic";
  * works instead of bouncing to the dashboard. It's marked onboarded so an
  * existing staff member isn't dropped into the athlete sign-up wizard.
  */
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ editSection?: EditSection; view?: View; logRace?: string; editGoal?: string; logBenchmark?: string; editBenchmark?: string }>;
+}) {
   const user = await requireUser();
   let customerId = await getMyCustomerId();
   if (!customerId) {
@@ -21,5 +28,5 @@ export default async function ProfilePage() {
     await db.user.update({ where: { id: user.id }, data: { customerId: c.id } });
     customerId = c.id;
   }
-  redirect(`/customers/${customerId}`);
+  return <CustomerDetail params={Promise.resolve({ id: customerId })} searchParams={searchParams} />;
 }

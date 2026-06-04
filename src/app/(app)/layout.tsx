@@ -1,12 +1,12 @@
-import Link from "next/link";
 import { clearSession, getAccount } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Home, Calendar, Users, Dumbbell, LogOut, Tent, Shield, Gauge, MessageSquare, User } from "lucide-react";
+import { LogOut } from "lucide-react";
 import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 import Toaster from "@/components/Toaster";
 import OnboardingModal from "@/components/OnboardingModal";
 import MainShell from "@/components/MainShell";
+import SidebarNav, { type SidebarNavItem } from "@/components/SidebarNav";
 import { Suspense } from "react";
 
 async function logout() {
@@ -26,21 +26,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const needsOnboarding = account.customerId != null && account.onboardedAt === null;
 
   const isStaff = user.role === "admin" || user.role === "coach";
-  const nav = [
+  const nav: SidebarNavItem[] = [
     // Shared pages — everyone sees these (customers get a scoped, read-only view).
-    { href: "/", label: "Dashboard", icon: Home },
-    { href: "/calendar", label: "Calendar", icon: Calendar },
-    { href: "/camps", label: "Camps", icon: Tent },
+    { href: "/", label: "Dashboard", icon: "dashboard" },
+    { href: "/calendar", label: "Calendar", icon: "calendar" },
+    { href: "/camps", label: "Camps", icon: "camps" },
     // Customers list is staff-only; athletes only ever see their own Profile.
-    ...(isStaff ? [{ href: "/customers", label: "Customers", icon: Users }] : []),
-    { href: "/workouts", label: "Workouts", icon: Dumbbell },
-    { href: "/profile", label: "Profile", icon: User },
+    ...(isStaff ? ([{ href: "/customers", label: "Customers", icon: "customers" }] satisfies SidebarNavItem[]) : []),
+    { href: "/workouts", label: "Workouts", icon: "workouts" },
+    { href: "/profile", label: "Profile", icon: "profile" },
     ...(user.role === "admin"
       ? [
-          { href: "/coaches", label: "Team", icon: Shield },
-          { href: "/admin/standards", label: "Standards", icon: Gauge },
-          { href: "/admin/prompts", label: "AI prompts", icon: MessageSquare },
-        ]
+          { href: "/coaches", label: "Team", icon: "team" },
+          { href: "/admin/standards", label: "Standards", icon: "standards" },
+          { href: "/admin/prompts", label: "AI prompts", icon: "prompts" },
+        ] satisfies SidebarNavItem[]
       : []),
   ];
 
@@ -51,18 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="text-2xl font-semibold tracking-tight">SXC</div>
           <div className="text-xs text-muted mt-0.5">Hyrox Coach</div>
         </div>
-        <nav className="px-3 space-y-1 shrink-0">
-          {nav.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground/80 hover:bg-background hover:text-foreground transition"
-            >
-              <Icon size={18} />
-              {label}
-            </Link>
-          ))}
-        </nav>
+        <SidebarNav items={nav} />
         <ChatSessionsPanel />
         <div className="p-3 border-t border-border shrink-0">
           <div className="px-3 py-2 mb-1">

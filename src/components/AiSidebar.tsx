@@ -51,10 +51,9 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
   const searchParams = useSearchParams();
   const activeId = searchParams.get("chat");
 
-  // Default open on xl+, and let other UI (e.g. the chat list) open the panel
-  // via a custom event. Open/close state itself lives in the Zustand store.
+  // Let other UI (e.g. the chat list) open the panel via a custom event.
+  // Open/close state itself lives in the Zustand store.
   useEffect(() => {
-    if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) setOpen(true);
     const opener = () => setOpen(true);
     window.addEventListener("sxc:open-ai", opener);
     return () => window.removeEventListener("sxc:open-ai", opener);
