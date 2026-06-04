@@ -320,6 +320,8 @@ model Workout {
   classes     ClassWorkout[]
   performances Performance[]
   assignments WorkoutAssignment[]
+
+  @@index([ownerCustomerId])
 }
 
 model WorkoutItem {
