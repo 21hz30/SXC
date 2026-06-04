@@ -42,7 +42,9 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       ? db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } })
       : Promise.resolve([]),
     edit ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } }) : Promise.resolve([]),
-    isStaff ? Promise.resolve(null) : getMyCustomerId(),
+    // Staff have a profile too, so they can join the camp and its classes as a
+    // real participant — fetch their customer id like anyone else.
+    getMyCustomerId(),
   ]);
   if (!camp) notFound();
 
@@ -119,6 +121,22 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Application approved"));
   }
+  // Staff join the camp themselves — straight to active, no approval needed.
+  // They keep all their management powers; this just makes them a participant
+  // so they appear on the roster and can sign up for the camp's classes.
+  async function joinCamp() {
+    "use server";
+    const u = await requireStaff();
+    const acct = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
+    if (!acct?.customerId) redirect("/profile");
+    await db.campMember.upsert({
+      where: { campId_customerId: { campId: id, customerId: acct.customerId } },
+      create: { campId: id, customerId: acct.customerId, status: "active" },
+      update: { status: "active" },
+    });
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "You joined the camp"));
+  }
   // Customer applies to join — creates a pending membership.
   async function applyToCamp() {
     "use server";
@@ -192,31 +210,46 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"} · Created by {camp.createdBy?.name ?? "—"}
           </div>
         </div>
-        {isStaff ? (
-          <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline shrink-0 mt-1">
-            {edit ? "Cancel" : "Edit camp"}
-          </Link>
-        ) : (
-          <div className="shrink-0">
-            {!myMembership && (
-              <form action={applyToCamp}>
-                <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90">Apply to join</button>
+        <div className="shrink-0 flex flex-col items-end gap-2 mt-1">
+          {isStaff && (
+            <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline">
+              {edit ? "Cancel" : "Edit camp"}
+            </Link>
+          )}
+          {isStaff ? (
+            // Staff can also join the camp as a participant (still keep edit powers).
+            !myMembership ? (
+              <form action={joinCamp}>
+                <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90">Join this camp</button>
               </form>
-            )}
-            {myMembership?.status === "pending" && (
-              <div className="text-right">
-                <span className="inline-block rounded-lg bg-amber-100 text-amber-700 px-3 py-2 text-xs font-medium">Application pending</span>
-                <form action={leaveCamp} className="mt-1"><button type="submit" className="text-xs text-muted hover:text-red-600">Withdraw</button></form>
-              </div>
-            )}
-            {myMembership?.status === "active" && (
+            ) : (
               <div className="text-right">
                 <span className="inline-block rounded-lg bg-emerald-100 text-emerald-700 px-3 py-2 text-xs font-medium">You&apos;re a member</span>
                 <form action={leaveCamp} className="mt-1"><button type="submit" className="text-xs text-muted hover:text-red-600">Leave camp</button></form>
               </div>
-            )}
-          </div>
-        )}
+            )
+          ) : (
+            <>
+              {!myMembership && (
+                <form action={applyToCamp}>
+                  <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90">Apply to join</button>
+                </form>
+              )}
+              {myMembership?.status === "pending" && (
+                <div className="text-right">
+                  <span className="inline-block rounded-lg bg-amber-100 text-amber-700 px-3 py-2 text-xs font-medium">Application pending</span>
+                  <form action={leaveCamp} className="mt-1"><button type="submit" className="text-xs text-muted hover:text-red-600">Withdraw</button></form>
+                </div>
+              )}
+              {myMembership?.status === "active" && (
+                <div className="text-right">
+                  <span className="inline-block rounded-lg bg-emerald-100 text-emerald-700 px-3 py-2 text-xs font-medium">You&apos;re a member</span>
+                  <form action={leaveCamp} className="mt-1"><button type="submit" className="text-xs text-muted hover:text-red-600">Leave camp</button></form>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </header>
 
       {edit && (
@@ -417,7 +450,9 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             onDeleteClass={isStaff ? deleteClass : undefined}
             canEdit={isStaff}
             showDetail={canSeeInside}
-            signupEnabled={!isStaff && canSeeInside}
+            // Anyone who's an active member — staff included — can sign up for
+            // the camp's classes from here.
+            signupEnabled={myMembership?.status === "active"}
           />
         </section>
       </div>
