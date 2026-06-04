@@ -18,7 +18,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos, myAssignments, myWorkouts] = await Promise.all([
+  const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone] = await Promise.all([
     db.class.findMany({
       where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
@@ -48,7 +48,24 @@ export default async function Dashboard() {
     myCustomerId
       ? db.workout.findMany({ where: { ownerCustomerId: myCustomerId }, orderBy: { name: "asc" }, select: { id: true, name: true } })
       : Promise.resolve([]),
+    // Classes the athlete was on the roster for in the past 2 weeks — to prompt
+    // for post-class feedback.
+    myCustomerId
+      ? db.rosterEntry.findMany({
+          where: { customerId: myCustomerId, class: { startsAt: { gte: addDays(now, -14), lt: now } } },
+          include: { class: { select: { id: true, title: true, startsAt: true } } },
+          orderBy: { class: { startsAt: "desc" } },
+        })
+      : Promise.resolve([]),
+    // Which classes the athlete has already given class-overall feedback on.
+    myCustomerId
+      ? db.performance.findMany({ where: { customerId: myCustomerId, workoutId: null }, select: { classId: true } })
+      : Promise.resolve([]),
   ]);
+
+  // Past classes still awaiting the athlete's feedback.
+  const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
+  const needFeedback = myPastRoster.filter((r) => !feedbackDoneClassIds.has(r.classId)).slice(0, 5);
 
   const todoItems = todos;
   const todayKey = startOfDay().toISOString().slice(0, 10);
@@ -205,6 +222,26 @@ export default async function Dashboard() {
                   <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Add</button>
                 </form>
               )}
+            </div>
+          )}
+
+          {/* Post-class feedback prompt — recent classes the athlete hasn't rated */}
+          {needFeedback.length > 0 && (
+            <div>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">How were your recent classes?</h2>
+              <ul className="bg-card border border-border rounded-xl divide-y divide-border">
+                {needFeedback.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{r.class.title}</div>
+                      <div className="text-xs text-muted">{formatDate(r.class.startsAt)}</div>
+                    </div>
+                    <Link href={`/classes/${r.class.id}`} className="shrink-0 rounded-lg bg-foreground text-white px-3 py-1.5 text-xs font-medium hover:opacity-90">
+                      Give feedback
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
