@@ -112,6 +112,10 @@ model WorkoutAssignment {
   customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   workoutId     String
   workout       Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  /// Set when this row is part of a camp's weekly training plan (fanned out to
+  /// each member). Null = an individual / self-assigned workout.
+  campId        String?
+  camp          Camp?    @relation(fields: [campId], references: [id], onDelete: SetNull)
   /// User who assigned it (coach/admin). Null = the athlete created it for themselves.
   assignedById  String?
   scheduledDate DateTime?
@@ -126,6 +130,7 @@ model WorkoutAssignment {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@unique([campId, customerId, scheduledDate])
   @@index([customerId, status])
   @@index([customerId, scheduledDate])
 }
@@ -283,6 +288,7 @@ model Camp {
 
   members  CampMember[]
   classes  Class[]
+  assignments WorkoutAssignment[]
 }
 
 model CampMember {

@@ -3,7 +3,6 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { formatDate, formatTime, formatSec } from "@/lib/utils";
-import { formatItem } from "@/domain/exercises";
 import Sparkline from "@/components/Sparkline";
 import { createSession } from "@/domain/chat";
 import { requireUser, requireStaff, clearSession, type SessionUser } from "@/lib/auth";
@@ -56,9 +55,9 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   const { editSection: editSectionParam, view: viewParam, logRace, editGoal, logBenchmark, editBenchmark } = await searchParams;
   const editSection: EditSection | null = (["identity", "hyrox", "body", "notes"] as const).find((s) => s === editSectionParam) ?? null;
   const isStaff = user.role === "admin" || user.role === "coach";
-  // Main record + the assignable-workouts list, fetched in parallel.
-  const [c, assignableWorkouts] = await Promise.all([
-   db.customer.findUnique({
+  // The profile is data-only: identity, body, benchmarks, performances and race
+  // history. The training plan + coach advice live on the athlete's dashboard.
+  const c = await db.customer.findUnique({
     where: { id },
     include: {
       benchmarks: { orderBy: { testedAt: "desc" } },
@@ -75,20 +74,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       },
       raceResults: { orderBy: { eventDate: "desc" } },
       raceGoals: true,
-      assignments: {
-        include: { workout: { select: { id: true, name: true, items: { orderBy: { order: "asc" } } } } },
-        orderBy: [{ status: "asc" }, { scheduledDate: "asc" }, { createdAt: "desc" }],
-      },
-      adviceItems: { orderBy: { createdAt: "desc" } },
     },
-   }),
-    // Staff assign from the shared library; an athlete self-logs their own.
-    db.workout.findMany({
-      where: { ownerCustomerId: isStaff ? null : id },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true },
-    }),
-  ]);
+  });
   if (!c) notFound();
   if (!canAccessCustomer(user, c)) redirect("/profile");
 
@@ -112,82 +99,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     const user = await requireStaff();
     const session = await createSession({ user }, { customerId: id });
     redirect(`/customers/${id}?chat=${session.id}`);
-  }
-
-  // ---- Off-class training: assignments + advice ----
-  // Coach assigns a workout (optionally with a date + guidance). The athlete
-  // may also self-assign one of their own workouts to track.
-  async function assignWorkout(formData: FormData) {
-    "use server";
-    const actor = await assertCanEditCustomer(id);
-    const workoutId = String(formData.get("workoutId") ?? "");
-    if (!workoutId) return;
-    // An athlete may only self-assign their own private workouts; staff assign
-    // from the shared library.
-    const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true } });
-    if (!w) return;
-    if (actor.role === "customer" ? w.ownerCustomerId !== id : w.ownerCustomerId !== null) return;
-    const dateRaw = String(formData.get("scheduledDate") ?? "").trim();
-    await db.workoutAssignment.create({
-      data: {
-        customerId: id,
-        workoutId,
-        assignedById: actor.role === "customer" ? null : actor.id,
-        scheduledDate: dateRaw ? new Date(dateRaw) : null,
-        coachSuggestion: String(formData.get("coachSuggestion") ?? "").trim() || null,
-        foodAdvice: String(formData.get("foodAdvice") ?? "").trim() || null,
-      },
-    });
-    revalidatePath(`/customers/${id}`);
-    redirect(flashUrl(`/customers/${id}`, "Workout assigned"));
-  }
-  // Athlete (or coach) logs completion: status + how it felt.
-  async function logAssignment(formData: FormData) {
-    "use server";
-    await assertCanEditCustomer(id);
-    const assignmentId = String(formData.get("assignmentId") ?? "");
-    if (!assignmentId) return;
-    const status = String(formData.get("status") ?? "completed");
-    const rpeRaw = String(formData.get("rpe") ?? "").trim();
-    // Scope to this athlete so a tampered assignmentId can't touch another's log.
-    await db.workoutAssignment.updateMany({
-      where: { id: assignmentId, customerId: id },
-      data: {
-        status,
-        completedAt: status === "completed" ? new Date() : null,
-        rpe: rpeRaw ? Number(rpeRaw) : null,
-        feeling: String(formData.get("feeling") ?? "").trim() || null,
-        notes: String(formData.get("notes") ?? "").trim() || null,
-      },
-    });
-    revalidatePath(`/customers/${id}`);
-    redirect(flashUrl(`/customers/${id}`, "Workout logged"));
-  }
-  async function deleteAssignment(formData: FormData) {
-    "use server";
-    await assertCanEditCustomer(id);
-    await db.workoutAssignment.deleteMany({ where: { id: String(formData.get("assignmentId") ?? ""), customerId: id } });
-    revalidatePath(`/customers/${id}`);
-    redirect(flashUrl(`/customers/${id}`, "Assignment removed"));
-  }
-  // Coach posts standing advice (training / nutrition / general).
-  async function addAdvice(formData: FormData) {
-    "use server";
-    const actor = await requireStaff();
-    const body = String(formData.get("body") ?? "").trim();
-    if (!body) return;
-    await db.coachAdvice.create({
-      data: { customerId: id, authorId: actor.id, kind: String(formData.get("kind") ?? "general"), body },
-    });
-    revalidatePath(`/customers/${id}`);
-    redirect(flashUrl(`/customers/${id}`, "Advice posted"));
-  }
-  async function deleteAdvice(formData: FormData) {
-    "use server";
-    await requireStaff();
-    await db.coachAdvice.delete({ where: { id: String(formData.get("adviceId") ?? "") } });
-    revalidatePath(`/customers/${id}`);
-    redirect(flashUrl(`/customers/${id}`, "Advice removed"));
   }
 
   async function updateCustomer(formData: FormData) {
@@ -476,7 +387,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       {/* Tab toggle — only shown once there's race data (or for staff). */}
       {showRace && (
         <div className="mb-6 inline-flex rounded-lg border border-border overflow-hidden text-sm">
-          <Link href={`/customers/${id}`} className={`px-4 py-2 ${view === "training" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Training</Link>
+          <Link href={`/customers/${id}`} className={`px-4 py-2 ${view === "training" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Overview</Link>
           <Link href={`/customers/${id}?view=race`} className={`px-4 py-2 ${view === "race" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Race</Link>
         </div>
       )}
@@ -598,172 +509,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
       {view === "training" && (
       <>
-      {/* TRAINING PLAN — assigned & self workouts, tracked off-class */}
-      <section className="mb-6">
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Training plan</h2>
-          <span className="text-xs text-muted">{c.assignments.filter((a) => a.status !== "completed").length} to do · {c.assignments.filter((a) => a.status === "completed").length} done</span>
-        </div>
-
-        {/* Assign / self-log form */}
-        {canEdit && (
-          <form action={assignWorkout} className="bg-card border border-border rounded-xl p-4 mb-4 grid md:grid-cols-2 gap-3">
-            <div className="md:col-span-2 text-xs font-medium text-muted">{isStaff ? "Assign a workout to this athlete" : "Add one of your workouts to track"}</div>
-            <div>
-              <label className="block text-[11px] text-muted mb-1">Workout</label>
-              <select name="workoutId" required defaultValue="" className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
-                <option value="" disabled>{assignableWorkouts.length ? "Pick a workout…" : (isStaff ? "No library workouts yet" : "Create a workout first")}</option>
-                {assignableWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] text-muted mb-1">Target date (optional)</label>
-              <input name="scheduledDate" type="date" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-            </div>
-            {isStaff && (
-              <>
-                <div>
-                  <label className="block text-[11px] text-muted mb-1">Coach suggestion (optional)</label>
-                  <input name="coachSuggestion" placeholder="e.g. keep RPE under 7, focus on form" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-muted mb-1">Food advice (optional)</label>
-                  <input name="foodAdvice" placeholder="e.g. carbs 2h before, protein after" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-                </div>
-              </>
-            )}
-            <div className="md:col-span-2 flex justify-end">
-              <button type="submit" disabled={assignableWorkouts.length === 0} className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
-                {isStaff ? "Assign workout" : "Add to my plan"}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {c.assignments.length === 0 ? (
-          <div className="bg-card border border-border border-dashed rounded-xl p-5 text-center text-sm text-muted">No workouts assigned yet.</div>
-        ) : (
-          <ul className="space-y-3">
-            {c.assignments.map((a) => {
-              const done = a.status === "completed";
-              return (
-                <li key={a.id} className={`bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{a.workout.name}</span>
-                        <span className={`text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 ${done ? "bg-emerald-100 text-emerald-700" : a.status === "skipped" ? "bg-zinc-200 text-zinc-600" : "bg-amber-100 text-amber-700"}`}>{a.status}</span>
-                        {!a.assignedById && <span className="text-[10px] text-muted">(self)</span>}
-                      </div>
-                      <div className="text-xs text-muted mt-0.5">
-                        {a.scheduledDate ? `Target ${formatDate(a.scheduledDate)}` : "No target date"}
-                        {done && a.completedAt ? ` · done ${formatDate(a.completedAt)}` : ""}
-                        {a.rpe != null ? ` · RPE ${a.rpe}` : ""}
-                        {a.feeling ? ` · ${a.feeling}` : ""}
-                      </div>
-                    </div>
-                    {canEdit && (
-                      <form action={deleteAssignment} className="shrink-0">
-                        <input type="hidden" name="assignmentId" value={a.id} />
-                        <ConfirmSubmit message={`Remove "${a.workout.name}" from the plan?`} className="text-xs text-muted hover:text-red-600 px-1">×</ConfirmSubmit>
-                      </form>
-                    )}
-                  </div>
-
-                  {/* Exercises */}
-                  {a.workout.items.length > 0 && (
-                    <div className="mt-2 text-xs text-muted flex flex-wrap gap-x-3 gap-y-0.5">
-                      {a.workout.items.map((it) => {
-                        const { title, details } = formatItem(it as never);
-                        return <span key={it.id}>{title}{details ? ` (${details})` : ""}</span>;
-                      })}
-                    </div>
-                  )}
-
-                  {/* Coach guidance */}
-                  {(a.coachSuggestion || a.foodAdvice) && (
-                    <div className="mt-2 space-y-1">
-                      {a.coachSuggestion && <div className="text-xs"><span className="font-medium text-accent">Coach:</span> {a.coachSuggestion}</div>}
-                      {a.foodAdvice && <div className="text-xs"><span className="font-medium text-emerald-700">Food:</span> {a.foodAdvice}</div>}
-                    </div>
-                  )}
-
-                  {a.notes && <div className="mt-1.5 text-xs italic text-muted">“{a.notes}”</div>}
-
-                  {/* Log completion — athlete (or coach) */}
-                  {canEdit && !done && (
-                    <form action={logAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-                      <input type="hidden" name="assignmentId" value={a.id} />
-                      <input type="hidden" name="status" value="completed" />
-                      <div>
-                        <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
-                        <input name="rpe" type="number" min={1} max={10} defaultValue={a.rpe ?? ""} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
-                        <input name="feeling" defaultValue={a.feeling ?? ""} placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="block text-[10px] text-muted mb-0.5">Notes</label>
-                        <input name="notes" defaultValue={a.notes ?? ""} placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                      </div>
-                      <div className="col-span-2 sm:col-span-4 flex justify-end">
-                        <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
-                      </div>
-                    </form>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* COACH ADVICE — standing training & nutrition guidance */}
-      {(isStaff || c.adviceItems.length > 0) && (
-        <section className="mb-6">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Coach advice</h2>
-          {isStaff && (
-            <form action={addAdvice} className="bg-card border border-border rounded-xl p-4 mb-3 flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-              <div className="sm:w-36">
-                <label className="block text-[11px] text-muted mb-1">Type</label>
-                <select name="kind" defaultValue="training" className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
-                  <option value="training">Training</option>
-                  <option value="nutrition">Nutrition</option>
-                  <option value="general">General</option>
-                </select>
-              </div>
-              <div className="flex-1">
-                <label className="block text-[11px] text-muted mb-1">Advice for this athlete</label>
-                <input name="body" required placeholder="e.g. add a Z2 run on rest days; aim 1.6g protein/kg" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-              </div>
-              <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium shrink-0">Post</button>
-            </form>
-          )}
-          {c.adviceItems.length === 0 ? (
-            <div className="text-xs text-muted">No advice yet.</div>
-          ) : (
-            <ul className="space-y-2">
-              {c.adviceItems.map((ad) => (
-                <li key={ad.id} className="bg-card border border-border rounded-xl p-3 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 mr-2 ${ad.kind === "nutrition" ? "bg-emerald-100 text-emerald-700" : ad.kind === "training" ? "bg-accent/10 text-accent" : "bg-zinc-100 text-zinc-600"}`}>{ad.kind}</span>
-                    <span className="text-sm">{ad.body}</span>
-                    <div className="text-[11px] text-muted mt-0.5">{formatDate(ad.createdAt)}</div>
-                  </div>
-                  {isStaff && (
-                    <form action={deleteAdvice} className="shrink-0">
-                      <input type="hidden" name="adviceId" value={ad.id} />
-                      <ConfirmSubmit message="Remove this advice?" className="text-xs text-muted hover:text-red-600 px-1">×</ConfirmSubmit>
-                    </form>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
       <section className="mb-6">
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Activity trends ({c.activities.length} sessions)</h2>
         <div className="grid grid-cols-3 gap-4">

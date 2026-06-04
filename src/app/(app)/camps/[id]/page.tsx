@@ -20,7 +20,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   const edit = isStaff ? editParam : undefined; // only staff get the edit form
 
   // All independent reads run in parallel — one DB round-trip instead of four.
-  const [camp, allCustomers, allWorkouts, coaches, myCustomerId] = await Promise.all([
+  const [camp, allCustomers, allWorkouts, coaches, myCustomerId, planRows] = await Promise.all([
     db.camp.findUnique({
       where: { id },
       include: {
@@ -45,6 +45,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     // Staff have a profile too, so they can join the camp and its classes as a
     // real participant — fetch their customer id like anyone else.
     getMyCustomerId(),
+    // The camp's live weekly plan (one row per member per day). Staff only.
+    isStaff
+      ? db.workoutAssignment.findMany({
+          where: { campId: id },
+          select: { scheduledDate: true, status: true, workout: { select: { id: true, name: true } } },
+          orderBy: { scheduledDate: "asc" },
+        })
+      : Promise.resolve([]),
   ]);
   if (!camp) notFound();
 
@@ -57,6 +65,30 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   // member; staff always can. Pending applicants can't yet.
   const canSeeInside = isStaff || myMembership?.status === "active";
   const memberIds = new Set(camp.members.map((m) => m.customerId));
+
+  // Collapse the per-member plan rows into one entry per (day, workout) for the
+  // "current plan" summary — with how many members have completed it.
+  const planByDay = new Map<string, { date: Date; workoutName: string; total: number; done: number }>();
+  for (const r of planRows) {
+    if (!r.scheduledDate) continue;
+    const key = `${r.scheduledDate.toISOString().slice(0, 10)}|${r.workout.id}`;
+    const entry = planByDay.get(key) ?? { date: r.scheduledDate, workoutName: r.workout.name, total: 0, done: 0 };
+    entry.total += 1;
+    if (r.status === "completed") entry.done += 1;
+    planByDay.set(key, entry);
+  }
+  const planDays = [...planByDay.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Default the plan builder to the upcoming Monday (UTC, to match how
+  // scheduledDate is stored from a YYYY-MM-DD input).
+  const nextMonday = (() => {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    const day = d.getUTCDay(); // 0=Sun..6=Sat
+    d.setUTCDate(d.getUTCDate() + ((8 - day) % 7 || 7));
+    return d.toISOString().slice(0, 10);
+  })();
+  const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   async function updateCamp(formData: FormData) {
     "use server";
@@ -160,6 +192,52 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     await db.campMember.deleteMany({ where: { campId: id, customerId: acct.customerId } });
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Left the camp"));
+  }
+  // Coach builds a Mon–Sun week grid and fans it out to every active member:
+  // one WorkoutAssignment per (member, day-with-a-workout). Idempotent — keyed
+  // on (campId, customerId, scheduledDate) so re-publishing edits in place
+  // without wiping a member's completion log; cleared days are removed.
+  async function assignCampPlan(formData: FormData) {
+    "use server";
+    const actor = await requireStaff();
+    const weekStart = String(formData.get("weekStart") ?? "").trim();
+    if (!weekStart) return;
+    const members = await db.campMember.findMany({
+      where: { campId: id, status: "active" },
+      select: { customerId: true },
+    });
+    if (members.length === 0) redirect(flashUrl(`/camps/${id}`, "No active members to assign to yet"));
+    const memberIdList = members.map((m) => m.customerId);
+    const base = new Date(weekStart); // YYYY-MM-DD → UTC midnight
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(base.getTime() + d * 86_400_000);
+      const workoutId = String(formData.get(`dayWorkout_${d}`) ?? "").trim();
+      const note = String(formData.get(`dayNote_${d}`) ?? "").trim() || null;
+      if (!workoutId) {
+        // Rest day — drop any not-yet-done camp assignment on this date.
+        await db.workoutAssignment.deleteMany({
+          where: { campId: id, scheduledDate: date, status: { not: "completed" }, customerId: { in: memberIdList } },
+        });
+        continue;
+      }
+      for (const customerId of memberIdList) {
+        await db.workoutAssignment.upsert({
+          where: { campId_customerId_scheduledDate: { campId: id, customerId, scheduledDate: date } },
+          create: { campId: id, customerId, workoutId, scheduledDate: date, assignedById: actor.id, coachSuggestion: note },
+          update: { workoutId, coachSuggestion: note }, // leave status/log untouched
+        });
+      }
+    }
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, `Weekly plan assigned to ${members.length} member${members.length === 1 ? "" : "s"}`));
+  }
+  // Wipe the camp's plan, keeping any already-completed sessions for the record.
+  async function clearCampPlan() {
+    "use server";
+    await requireStaff();
+    await db.workoutAssignment.deleteMany({ where: { campId: id, status: { not: "completed" } } });
+    revalidatePath(`/camps/${id}`);
+    redirect(flashUrl(`/camps/${id}`, "Plan cleared"));
   }
   async function addClass(formData: FormData) {
     "use server";
@@ -299,6 +377,78 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             </ConfirmSubmit>
           </form>
         </>
+      )}
+
+      {/* WEEKLY TRAINING PLAN — coach builds a Mon–Sun grid that members train
+          on their off-days; it lands on each member's dashboard. Staff only. */}
+      {isStaff && (
+        <section className="mb-6">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Weekly training plan</h2>
+            <span className="text-xs text-muted">For the days between classes — pushed to every member&apos;s dashboard</span>
+          </div>
+
+          <form action={assignCampPlan} className="bg-card border border-border rounded-xl p-5">
+            <div className="flex flex-wrap items-end gap-3 mb-4">
+              <div>
+                <label className="block text-[11px] text-muted mb-1">Week starting (Mon)</label>
+                <input name="weekStart" type="date" required defaultValue={nextMonday} className="rounded-lg border border-border px-3 py-2 text-sm" />
+              </div>
+              <p className="text-xs text-muted flex-1 min-w-[12rem]">
+                Pick a workout for each day (leave a day blank for a rest day). Assigning is safe to repeat —
+                it updates the plan without wiping what members have already completed.
+              </p>
+            </div>
+
+            {allWorkouts.length === 0 ? (
+              <div className="text-sm text-muted border border-dashed border-border rounded-lg p-4 text-center">
+                Add workouts to the library first — then you can build the week here.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {WEEKDAYS.map((label, d) => (
+                  <div key={d} className="border border-border rounded-lg p-3">
+                    <div className="text-xs font-semibold mb-1.5">{label}</div>
+                    <select name={`dayWorkout_${d}`} defaultValue="" className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm mb-2">
+                      <option value="">Rest day</option>
+                      {allWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </select>
+                    <input name={`dayNote_${d}`} placeholder="note (optional)" className="w-full rounded-lg border border-border px-2 py-1 text-xs" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between mt-4">
+              <span className="text-xs text-muted">{activeMembers.length} active member{activeMembers.length === 1 ? "" : "s"} will receive this plan</span>
+              <button type="submit" disabled={allWorkouts.length === 0 || activeMembers.length === 0} className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
+                Assign to {activeMembers.length} member{activeMembers.length === 1 ? "" : "s"}
+              </button>
+            </div>
+          </form>
+
+          {/* What's currently live */}
+          {planDays.length > 0 && (
+            <div className="mt-3 bg-card border border-border rounded-xl p-4">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="text-xs font-medium text-muted uppercase tracking-wide">Currently assigned</div>
+                <form action={clearCampPlan}>
+                  <ConfirmSubmit message="Clear the camp's training plan? Sessions members already completed are kept." className="text-xs text-muted hover:text-red-600">
+                    Clear plan
+                  </ConfirmSubmit>
+                </form>
+              </div>
+              <ul className="divide-y divide-border">
+                {planDays.map((p, i) => (
+                  <li key={i} className="flex items-center justify-between py-1.5 text-sm">
+                    <span><span className="text-muted tabular-nums mr-2">{formatDate(p.date)}</span>{p.workoutName}</span>
+                    <span className="text-xs text-muted tabular-nums">{p.done}/{p.total} done</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
