@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { GripVertical, Minus, Plus } from "lucide-react";
+import { GripVertical, Minus, Plus, Copy } from "lucide-react";
 import { toast } from "@/components/Toaster";
 
 type Item = { workoutId: string; rounds: number; card: React.ReactNode };
@@ -54,6 +54,22 @@ export default function ClassWorkoutList({ classId, items }: { classId: string; 
     persistOrder(next);
   }
 
+  async function duplicate(workoutId: string) {
+    try {
+      const res = await fetch(`/api/class/${classId}/workouts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ duplicateOf: workoutId }),
+      });
+      if (!res.ok) throw new Error("failed");
+      toast("Workout duplicated — tweak the copy below");
+    } catch {
+      toast("Could not duplicate the workout.");
+    } finally {
+      router.refresh();
+    }
+  }
+
   async function setRoundsFor(workoutId: string, value: number) {
     const v = Math.max(1, Math.min(50, value));
     setRounds((r) => ({ ...r, [workoutId]: v }));
@@ -91,7 +107,10 @@ export default function ClassWorkoutList({ classId, items }: { classId: string; 
                 <GripVertical size={14} /> Drag to reorder
               </span>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted">Rounds</span>
+                <button type="button" onClick={() => duplicate(it.workoutId)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted hover:text-accent hover:border-accent" title="Duplicate this workout (creates an editable copy on the class)">
+                  <Copy size={12} /> Duplicate
+                </button>
+                <span className="ml-1 text-xs text-muted">Rounds</span>
                 <button type="button" onClick={() => setRoundsFor(it.workoutId, r - 1)} disabled={r <= 1} className="w-6 h-6 rounded-md border border-border text-muted hover:bg-background flex items-center justify-center disabled:opacity-40"><Minus size={12} /></button>
                 <span className="w-6 text-center text-sm font-medium tabular-nums">{r}</span>
                 <button type="button" onClick={() => setRoundsFor(it.workoutId, r + 1)} className="w-6 h-6 rounded-md border border-border text-muted hover:bg-background flex items-center justify-center"><Plus size={12} /></button>

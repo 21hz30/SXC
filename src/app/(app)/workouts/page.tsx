@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { categoryLabel } from "@/domain/exercises";
+import { cloneWorkout } from "@/domain/workouts";
 import { getMyCustomerId, requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,23 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
     redirect(`/workouts/${w.id}`);
   }
 
+  // Clone a workout (with its exercises) and open the copy to tweak — handy for
+  // making a "pro" variant of an "open" workout (more rounds, less rest).
+  async function duplicateWorkout(formData: FormData) {
+    "use server";
+    const u = await requireUser();
+    const workoutId = String(formData.get("workoutId") ?? "");
+    if (!workoutId) redirect("/workouts");
+    const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true } });
+    const staff = u.role === "admin" || u.role === "coach";
+    const mine = staff ? null : await getMyCustomerId();
+    const ok = w && (staff ? w.ownerCustomerId === null : w.ownerCustomerId === mine);
+    if (!ok) redirect("/workouts");
+    const copy = await cloneWorkout({ user: u }, workoutId);
+    revalidatePath("/workouts");
+    redirect(`/workouts/${copy.id}`);
+  }
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <header className="mb-6 flex items-end justify-between">
@@ -80,29 +98,35 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
             .sort((a, b) => b.getTime() - a.getTime())[0];
           const itemSummary = w.items.map((i) => categoryLabel(i.category)).slice(0, 6).join(" · ");
           return (
-            <Link key={w.id} href={`/workouts/${w.id}`} className="block bg-card border border-border rounded-xl p-5 hover:border-accent transition">
+            <div key={w.id} className="block bg-card border border-border rounded-xl p-5 hover:border-accent transition">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-lg font-semibold">{w.name}</div>
+                  <Link href={`/workouts/${w.id}`} className="text-lg font-semibold hover:text-accent">{w.name}</Link>
                   {w.description && <div className="text-sm text-muted mt-0.5">{w.description}</div>}
                 </div>
-                <div className="text-right text-xs text-muted shrink-0">
-                  <div>{w.items.length} exercises</div>
-                  <div>{w.classes.length} classes</div>
-                  <div>{lastUsed ? `last: ${formatDate(lastUsed)}` : "never used"}</div>
+                <div className="flex items-start gap-3 shrink-0">
+                  <div className="text-right text-xs text-muted">
+                    <div>{w.items.length} exercises</div>
+                    <div>{w.classes.length} classes</div>
+                    <div>{lastUsed ? `last: ${formatDate(lastUsed)}` : "never used"}</div>
+                  </div>
+                  <form action={duplicateWorkout}>
+                    <input type="hidden" name="workoutId" value={w.id} />
+                    <button type="submit" className="text-xs rounded-lg border border-border px-2.5 py-1 text-muted hover:text-accent hover:border-accent">Duplicate</button>
+                  </form>
                 </div>
               </div>
               {itemSummary && (
-                <div className="text-xs text-muted mt-3 truncate">
+                <Link href={`/workouts/${w.id}`} className="block text-xs text-muted mt-3 truncate hover:text-accent">
                   {itemSummary}{w.items.length > 6 ? " …" : ""}
-                </div>
+                </Link>
               )}
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {(w.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean).map((t) => (
                   <span key={t} className="text-xs bg-accent/10 text-accent rounded-full px-2 py-0.5">{t}</span>
                 ))}
               </div>
-            </Link>
+            </div>
           );
         })}
         {workouts.length === 0 && (

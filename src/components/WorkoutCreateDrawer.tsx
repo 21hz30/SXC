@@ -24,10 +24,11 @@ export default function WorkoutCreateDrawer({ classId }: { classId: string }) {
   const [items, setItems] = useState<Item[]>([]);
   const [showAdd, setShowAdd] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [tags, setTags] = useState("");
   const [saving, setSaving] = useState(false);
 
   function reset() {
-    setName(""); setDescription(""); setItems([]); setShowAdd(true); setEditingId(null);
+    setName(""); setDescription(""); setItems([]); setShowAdd(true); setEditingId(null); setTags("");
   }
   function close() { setOpen(false); }
 
@@ -41,6 +42,7 @@ export default function WorkoutCreateDrawer({ classId }: { classId: string }) {
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || null,
+          tags: tags.trim() || null,
           items: items.map(({ id: _id, ...rest }) => rest),
         }),
       });
@@ -83,6 +85,11 @@ export default function WorkoutCreateDrawer({ classId }: { classId: string }) {
               <div>
                 <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Description (optional)</label>
                 <input value={description} onChange={(e) => setDescription(e.target.value)} className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Tags (optional)</label>
+                <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="comma-separated, e.g. pro, strength" className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent" />
+                <div className="text-[11px] text-muted mt-1">Tags help you quickly find this workout later (not tied to a camp).</div>
               </div>
 
               <div>

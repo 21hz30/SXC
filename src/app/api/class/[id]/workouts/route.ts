@@ -2,20 +2,30 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { cloneWorkout } from "@/domain/workouts";
 import type { WorkoutItemInput } from "@/domain/exercises";
 
 // POST /api/class/[id]/workouts
-//   { workoutId }                        → link an existing library workout
-//   { name, description?, items: [...] } → create a NEW shared workout (with its
-//                                          exercises) and link it, in one step
+//   { workoutId }                               → link an existing library workout
+//   { duplicateOf }                             → clone a workout + link the copy
+//   { name, description?, tags?, items: [...] } → create a NEW shared workout
+//                                                 (with its exercises) and link it
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await requireStaff();
+  const staff = await requireStaff();
   const { id } = await params;
   const body = (await req.json()) as
     | { workoutId: string }
-    | { name: string; description?: string | null; items?: WorkoutItemInput[] };
+    | { duplicateOf: string }
+    | { name: string; description?: string | null; tags?: string | null; items?: WorkoutItemInput[] };
 
   let workoutId: string | undefined = (body as { workoutId?: string }).workoutId;
+
+  // Duplicate branch: deep-copy an existing workout, then link the copy.
+  const duplicateOf = (body as { duplicateOf?: string }).duplicateOf;
+  if (!workoutId && duplicateOf) {
+    const copy = await cloneWorkout({ user: staff }, duplicateOf);
+    workoutId = copy.id;
+  }
 
   // Create-with-items branch: build the workout (and its exercises) up front.
   if (!workoutId && "name" in body) {
@@ -26,6 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: {
         name,
         description: (body.description ?? "").toString().trim() || null,
+        tags: (body.tags ?? "").toString().trim() || null,
         ownerCustomerId: null, // shared library workout
         items: {
           create: items.map((it, i) => ({

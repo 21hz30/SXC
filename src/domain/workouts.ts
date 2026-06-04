@@ -195,6 +195,42 @@ export async function adjustClassWorkout(
   return { workoutId: clone.id, cloned: true };
 }
 
+/** Deep-copy a workout (name + " (copy)", description, tags, all exercises),
+ *  preserving its owner. Returns the new workout id. */
+export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: string }> {
+  const orig = await db.workout.findUnique({
+    where: { id: workoutId },
+    include: { items: { orderBy: { order: "asc" } } },
+  });
+  if (!orig) throw new Error("workout not found");
+  const copy = await db.workout.create({
+    data: {
+      name: `${orig.name} (copy)`,
+      description: orig.description,
+      tags: orig.tags,
+      ownerCustomerId: orig.ownerCustomerId,
+      items: {
+        create: orig.items.map((it, i) => ({
+          order: i,
+          category: it.category,
+          label: it.label,
+          distanceM: it.distanceM,
+          timeSec: it.timeSec,
+          weightKg: it.weightKg,
+          reps: it.reps,
+          sets: it.sets,
+          paceSecPerKm: it.paceSecPerKm,
+          heightM: it.heightM,
+          notes: it.notes,
+        })),
+      },
+    },
+    select: { id: true },
+  });
+  bust();
+  return copy;
+}
+
 export async function createWorkout(_ctx: Ctx, input: { name: string; description?: string | null }) {
   const w = await db.workout.create({
     data: { name: input.name.trim(), description: input.description?.trim() || null },

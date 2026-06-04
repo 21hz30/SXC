@@ -13,6 +13,7 @@ import { listWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
 import ClassWorkoutList from "@/components/ClassWorkoutList";
 import WorkoutCreateDrawer from "@/components/WorkoutCreateDrawer";
+import AddWorkoutPicker from "@/components/AddWorkoutPicker";
 import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
 import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import { canAccessCamp } from "@/lib/access";
@@ -188,7 +189,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       select: { customerId: true, publishedAt: true, updatedAt: true },
     }),
     listWatchData({ user }, id) as Promise<WatchRow[]>,
-    db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true, tags: true } }),
   ]);
   const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
   const reportByCustomer = new Map(reports.map((r) => [r.customerId, r]));
@@ -208,11 +209,15 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
 
-  // The whole shared library is shown in the picker; ones already on this class
-  // are flagged (and disabled) rather than hidden, so a coach can always see
-  // their full library. To repeat a workout, bump its "rounds" on its card.
-  const libraryOptions = allLibraryWorkouts.map((w) => ({ ...w, assigned: assignedWorkoutIds.has(w.id) }));
-  const anyAddable = libraryOptions.some((w) => !w.assigned);
+  // The whole shared library is shown in the picker (with a tag filter); ones
+  // already on this class are flagged so a coach always sees their full library.
+  // To repeat a workout, bump its "rounds" on its card.
+  const libraryOptions = allLibraryWorkouts.map((w) => ({
+    id: w.id,
+    name: w.name,
+    tags: (w.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
+    assigned: assignedWorkoutIds.has(w.id),
+  }));
 
   async function updateClass(formData: FormData) {
     "use server";
@@ -270,21 +275,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     await db.rosterEntry.delete({ where: { id: entryId } });
     revalidatePath(`/classes/${id}`);
     redirect(flashUrl(`/classes/${id}`, "Removed from roster"));
-  }
-
-  // Attach an existing workout to this class (appended to the end).
-  async function addWorkoutToClass(formData: FormData) {
-    "use server";
-    await requireCoach();
-    const workoutId = String(formData.get("workoutId") ?? "");
-    if (!workoutId) return;
-    const already = await db.classWorkout.findFirst({ where: { classId: id, workoutId } });
-    if (!already) {
-      const last = await db.classWorkout.findFirst({ where: { classId: id }, orderBy: { order: "desc" } });
-      await db.classWorkout.create({ data: { classId: id, workoutId, order: (last?.order ?? -1) + 1 } });
-    }
-    revalidatePath(`/classes/${id}`);
-    redirect(flashUrl(`/classes/${id}`, already ? "Workout already on this class" : "Workout added"));
   }
 
   // Generate AI post-class reports for every rostered athlete who has a
@@ -397,19 +387,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
         {/* Add an existing workout, or create a new one — both attach to this class */}
         <div className="bg-card border border-border rounded-xl p-4 mb-4 grid md:grid-cols-2 gap-4">
-          <form action={addWorkoutToClass} className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted uppercase tracking-wide">Add an existing workout</label>
-            <div className="flex gap-2">
-              <select name="workoutId" required defaultValue="" className="flex-1 rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
-                <option value="" disabled>Pick a workout…</option>
-                {libraryOptions.map((w) => <option key={w.id} value={w.id} disabled={w.assigned}>{w.name}{w.assigned ? " — already on this class" : ""}</option>)}
-              </select>
-              <button type="submit" disabled={!anyAddable} className="rounded-lg bg-foreground text-white px-3 text-sm disabled:opacity-40">Add</button>
-            </div>
-            {libraryOptions.length === 0
-              ? <span className="text-[11px] text-muted">No workouts in your library yet — create one on the right.</span>
-              : !anyAddable && <span className="text-[11px] text-muted">All your workouts are already on this class. To repeat one, raise its “Rounds” on its card below.</span>}
-          </form>
+          <AddWorkoutPicker classId={cls.id} workouts={libraryOptions} />
 
           <div className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
             <label className="text-xs font-medium text-muted uppercase tracking-wide">Or create a new workout</label>
