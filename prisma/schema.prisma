@@ -348,6 +348,8 @@ model ClassWorkout {
   workoutId String
   workout   Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
   order     Int     @default(0)
+  /// How many times this workout is performed in the class (e.g. 4 rounds).
+  rounds    Int     @default(1)
   createdAt DateTime @default(now())
 
   @@unique([classId, workoutId])

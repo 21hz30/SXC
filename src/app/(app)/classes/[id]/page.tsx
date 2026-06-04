@@ -11,6 +11,7 @@ import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
 import { listWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
+import ClassWorkoutList from "@/components/ClassWorkoutList";
 import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
 import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import { canAccessCamp } from "@/lib/access";
@@ -135,7 +136,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             <div className="space-y-4">
               {cls.workouts.map((cw) => (
                 <div key={cw.id} className="bg-card border border-border rounded-xl p-5">
-                  <div className="font-semibold">{cw.workout.name}</div>
+                  <div className="font-semibold">{cw.workout.name}{cw.rounds > 1 && <span className="ml-2 text-xs font-medium text-accent">× {cw.rounds} rounds</span>}</div>
                   {cw.workout.description && <div className="text-sm text-muted mt-0.5">{cw.workout.description}</div>}
                   <ul className="mt-3 divide-y divide-border">
                     {cw.workout.items.map((it) => {
@@ -435,44 +436,49 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             No workout assigned yet — add an existing one or create a new one above.
           </div>
         ) : (
-          <div className="space-y-6">
-            {cls.workouts.map((cw, idx) => {
+          <ClassWorkoutList
+            classId={cls.id}
+            items={cls.workouts.map((cw, idx) => {
               const fb = workoutFeedbackData[idx];
-              return (
-                <div key={cw.id} className="bg-card border border-border rounded-xl overflow-hidden">
-                  <ClassWorkoutEditor
-                    classId={cls.id}
-                    workoutId={cw.workoutId}
-                    workoutName={cw.workout.name}
-                    description={cw.workout.description}
-                    initialItems={cw.workout.items.map((it) => ({
-                      id: it.id,
-                      category: it.category as never,
-                      label: it.label,
-                      distanceM: it.distanceM,
-                      timeSec: it.timeSec,
-                      weightKg: it.weightKg,
-                      reps: it.reps,
-                      sets: it.sets,
-                      paceSecPerKm: it.paceSecPerKm,
-                      heightM: it.heightM,
-                      notes: it.notes,
-                    }))}
-                  />
-                  <div className="px-5 pt-4 pb-1 text-[11px] font-medium text-muted uppercase tracking-wide">
-                    Athlete feedback for this workout
+              return {
+                workoutId: cw.workoutId,
+                rounds: cw.rounds,
+                card: (
+                  <div className="bg-card border border-border rounded-xl overflow-hidden">
+                    <ClassWorkoutEditor
+                      classId={cls.id}
+                      workoutId={cw.workoutId}
+                      workoutName={cw.workout.name}
+                      description={cw.workout.description}
+                      initialItems={cw.workout.items.map((it) => ({
+                        id: it.id,
+                        category: it.category as never,
+                        label: it.label,
+                        distanceM: it.distanceM,
+                        timeSec: it.timeSec,
+                        weightKg: it.weightKg,
+                        reps: it.reps,
+                        sets: it.sets,
+                        paceSecPerKm: it.paceSecPerKm,
+                        heightM: it.heightM,
+                        notes: it.notes,
+                      }))}
+                    />
+                    <div className="px-5 pt-4 pb-1 text-[11px] font-medium text-muted uppercase tracking-wide">
+                      Athlete feedback for this workout
+                    </div>
+                    <WorkoutFeedbackPanel
+                      classId={cls.id}
+                      workoutId={cw.workoutId}
+                      members={members}
+                      exercises={fb.exercises}
+                      initial={fb.initial}
+                    />
                   </div>
-                  <WorkoutFeedbackPanel
-                    classId={cls.id}
-                    workoutId={cw.workoutId}
-                    members={members}
-                    exercises={fb.exercises}
-                    initial={fb.initial}
-                  />
-                </div>
-              );
+                ),
+              };
             })}
-          </div>
+          />
         )}
       </section>
 

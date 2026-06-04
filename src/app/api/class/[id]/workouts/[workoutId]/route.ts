@@ -1,9 +1,24 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireStaff } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { adjustClassWorkout } from "@/domain/workouts";
 import type { WorkoutItemInput } from "@/domain/exercises";
+
+// PATCH /api/class/[id]/workouts/[workoutId] → update this attachment's round count
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string; workoutId: string }> }) {
+  await requireStaff();
+  const { id, workoutId } = await params;
+  const body = (await req.json().catch(() => ({}))) as { rounds?: number };
+  if (body.rounds !== undefined) {
+    const rounds = Math.max(1, Math.min(50, Math.floor(Number(body.rounds) || 1)));
+    await db.classWorkout.updateMany({ where: { classId: id, workoutId }, data: { rounds } });
+  }
+  const cls = await db.class.findUnique({ where: { id }, select: { campId: true } });
+  revalidatePath(`/classes/${id}`);
+  if (cls?.campId) revalidatePath(`/camps/${cls.campId}`);
+  return Response.json({ ok: true });
+}
 
 // PUT /api/class/[id]/workouts/[workoutId] → adjust this class's exercises
 // (copy-on-write: clones a shared workout so other classes are untouched).
