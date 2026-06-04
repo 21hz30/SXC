@@ -288,8 +288,8 @@ export function ItemForm({
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">{category === "other" ? "Exercise name" : "Label (optional)"}</label>
-          <input value={values.label ?? ""} onChange={(e) => setField("label", e.target.value)} placeholder={category === "other" ? "Type a custom exercise, e.g. Box jumps" : "e.g. Round 1"} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
+          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Label (optional)</label>
+          <input value={values.label ?? ""} onChange={(e) => setField("label", e.target.value)} placeholder="e.g. Round 1" className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
         </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

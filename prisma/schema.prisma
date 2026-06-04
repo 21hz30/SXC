@@ -125,9 +125,8 @@ model WorkoutAssignment {
   feeling       String?
   notes         String?
   resultsJson   String?  // per-exercise achieved: { "<itemId>": "value" }
-  coachSuggestion String?  // training note for the day
-  foodAdvice    String?    // eating suggestion
-  restAdvice    String?    // recovery / rest suggestion
+  coachSuggestion String?
+  foodAdvice    String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -321,8 +320,6 @@ model Workout {
   classes     ClassWorkout[]
   performances Performance[]
   assignments WorkoutAssignment[]
-
-  @@index([ownerCustomerId])
 }
 
 model WorkoutItem {

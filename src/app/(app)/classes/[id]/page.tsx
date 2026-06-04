@@ -11,7 +11,6 @@ import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
 import { listWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
-import WorkoutCreateDrawer from "@/components/WorkoutCreateDrawer";
 import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
 import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import { canAccessCamp } from "@/lib/access";
@@ -53,11 +52,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
     const myEntry = myCustomerId ? cls.roster.find((r) => r.customerId === myCustomerId) ?? null : null;
     const isFull = cls.roster.length >= cls.capacity;
-    // Once the class has started, the athlete can tell their coach how it felt.
-    const classStarted = cls.startsAt.getTime() <= Date.now();
-    const myPerf = myCustomerId
-      ? await db.performance.findFirst({ where: { classId: id, customerId: myCustomerId, workoutId: null } })
-      : null;
 
     async function signUp() {
       "use server";
@@ -79,30 +73,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       if (a?.customerId) await db.rosterEntry.deleteMany({ where: { classId: id, customerId: a.customerId } });
       revalidatePath(`/classes/${id}`);
       redirect(flashUrl(`/classes/${id}`, "Sign-up cancelled"));
-    }
-    // Athlete's own post-class feedback. Scoped to their own customer id — never
-    // trusts a client-supplied id — and only ever writes the class-overall row.
-    async function submitFeedback(formData: FormData) {
-      "use server";
-      const u = await requireUser();
-      const mine = (await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } }))?.customerId;
-      if (!mine) redirect("/profile");
-      const num = (k: string) => { const v = String(formData.get(k) ?? "").trim(); return v ? Number(v) : null; };
-      const data = {
-        status: "completed",
-        rpe: num("rpe"),
-        fatiguePct: num("fatiguePct"),
-        feeling: String(formData.get("feeling") ?? "").trim() || null,
-        injuryNote: String(formData.get("injuryNote") ?? "").trim() || null,
-        notes: String(formData.get("notes") ?? "").trim() || null,
-      };
-      // The class-overall row has workoutId = null, which Prisma can't target
-      // through its compound-unique upsert — so find-then-update/create.
-      const existing = await db.performance.findFirst({ where: { classId: id, customerId: mine, workoutId: null }, select: { id: true } });
-      if (existing) await db.performance.update({ where: { id: existing.id }, data });
-      else await db.performance.create({ data: { classId: id, customerId: mine, workoutId: null, ...data } });
-      revalidatePath(`/classes/${id}`);
-      redirect(flashUrl(`/classes/${id}`, "Thanks — your feedback is saved"));
     }
 
     return (
@@ -153,49 +123,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             </form>
           )}
         </div>
-
-        {/* Post-class feedback — appears once the session has started */}
-        {classStarted && (
-          <div className="bg-card border border-border rounded-xl p-5 mb-6">
-            <div className="flex items-baseline justify-between mb-1">
-              <h2 className="text-sm font-medium uppercase tracking-wide text-muted">How did it go?</h2>
-              {myPerf && <span className="text-[11px] font-medium text-emerald-700">✓ Submitted</span>}
-            </div>
-            <p className="text-xs text-muted mb-3">Tell your coach how this session felt — it shapes your next plan and your post-class report.</p>
-            <form action={submitFeedback} className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
-              <div>
-                <label className="block text-[11px] text-muted mb-1">Effort (RPE 1–10)</label>
-                <input name="rpe" type="number" min={1} max={10} defaultValue={myPerf?.rpe ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-              </div>
-              <div>
-                <label className="block text-[11px] text-muted mb-1">Tiredness</label>
-                <select name="fatiguePct" defaultValue={myPerf?.fatiguePct != null ? String(myPerf.fatiguePct) : ""} className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
-                  <option value="">—</option>
-                  <option value="15">Fresh</option>
-                  <option value="40">A bit tired</option>
-                  <option value="65">Tired</option>
-                  <option value="85">Very tired</option>
-                  <option value="95">Wrecked</option>
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label className="block text-[11px] text-muted mb-1">Feeling</label>
-                <input name="feeling" defaultValue={myPerf?.feeling ?? ""} placeholder="e.g. legs heavy, strong on the row" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-              </div>
-              <div className="col-span-2 sm:col-span-3">
-                <label className="block text-[11px] text-muted mb-1">Notes (optional)</label>
-                <input name="notes" defaultValue={myPerf?.notes ?? ""} placeholder="anything worth noting" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-              </div>
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-[11px] text-muted mb-1">Injury? (optional)</label>
-                <input name="injuryNote" defaultValue={myPerf?.injuryNote ?? ""} placeholder="any niggle" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
-              </div>
-              <div className="col-span-2 sm:col-span-4 flex justify-end">
-                <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">{myPerf ? "Update feedback" : "Submit feedback"}</button>
-              </div>
-            </form>
-          </div>
-        )}
 
         {/* Exercise plan — read-only */}
         <section>
@@ -385,6 +312,20 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     redirect(flashUrl(`/classes/${id}`, msg));
   }
 
+  // Create a brand-new workout and attach it to this class in one step.
+  async function createWorkoutForClass(formData: FormData) {
+    "use server";
+    await requireCoach();
+    const name = String(formData.get("name") ?? "").trim();
+    if (!name) return;
+    const description = String(formData.get("description") ?? "").trim() || null;
+    const w = await db.workout.create({ data: { name, description } });
+    const last = await db.classWorkout.findFirst({ where: { classId: id }, orderBy: { order: "desc" } });
+    await db.classWorkout.create({ data: { classId: id, workoutId: w.id, order: (last?.order ?? -1) + 1 } });
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, `Workout "${name}" created and added`));
+  }
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
@@ -478,11 +419,15 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             {availableWorkouts.length === 0 && <span className="text-[11px] text-muted">All workouts are already on this class.</span>}
           </form>
 
-          <div className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
+          <form action={createWorkoutForClass} className="flex flex-col gap-1.5 md:border-l md:border-border md:pl-4">
             <label className="text-xs font-medium text-muted uppercase tracking-wide">Or create a new workout</label>
-            <WorkoutCreateDrawer classId={cls.id} />
-            <span className="text-[11px] text-muted">Build its exercises in the panel, then save — it&apos;s added here and saved to your workout library.</span>
-          </div>
+            <input name="name" required placeholder="Workout name" className="rounded-lg border border-border px-2 py-1.5 text-sm" />
+            <div className="flex gap-2">
+              <input name="description" placeholder="Description (optional)" className="flex-1 rounded-lg border border-border px-2 py-1.5 text-sm" />
+              <button type="submit" className="rounded-lg bg-foreground text-white px-3 text-sm">Create &amp; add</button>
+            </div>
+            <span className="text-[11px] text-muted">Stations can be added after it&apos;s created, below.</span>
+          </form>
         </div>
 
         {cls.workouts.length === 0 ? (

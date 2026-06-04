@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formatSec } from "@/lib/utils";
-import { Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { requireCoach } from "@/lib/auth";
 import { customerScope, nonStaffCustomerWhere } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
@@ -12,15 +12,16 @@ import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; error?: string }> }) {
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; error?: string }> }) {
   const user = await requireCoach();
-  const { new: isNew, error } = await searchParams;
+  const { new: isNew, edit, error } = await searchParams;
   // Exclude staff (admin/coach) profiles — they live on the Team page.
   const customers = await db.customer.findMany({
     where: { ...customerScope(user), ...nonStaffCustomerWhere() },
     orderBy: { name: "asc" },
     include: { rosterEntries: true },
   });
+  const editingCustomer = edit ? customers.find((c) => c.id === edit) ?? null : null;
 
   async function createCustomer(formData: FormData) {
     "use server";
@@ -53,6 +54,48 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     });
     revalidatePath("/customers");
     redirect(flashUrl(`/customers/${c.id}`, `${c.name} added`));
+  }
+
+  async function updateCustomer(formData: FormData) {
+    "use server";
+    await requireCoach();
+    const customerId = String(formData.get("customerId") ?? "");
+    const name = String(formData.get("name") ?? "").trim();
+    if (!customerId || !name) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=name`);
+    const email = String(formData.get("email") ?? "").trim() || null;
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    const tags = String(formData.get("tags") ?? "").trim() || null;
+
+    if (phone) {
+      const dupePhone = await db.customer.findFirst({
+        where: { phone, NOT: { id: customerId } },
+        select: { id: true },
+      });
+      if (dupePhone) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=phone`);
+    }
+    const sameName = await db.customer.findFirst({
+      where: {
+        name: { equals: name, mode: "insensitive" },
+        NOT: { id: customerId },
+      },
+      select: { id: true },
+    });
+    if (sameName && !phone && !email && !tags) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=dupename`);
+
+    const updated = await db.customer.update({
+      where: { id: customerId },
+      data: {
+        name,
+        email,
+        phone,
+        age: Number(formData.get("age")) || null,
+        weightKg: Number(formData.get("weightKg")) || null,
+        heightCm: Number(formData.get("heightCm")) || null,
+        tags,
+      },
+    });
+    revalidatePath("/customers");
+    redirect(flashUrl("/customers", `${updated.name} updated`));
   }
 
   async function deleteCustomer(formData: FormData) {
@@ -110,6 +153,38 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         </form>
       )}
 
+      {editingCustomer && (
+        <form action={updateCustomer} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
+          {error && (
+            <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error === "phone"
+                ? "That phone number is already used by another customer."
+                : error === "dupename"
+                ? "A customer with this name already exists. Add a phone, email, or tag to tell them apart."
+                : "Please enter a name."}
+            </div>
+          )}
+          <input type="hidden" name="customerId" value={editingCustomer.id} />
+          <div className="col-span-2">
+            <label className="block text-sm font-medium mb-1.5">Name *</label>
+            <input name="name" required defaultValue={editingCustomer.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div><label className="block text-sm font-medium mb-1.5">Email</label><input name="email" type="email" defaultValue={editingCustomer.email ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Phone</label>
+            <input name="phone" defaultValue={editingCustomer.phone ?? ""} placeholder="Used to keep customers unique" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div><label className="block text-sm font-medium mb-1.5">Age</label><input name="age" type="number" defaultValue={editingCustomer.age ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div><label className="block text-sm font-medium mb-1.5">Weight (kg)</label><input name="weightKg" type="number" step="0.1" defaultValue={editingCustomer.weightKg ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div><label className="block text-sm font-medium mb-1.5">Height (cm)</label><input name="heightCm" type="number" step="0.1" defaultValue={editingCustomer.heightCm ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div><label className="block text-sm font-medium mb-1.5">Tags (comma-separated)</label><input name="tags" defaultValue={editingCustomer.tags ?? ""} placeholder="competing,Oct" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          <div className="col-span-2 flex gap-2 justify-end">
+            <Link href="/customers" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
+            <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Save changes</button>
+          </div>
+        </form>
+      )}
+
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-background text-muted">
@@ -135,15 +210,20 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   <td className="px-5 py-4 tabular-nums">{formatSec(c.hyroxPbSec)}</td>
                   <td className="px-5 py-4 text-right tabular-nums">{attended}/{total}</td>
                   <td className="px-5 py-4 text-right">
-                    <form action={deleteCustomer}>
-                      <input type="hidden" name="customerId" value={c.id} />
-                      <ConfirmSubmit
-                        message={`Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`}
-                        className="text-muted hover:text-red-600 opacity-0 group-hover:opacity-100"
-                      >
-                        <Trash2 size={14} />
-                      </ConfirmSubmit>
-                    </form>
+                    <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100">
+                      <Link href={`/customers?edit=${c.id}`} className="text-muted hover:text-foreground" aria-label={`Edit ${c.name}`}>
+                        <Pencil size={14} />
+                      </Link>
+                      <form action={deleteCustomer}>
+                        <input type="hidden" name="customerId" value={c.id} />
+                        <ConfirmSubmit
+                          message={`Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`}
+                          className="text-muted hover:text-red-600"
+                        >
+                          <Trash2 size={14} />
+                        </ConfirmSubmit>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               );

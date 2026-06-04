@@ -42,11 +42,6 @@ export default function ClassWorkoutEditor({
     setItems(initialItems);
     setEditing(true);
   }
-  function startAdding() {
-    setItems(initialItems);
-    setEditing(true);
-    setShowAdd(true);
-  }
   function cancel() {
     setItems(initialItems);
     setEditing(false);
@@ -105,14 +100,7 @@ export default function ClassWorkoutEditor({
               </li>
             );
           })}
-          {initialItems.length === 0 && (
-            <li className="px-2 py-3">
-              <button onClick={startAdding} className="inline-flex items-center gap-1.5 rounded-lg bg-foreground text-white px-3 py-1.5 text-xs font-medium hover:opacity-90">
-                <Plus size={12} /> Add exercises
-              </button>
-              <span className="ml-2 text-xs text-muted">No exercises yet.</span>
-            </li>
-          )}
+          {initialItems.length === 0 && <li className="px-2 py-3 text-xs text-muted">No exercises — click Adjust to add some.</li>}
         </ul>
       </div>
     );

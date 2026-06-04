@@ -12,11 +12,11 @@ import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string; planFor?: string; week?: string }> }) {
+export default async function CampDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
   const user = await requireUser();
   const isStaff = user.role === "admin" || user.role === "coach";
   const { id } = await params;
-  const { edit: editParam, planFor: planForParam, week: weekParam } = await searchParams;
+  const { edit: editParam } = await searchParams;
   const edit = isStaff ? editParam : undefined; // only staff get the edit form
 
   // All independent reads run in parallel — one DB round-trip instead of four.
@@ -89,33 +89,6 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     return d.toISOString().slice(0, 10);
   })();
   const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-  // Plan builder target + week. target "all" = baseline applied to every active
-  // member; a customer id = an override for that one athlete.
-  const planTarget = planForParam && activeMembers.some((m) => m.customerId === planForParam) ? planForParam : "all";
-  const weekStart = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? weekParam : nextMonday;
-  const weekBase = new Date(weekStart);
-  const weekDates = Array.from({ length: 7 }, (_, i) => new Date(weekBase.getTime() + i * 86_400_000));
-  const prevWeek = new Date(weekBase.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
-  const nextWeek = new Date(weekBase.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
-  const fmtUTC = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  const weekLabel = `${fmtUTC(weekDates[0])} – ${fmtUTC(weekDates[6])}`;
-  // Prefill the grid: for a single athlete, from their current rows this week;
-  // "all" stays blank (it's the set-everyone baseline).
-  const prefill: Record<number, { workoutId: string; coach: string; food: string; rest: string }> = {};
-  if (isStaff && planTarget !== "all") {
-    const rows = await db.workoutAssignment.findMany({
-      where: { campId: id, customerId: planTarget, scheduledDate: { gte: weekDates[0], lte: weekDates[6] } },
-      select: { scheduledDate: true, workoutId: true, coachSuggestion: true, foodAdvice: true, restAdvice: true },
-    });
-    for (const r of rows) {
-      if (!r.scheduledDate) continue;
-      const idx = Math.round((r.scheduledDate.getTime() - weekBase.getTime()) / 86_400_000);
-      if (idx >= 0 && idx < 7) prefill[idx] = { workoutId: r.workoutId, coach: r.coachSuggestion ?? "", food: r.foodAdvice ?? "", rest: r.restAdvice ?? "" };
-    }
-  }
-  const planHref = (t: string, w: string) => `/camps/${id}?planFor=${t}&week=${w}`;
-  const targetName = planTarget === "all" ? "all members" : (activeMembers.find((m) => m.customerId === planTarget)?.customer.name ?? "this athlete");
 
   async function updateCamp(formData: FormData) {
     "use server";
@@ -229,24 +202,17 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     const actor = await requireStaff();
     const weekStart = String(formData.get("weekStart") ?? "").trim();
     if (!weekStart) return;
-    // target = "all" → every active member; otherwise a single customer id (an
-    // override for that athlete only).
-    const target = String(formData.get("target") ?? "all").trim();
-    let memberIdList: string[];
-    if (target && target !== "all") {
-      memberIdList = [target];
-    } else {
-      const members = await db.campMember.findMany({ where: { campId: id, status: "active" }, select: { customerId: true } });
-      if (members.length === 0) redirect(flashUrl(`/camps/${id}`, "No active members to assign to yet"));
-      memberIdList = members.map((m) => m.customerId);
-    }
+    const members = await db.campMember.findMany({
+      where: { campId: id, status: "active" },
+      select: { customerId: true },
+    });
+    if (members.length === 0) redirect(flashUrl(`/camps/${id}`, "No active members to assign to yet"));
+    const memberIdList = members.map((m) => m.customerId);
     const base = new Date(weekStart); // YYYY-MM-DD → UTC midnight
     for (let d = 0; d < 7; d++) {
       const date = new Date(base.getTime() + d * 86_400_000);
       const workoutId = String(formData.get(`dayWorkout_${d}`) ?? "").trim();
-      const coachSuggestion = String(formData.get(`dayCoach_${d}`) ?? "").trim() || null;
-      const foodAdvice = String(formData.get(`dayFood_${d}`) ?? "").trim() || null;
-      const restAdvice = String(formData.get(`dayRest_${d}`) ?? "").trim() || null;
+      const note = String(formData.get(`dayNote_${d}`) ?? "").trim() || null;
       if (!workoutId) {
         // Rest day — drop any not-yet-done camp assignment on this date.
         await db.workoutAssignment.deleteMany({
@@ -257,14 +223,13 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       for (const customerId of memberIdList) {
         await db.workoutAssignment.upsert({
           where: { campId_customerId_scheduledDate: { campId: id, customerId, scheduledDate: date } },
-          create: { campId: id, customerId, workoutId, scheduledDate: date, assignedById: actor.id, coachSuggestion, foodAdvice, restAdvice },
-          update: { workoutId, coachSuggestion, foodAdvice, restAdvice }, // leave status/log untouched
+          create: { campId: id, customerId, workoutId, scheduledDate: date, assignedById: actor.id, coachSuggestion: note },
+          update: { workoutId, coachSuggestion: note }, // leave status/log untouched
         });
       }
     }
     revalidatePath(`/camps/${id}`);
-    const who = target && target !== "all" ? "this athlete" : `${memberIdList.length} member${memberIdList.length === 1 ? "" : "s"}`;
-    redirect(flashUrl(`/camps/${id}`, `Weekly plan saved for ${who}`));
+    redirect(flashUrl(`/camps/${id}`, `Weekly plan assigned to ${members.length} member${members.length === 1 ? "" : "s"}`));
   }
   // Wipe the camp's plan, keeping any already-completed sessions for the record.
   async function clearCampPlan() {
@@ -420,28 +385,19 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         <section className="mb-6">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Weekly training plan</h2>
-            <span className="text-xs text-muted">For the days between classes — lands on each member&apos;s dashboard</span>
-          </div>
-
-          {/* Apply-to selector: baseline for all, or override a single athlete */}
-          <div className="flex flex-wrap items-center gap-1.5 mb-3">
-            <span className="text-[11px] text-muted mr-1">Apply to:</span>
-            <Link href={planHref("all", weekStart)} className={`text-xs rounded-lg px-2.5 py-1 border ${planTarget === "all" ? "bg-foreground text-white border-foreground" : "border-border hover:bg-background"}`}>All members</Link>
-            {activeMembers.map((m) => (
-              <Link key={m.customerId} href={planHref(m.customerId, weekStart)} className={`text-xs rounded-lg px-2.5 py-1 border ${planTarget === m.customerId ? "bg-foreground text-white border-foreground" : "border-border hover:bg-background"}`}>{m.customer.name}</Link>
-            ))}
+            <span className="text-xs text-muted">For the days between classes — pushed to every member&apos;s dashboard</span>
           </div>
 
           <form action={assignCampPlan} className="bg-card border border-border rounded-xl p-5">
-            <input type="hidden" name="target" value={planTarget} />
-            <input type="hidden" name="weekStart" value={weekStart} />
-
-            {/* Week nav */}
-            <div className="flex items-center gap-2 mb-4">
-              <Link href={planHref(planTarget, prevWeek)} className="rounded-lg border border-border px-2 py-1 text-sm hover:bg-background">←</Link>
-              <span className="text-sm font-medium tabular-nums">{weekLabel}</span>
-              <Link href={planHref(planTarget, nextWeek)} className="rounded-lg border border-border px-2 py-1 text-sm hover:bg-background">→</Link>
-              <span className="text-xs text-muted ml-2">{planTarget === "all" ? "Baseline for every active member" : `Override for ${targetName}`}</span>
+            <div className="flex flex-wrap items-end gap-3 mb-4">
+              <div>
+                <label className="block text-[11px] text-muted mb-1">Week starting (Mon)</label>
+                <input name="weekStart" type="date" required defaultValue={nextMonday} className="rounded-lg border border-border px-3 py-2 text-sm" />
+              </div>
+              <p className="text-xs text-muted flex-1 min-w-[12rem]">
+                Pick a workout for each day (leave a day blank for a rest day). Assigning is safe to repeat —
+                it updates the plan without wiping what members have already completed.
+              </p>
             </div>
 
             {allWorkouts.length === 0 ? (
@@ -449,29 +405,24 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
                 Add workouts to the library first — then you can build the week here.
               </div>
             ) : (
-              <div className="space-y-2">
-                {WEEKDAYS.map((label, d) => {
-                  const pf = prefill[d];
-                  return (
-                    <div key={d} className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-center border border-border rounded-lg p-2">
-                      <div className="sm:col-span-2 text-xs font-semibold">{label} <span className="text-muted font-normal tabular-nums">{fmtUTC(weekDates[d])}</span></div>
-                      <select name={`dayWorkout_${d}`} defaultValue={pf?.workoutId ?? ""} className="sm:col-span-3 rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
-                        <option value="">Rest day</option>
-                        {allWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                      </select>
-                      <input name={`dayCoach_${d}`} defaultValue={pf?.coach ?? ""} placeholder="training note" className="sm:col-span-3 rounded-lg border border-border px-2 py-1 text-xs" />
-                      <input name={`dayFood_${d}`} defaultValue={pf?.food ?? ""} placeholder="eating" className="sm:col-span-2 rounded-lg border border-border px-2 py-1 text-xs" />
-                      <input name={`dayRest_${d}`} defaultValue={pf?.rest ?? ""} placeholder="recovery" className="sm:col-span-2 rounded-lg border border-border px-2 py-1 text-xs" />
-                    </div>
-                  );
-                })}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {WEEKDAYS.map((label, d) => (
+                  <div key={d} className="border border-border rounded-lg p-3">
+                    <div className="text-xs font-semibold mb-1.5">{label}</div>
+                    <select name={`dayWorkout_${d}`} defaultValue="" className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm mb-2">
+                      <option value="">Rest day</option>
+                      {allWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </select>
+                    <input name={`dayNote_${d}`} placeholder="note (optional)" className="w-full rounded-lg border border-border px-2 py-1 text-xs" />
+                  </div>
+                ))}
               </div>
             )}
 
             <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-muted">{planTarget === "all" ? `Saves to all ${activeMembers.length} active member${activeMembers.length === 1 ? "" : "s"} (resets their week)` : `Overrides ${targetName} for this week only`}</span>
+              <span className="text-xs text-muted">{activeMembers.length} active member{activeMembers.length === 1 ? "" : "s"} will receive this plan</span>
               <button type="submit" disabled={allWorkouts.length === 0 || activeMembers.length === 0} className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
-                {planTarget === "all" ? `Assign to ${activeMembers.length} member${activeMembers.length === 1 ? "" : "s"}` : `Save for ${targetName}`}
+                Assign to {activeMembers.length} member{activeMembers.length === 1 ? "" : "s"}
               </button>
             </div>
           </form>
