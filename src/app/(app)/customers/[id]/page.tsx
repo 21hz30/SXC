@@ -341,7 +341,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   const goalToEdit = editingGoalDivision ? goals.find((g) => g.division === editingGoalDivision) : null;
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
       <BackButton fallback={isStaff ? "/customers" : "/"} label="Back" />
       <header className="mt-3 mb-6 flex items-end justify-between">
         <div>

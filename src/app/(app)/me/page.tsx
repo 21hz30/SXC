@@ -22,7 +22,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
 
   if (!userRow?.customerId) {
     return (
-      <div className="p-8 max-w-2xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto">
         <h1 className="text-3xl font-semibold tracking-tight">Hi, {user.name}</h1>
         <div className="mt-4 bg-card border border-border rounded-xl p-6 text-sm">
           <p>Your athlete portal is coming soon.</p>
@@ -51,7 +51,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
   const openReport = open ? reports.find((r) => r.id === open) : null;
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
       <header className="flex items-baseline justify-between mb-6">
         <h1 className="text-3xl font-semibold tracking-tight">Hi, {user.name}</h1>
         <form action={async () => { "use server"; const { clearSession } = await import("@/lib/auth"); await clearSession(); const { redirect } = await import("next/navigation"); redirect("/login"); }}>

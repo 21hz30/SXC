@@ -89,7 +89,7 @@ export default async function ReportPage({
   }
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
       <BackButton fallback={`/classes/${id}`} label="Back to class" />
       <header className="mt-3 mb-6">
         <div className="text-sm text-muted">

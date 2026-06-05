@@ -26,7 +26,7 @@ export default async function StandardsAdminPage() {
   ] as const;
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
       <header className="mb-6">
         <h1 className="text-3xl font-semibold tracking-tight">Division Standards</h1>
         <div className="text-sm text-muted mt-1">

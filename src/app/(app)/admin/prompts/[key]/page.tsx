@@ -54,7 +54,7 @@ export default async function PromptEditor({
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
       <BackButton fallback="/admin/prompts" label="All prompts" />
       <header className="mt-3 mb-5">
         <div className="text-xs text-muted">

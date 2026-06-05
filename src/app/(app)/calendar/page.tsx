@@ -79,13 +79,13 @@ export default async function CalendarPage({
   const canSignUp = !isStaff && !!myCustomerId;
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <header className="mb-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-3xl font-semibold tracking-tight">Calendar</h1>
-          <div className="text-base text-muted">{title}</div>
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex items-baseline gap-2 sm:gap-3 min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Calendar</h1>
+          <div className="text-sm sm:text-base text-muted truncate">{title}</div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           <Link href={`/calendar?view=${view}&d=${isoDay(prev)}`} className="p-2 rounded-lg border border-border hover:bg-background"><ChevronLeft size={16} /></Link>
           <Link href={`/calendar?view=${view}`} className="px-3 py-2 rounded-lg border border-border text-sm hover:bg-background">Today</Link>
           <Link href={`/calendar?view=${view}&d=${isoDay(next)}`} className="p-2 rounded-lg border border-border hover:bg-background"><ChevronRight size={16} /></Link>
@@ -432,8 +432,8 @@ function DayView({ classes, todos, assignments, cursor, canAdd, canSignUp, signe
   const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
   const dayAssignments = assignments.filter((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), cursor));
   return (
-    <div className="grid grid-cols-4 gap-6">
-      <div className="col-span-3 bg-card border border-border rounded-xl overflow-hidden">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:gap-6">
+      <div className="lg:col-span-3 bg-card border border-border rounded-xl overflow-hidden">
         <TimeGrid days={[cursor]} classes={classes} startHour={startHour} endHour={endHour} now={now} compact={false} canSignUp={canSignUp} signedUpIds={signedUpIds} />
       </div>
       <div className="space-y-5">
@@ -478,6 +478,10 @@ function WeekView({ classes, todos, assignments, weekStart, canAdd, canSignUp, s
   const hasAllDay = dayTodos.some((a) => a.length > 0) || dayAssignments.some((a) => a.length > 0);
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* On phones the 7-day grid would be unreadable, so it scrolls horizontally
+          at a usable min width; from sm+ it fits normally. */}
+      <div className="overflow-x-auto">
+      <div className="min-w-[600px] sm:min-w-0">
       <div className="grid border-b border-border" style={{ gridTemplateColumns: cols }}>
         <div className="border-r border-border" />
         {days.map((d) => {
@@ -509,6 +513,8 @@ function WeekView({ classes, todos, assignments, weekStart, canAdd, canSignUp, s
         </div>
       )}
       <TimeGrid days={days} classes={classes} startHour={startHour} endHour={endHour} now={now} compact canSignUp={canSignUp} signedUpIds={signedUpIds} enableDrag={canAdd} />
+      </div>
+      </div>
       <CalendarDnD />
     </div>
   );

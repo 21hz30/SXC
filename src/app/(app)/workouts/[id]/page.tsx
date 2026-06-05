@@ -16,7 +16,7 @@ export default async function WorkoutDetail({ params }: { params: Promise<{ id: 
   if (isStaff ? w.ownerCustomerId !== null : w.ownerCustomerId !== (await getMyCustomerId())) notFound();
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
       <BackButton fallback="/workouts" label="Back" />
       <header className="mt-3 mb-6">
         <h1 className="text-3xl font-semibold tracking-tight">{w.name}</h1>

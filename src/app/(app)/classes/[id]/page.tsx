@@ -118,7 +118,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     }
 
     return (
-      <div className="p-8 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
         <header className="mt-3 mb-6">
           <div className="text-sm text-muted">
@@ -430,7 +430,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
       <header className="mt-3 mb-6 flex items-start justify-between gap-4">
         <div>

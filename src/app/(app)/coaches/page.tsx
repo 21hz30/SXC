@@ -133,7 +133,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
       <header className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Team</h1>
@@ -147,7 +147,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
       {isNew && <AccountForm action={createCoach} error={error} showRole cancelHref="/coaches" submitLabel="Create user" />}
 
       {editingUser && (
-        <form action={updateUser} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
+        <form action={updateUser} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <input type="hidden" name="userId" value={editingUser.id} />
           <div><label className="block text-sm font-medium mb-1.5">Full name</label><input name="name" required defaultValue={editingUser.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div>

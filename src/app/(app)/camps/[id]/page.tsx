@@ -342,12 +342,12 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <BackButton fallback="/camps" label="Back" />
-      <header className="mt-3 mb-6 flex items-start justify-between gap-4">
+      <header className="mt-3 mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-semibold tracking-tight">{camp.name}</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{camp.name}</h1>
             <span className={`text-[11px] font-semibold uppercase tracking-wide rounded px-2 py-1 ${camp.division === "pro" ? "bg-accent/10 text-accent" : "bg-zinc-100 text-zinc-600"}`}>
               {camp.division === "pro" ? "Pro" : "Open"}
             </span>
@@ -357,7 +357,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             {formatDate(camp.startDate)} → {formatDate(camp.endDate)} · Coach: {camp.coach?.name ?? "Unassigned"} · Created by {camp.createdBy?.name ?? "—"}
           </div>
         </div>
-        <div className="shrink-0 flex flex-col items-end gap-2 mt-1">
+        <div className="shrink-0 flex flex-row flex-wrap items-center sm:flex-col sm:items-end gap-2 sm:mt-1">
           {isStaff && (
             <Link href={edit ? `/camps/${id}` : `/camps/${id}?edit=1`} className="text-xs text-accent hover:underline">
               {edit ? "Cancel" : "Edit camp"}
@@ -452,7 +452,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
           on their off-days; it lands on each member's dashboard. Staff only. */}
       {isStaff && (
         <section className="mb-6">
-          <div className="flex items-baseline justify-between mb-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between mb-3">
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Weekly training plan</h2>
             <span className="text-xs text-muted">Workouts land on each member&apos;s dashboard &amp; calendar; classes are scheduled for the camp</span>
           </div>

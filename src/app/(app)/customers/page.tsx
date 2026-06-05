@@ -133,7 +133,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <header className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Customers</h1>
@@ -147,7 +147,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       {isNew && <AccountForm action={createCustomer} error={error} cancelHref="/customers" submitLabel="Create customer" />}
 
       {editingCustomer && (
-        <form action={updateCustomer} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
+        <form action={updateCustomer} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {error && (
             <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
               {error === "phone"

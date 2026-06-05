@@ -66,7 +66,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
       <header className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">{isStaff ? "Workouts" : "My workouts"}</h1>

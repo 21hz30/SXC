@@ -8,6 +8,7 @@ import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 import Toaster from "@/components/Toaster";
 import OnboardingModal from "@/components/OnboardingModal";
 import MainShell from "@/components/MainShell";
+import MobileNav from "@/components/MobileNav";
 import SidebarNav, { type SidebarNavItem } from "@/components/SidebarNav";
 import { Suspense } from "react";
 
@@ -71,6 +72,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </form>
         </div>
       </aside>
+
+      <MobileNav items={nav} user={{ name: user.name, role: user.role }} logout={logout} />
 
       <MainShell>{children}</MainShell>
 
