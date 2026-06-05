@@ -224,9 +224,10 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     redirect(flashUrl(`/camps/${id}`, "Left the camp"));
   }
   // Coach builds a Mon–Sun week grid and fans it out to every active member:
-  // one WorkoutAssignment per (member, day-with-a-workout). Idempotent — keyed
-  // on (campId, customerId, scheduledDate) so re-publishing edits in place
-  // without wiping a member's completion log; cleared days are removed.
+  // one WorkoutAssignment per (member, day-with-a-workout). Re-assigning fully
+  // replaces the camp's active plan (every not-yet-completed workout is wiped
+  // first), so a new week always *covers* the old one; completed sessions are
+  // kept as the member's history.
   async function assignCampPlan(formData: FormData) {
     "use server";
     const actor = await requireStaff();
@@ -244,39 +245,31 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     const base = new Date(weekStart); // YYYY-MM-DD → UTC midnight
     let classesAdded = 0;
 
+    // Re-assigning fully *covers* the old plan: wipe every not-yet-completed
+    // workout across the camp first, then fan out the new week. Completed
+    // sessions stay as the member's history (skipDuplicates leaves them intact).
+    await db.workoutAssignment.deleteMany({ where: { campId: id, status: { not: "completed" } } });
+
     for (let d = 0; d < 7 && d < plan.days.length; d++) {
       const day = plan.days[d] ?? {};
       const date = new Date(base.getTime() + d * 86_400_000);
       const dateStr = date.toISOString().slice(0, 10);
 
-      // Workouts: make every active member's set for this day match the plan,
-      // keeping any session a member already completed.
-      const dayWorkouts = (day.workouts ?? []).filter((w) => w.workoutId);
-      const wIds = [...new Set(dayWorkouts.map((w) => w.workoutId as string))];
-      if (memberIds.length > 0) {
-        const existing = await db.workoutAssignment.findMany({
-          where: { campId: id, scheduledDate: date, customerId: { in: memberIds } },
-          select: { id: true, customerId: true, workoutId: true, status: true },
-        });
-        const have = new Set(existing.map((e) => `${e.customerId}|${e.workoutId}`));
+      // Workouts: fan this day's set out to every active member (deduped per day).
+      const seen = new Set<string>();
+      const dayWorkouts = (day.workouts ?? []).filter((w) => {
+        if (!w.workoutId || seen.has(w.workoutId)) return false;
+        seen.add(w.workoutId);
+        return true;
+      });
+      if (memberIds.length > 0 && dayWorkouts.length > 0) {
         const toCreate: { campId: string; customerId: string; workoutId: string; scheduledDate: Date; assignedById: string; coachSuggestion: string | null }[] = [];
         for (const customerId of memberIds) {
           for (const w of dayWorkouts) {
-            if (have.has(`${customerId}|${w.workoutId}`)) continue;
             toCreate.push({ campId: id, customerId, workoutId: w.workoutId as string, scheduledDate: date, assignedById: actor.id, coachSuggestion: w.note?.trim() || null });
           }
         }
         if (toCreate.length) await db.workoutAssignment.createMany({ data: toCreate, skipDuplicates: true });
-        // Push note edits to assignments that stay in the plan.
-        for (const w of dayWorkouts) {
-          await db.workoutAssignment.updateMany({
-            where: { campId: id, scheduledDate: date, workoutId: w.workoutId as string, customerId: { in: memberIds } },
-            data: { coachSuggestion: w.note?.trim() || null },
-          });
-        }
-        // Remove workouts dropped from the plan, but keep completed ones for the record.
-        const removeIds = existing.filter((e) => !wIds.includes(e.workoutId) && e.status !== "completed").map((e) => e.id);
-        if (removeIds.length) await db.workoutAssignment.deleteMany({ where: { id: { in: removeIds } } });
       }
 
       // Classes: quick-schedule a camp session per entry (deduped on start time
