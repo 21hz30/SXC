@@ -105,19 +105,256 @@ export default async function CalendarPage({
 type ClassWithRel = Awaited<ReturnType<typeof db.class.findMany>>[number] & { roster: { attendance: string }[]; camp: { name: string } | null };
 type TodoRow = Awaited<ReturnType<typeof db.todo.findMany>>[number];
 
-function ClassCard({ c, canSignUp = false, signedUp = false }: { c: ClassWithRel; canSignUp?: boolean; signedUp?: boolean }) {
-  const attended = c.roster.filter((r) => r.attendance === "attended").length;
+const HOUR_PX = 52;
+const HOUR_LINE = `repeating-linear-gradient(to bottom, var(--border) 0px, var(--border) 1px, transparent 1px, transparent ${HOUR_PX}px)`;
+
+function hourLabel(h: number) {
+  const hr = ((h + 11) % 12) + 1;
+  return `${hr} ${h % 24 < 12 ? "AM" : "PM"}`;
+}
+
+// Greedy side-by-side column packing for overlapping events (Apple-calendar style).
+function packColumns<T extends { startMin: number; endMin: number }>(
+  items: T[],
+): (T & { _col: number; _cols: number })[] {
+  const sorted = [...items].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+  const out: (T & { _col: number; _cols: number })[] = [];
+  let group: (T & { _col: number })[] = [];
+  let colEnds: number[] = [];
+  const flush = () => {
+    const cols = colEnds.length || 1;
+    for (const g of group) out.push({ ...g, _cols: cols });
+    group = [];
+    colEnds = [];
+  };
+  for (const it of sorted) {
+    if (colEnds.length && it.startMin >= Math.max(...colEnds)) flush();
+    let col = colEnds.findIndex((e) => e <= it.startMin);
+    if (col === -1) {
+      col = colEnds.length;
+      colEnds.push(it.endMin);
+    } else {
+      colEnds[col] = it.endMin;
+    }
+    group.push({ ...it, _col: col });
+  }
+  flush();
+  return out;
+}
+
+// Visible hour window: default 7am–9pm, widened to fit any classes outside it.
+function gridRange(classes: ClassWithRel[], days: Date[]) {
+  let start = 7;
+  let end = 21;
+  for (const c of classes) {
+    if (!days.some((d) => sameDay(new Date(c.startsAt), d))) continue;
+    const s = new Date(c.startsAt);
+    start = Math.min(start, s.getHours());
+    end = Math.max(end, Math.ceil((s.getHours() * 60 + s.getMinutes() + c.durationMin) / 60));
+  }
+  start = Math.max(0, start);
+  end = Math.min(24, Math.max(end, start + 1));
+  return { startHour: start, endHour: end };
+}
+
+function TimeGutter({ startHour, endHour }: { startHour: number; endHour: number }) {
+  const hours = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i);
   return (
-    <Link href={`/classes/${c.id}`} className="block bg-card border border-border rounded-lg p-3 hover:border-accent transition">
-      <div className="text-xs font-semibold text-accent">{formatTime(c.startsAt)}</div>
-      <div className="text-sm font-medium leading-tight mt-0.5">{c.title}</div>
-      <div className="text-xs text-muted mt-1">{c.camp?.name ?? "—"} · {c.roster.length}/{c.capacity}{attended > 0 && ` · ${attended} ✓`}</div>
-      {canSignUp && (
-        <div className="mt-2">
-          <ClassSignupButton classId={c.id} signedUp={signedUp} isFull={c.roster.length >= c.capacity} size="xs" />
+    <div className="relative">
+      {hours.map((h) => (
+        <div
+          key={h}
+          className="absolute right-2 -translate-y-1/2 text-[10px] font-medium text-muted tabular-nums whitespace-nowrap"
+          style={{ top: (h - startHour) * HOUR_PX }}
+        >
+          {hourLabel(h)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ClassBlock({
+  c,
+  startHour,
+  col,
+  cols,
+  compact,
+  canSignUp,
+  signedUp,
+}: {
+  c: ClassWithRel;
+  startHour: number;
+  col: number;
+  cols: number;
+  compact: boolean;
+  canSignUp: boolean;
+  signedUp: boolean;
+}) {
+  const s = new Date(c.startsAt);
+  const startMin = s.getHours() * 60 + s.getMinutes();
+  const top = ((startMin - startHour * 60) / 60) * HOUR_PX;
+  const height = Math.max((c.durationMin / 60) * HOUR_PX, 20);
+  const gap = 2;
+  const left = `calc(${(col / cols) * 100}% + ${col === 0 ? 1 : gap}px)`;
+  const width = `calc(${100 / cols}% - ${col === 0 ? 2 : gap + 1}px)`;
+  const showSignup = !compact && canSignUp && height >= 64;
+  const showMeta = height >= 46 && !showSignup;
+  const attended = c.roster.filter((r) => r.attendance === "attended").length;
+  const tone = signedUp
+    ? "ring-emerald-400/60 bg-emerald-50 hover:bg-emerald-100/70"
+    : "ring-accent/30 bg-accent/10 hover:bg-accent/20";
+  return (
+    <div className="absolute z-10" style={{ top, height, left, width }}>
+      <div className={`relative h-full rounded-md ring-1 ${tone} shadow-sm overflow-hidden transition-colors`}>
+        <span className={`absolute left-0 top-0 bottom-0 w-1 ${signedUp ? "bg-emerald-500" : "bg-accent"}`} />
+        <Link href={`/classes/${c.id}`} className="absolute inset-0 z-0" aria-label={c.title} />
+        <div className="relative z-10 pointer-events-none pl-2.5 pr-1.5 py-1">
+          <div className={`text-[11px] font-semibold tabular-nums truncate ${signedUp ? "text-emerald-700" : "text-accent"}`}>
+            {formatTime(c.startsAt)}
+          </div>
+          <div className="text-xs font-medium text-foreground truncate">{c.title}</div>
+          {showMeta && (
+            <div className="text-[10px] text-muted truncate mt-0.5">
+              {c.camp?.name ?? "—"} · {c.roster.length}/{c.capacity}
+              {attended > 0 && ` · ${attended} ✓`}
+            </div>
+          )}
+        </div>
+        {showSignup && (
+          <div className="absolute left-2 right-1.5 bottom-1 z-20">
+            <ClassSignupButton classId={c.id} signedUp={signedUp} isFull={c.roster.length >= c.capacity} size="xs" />
+          </div>
+        )}
+        {compact && signedUp && (
+          <span className="absolute right-1 top-1 z-20 text-[10px] font-bold leading-none text-emerald-600">✓</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DayColumn({
+  day,
+  classes,
+  startHour,
+  endHour,
+  now,
+  compact,
+  canSignUp,
+  signedUpIds,
+}: {
+  day: Date;
+  classes: ClassWithRel[];
+  startHour: number;
+  endHour: number;
+  now: Date;
+  compact: boolean;
+  canSignUp: boolean;
+  signedUpIds: Set<string>;
+}) {
+  const total = (endHour - startHour) * HOUR_PX;
+  const laid = packColumns(
+    classes
+      .filter((c) => sameDay(new Date(c.startsAt), day))
+      .map((c) => {
+        const s = new Date(c.startsAt);
+        const sm = s.getHours() * 60 + s.getMinutes();
+        return { c, startMin: sm, endMin: sm + c.durationMin };
+      }),
+  );
+  const nowTop = ((now.getHours() * 60 + now.getMinutes() - startHour * 60) / 60) * HOUR_PX;
+  const showNow = sameDay(day, now) && nowTop >= 0 && nowTop <= total;
+  return (
+    <div className="relative border-l border-border" style={{ backgroundImage: HOUR_LINE }}>
+      {laid.map((it) => (
+        <ClassBlock
+          key={it.c.id}
+          c={it.c}
+          startHour={startHour}
+          col={it._col}
+          cols={it._cols}
+          compact={compact}
+          canSignUp={canSignUp}
+          signedUp={signedUpIds.has(it.c.id)}
+        />
+      ))}
+      {showNow && (
+        <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top: nowTop }}>
+          <div className="relative h-px bg-accent">
+            <span className="absolute -left-[3px] -top-[3px] h-[7px] w-[7px] rounded-full bg-accent" />
+          </div>
         </div>
       )}
-    </Link>
+    </div>
+  );
+}
+
+function TimeGrid({
+  days,
+  classes,
+  startHour,
+  endHour,
+  now,
+  compact,
+  canSignUp,
+  signedUpIds,
+}: {
+  days: Date[];
+  classes: ClassWithRel[];
+  startHour: number;
+  endHour: number;
+  now: Date;
+  compact: boolean;
+  canSignUp: boolean;
+  signedUpIds: Set<string>;
+}) {
+  return (
+    <div className="overflow-y-auto" style={{ maxHeight: "68vh" }}>
+      <div className="pt-3 pb-5">
+        <div
+          className="grid"
+          style={{
+            gridTemplateColumns: `3.5rem repeat(${days.length}, minmax(0,1fr))`,
+            height: (endHour - startHour) * HOUR_PX,
+          }}
+        >
+          <TimeGutter startHour={startHour} endHour={endHour} />
+          {days.map((d) => (
+            <DayColumn
+              key={d.toISOString()}
+              day={d}
+              classes={classes}
+              startHour={startHour}
+              endHour={endHour}
+              now={now}
+              compact={compact}
+              canSignUp={canSignUp}
+              signedUpIds={signedUpIds}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TodoChip({ t }: { t: TodoRow }) {
+  if (t.source === "note") {
+    return (
+      <div className="text-[10px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 bg-sky-100 text-sky-800">
+        <StickyNote size={10} /> {t.title}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`text-[10px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${
+        t.done ? "bg-background text-muted line-through" : "bg-amber-100 text-amber-800"
+      }`}
+    >
+      <CheckSquare size={10} /> {t.title}
+    </div>
   );
 }
 
@@ -140,22 +377,13 @@ function TodoCard({ t }: { t: TodoRow }) {
 }
 
 function DayView({ classes, todos, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
+  const now = new Date();
+  const { startHour, endHour } = gridRange(classes, [cursor]);
   const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
-  const hours = Array.from({ length: 16 }, (_, i) => i + 6);
   return (
     <div className="grid grid-cols-4 gap-6">
-      <div className="col-span-3 bg-card border border-border rounded-xl divide-y divide-border">
-        {hours.map((h) => {
-          const inHour = classes.filter((c) => sameDay(new Date(c.startsAt), cursor) && new Date(c.startsAt).getHours() === h);
-          return (
-            <div key={h} className="flex">
-              <div className="w-20 px-4 py-4 text-xs text-muted">{h}:00</div>
-              <div className="flex-1 p-2 space-y-2 min-h-[60px]">
-                {inHour.map((c) => <ClassCard key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}
-              </div>
-            </div>
-          );
-        })}
+      <div className="col-span-3 bg-card border border-border rounded-xl overflow-hidden">
+        <TimeGrid days={[cursor]} classes={classes} startHour={startHour} endHour={endHour} now={now} compact={false} canSignUp={canSignUp} signedUpIds={signedUpIds} />
       </div>
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -179,34 +407,45 @@ function DayView({ classes, todos, cursor, canAdd, canSignUp, signedUpIds }: { c
 
 function WeekView({ classes, todos, weekStart, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; weekStart: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const today = new Date();
+  const now = new Date();
+  const { startHour, endHour } = gridRange(classes, days);
   const isoDay = (d: Date) => d.toISOString().split("T")[0];
   const returnTo = `/calendar?view=week&d=${isoDay(weekStart)}`;
+  const cols = `3.5rem repeat(7, minmax(0,1fr))`;
+  const dayTodos = days.map((d) => todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), d)));
+  const hasTodos = dayTodos.some((a) => a.length > 0);
   return (
-    <div className="grid grid-cols-7 gap-3">
-      {days.map((d) => {
-        const isToday = sameDay(d, today);
-        const inDay = classes.filter((c) => sameDay(new Date(c.startsAt), d));
-        const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), d));
-        return (
-          <div key={d.toISOString()} className="group min-h-[400px]">
-            <div className={`flex items-center justify-between mb-2 ${isToday ? "text-accent" : "text-muted"}`}>
-              <span className="text-xs font-medium uppercase tracking-wide">
-                {d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
-              </span>
-              {canAdd && (
-                <span className="opacity-0 group-hover:opacity-100 transition">
-                  <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
-                </span>
-              )}
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="grid border-b border-border" style={{ gridTemplateColumns: cols }}>
+        <div className="border-r border-border" />
+        {days.map((d) => {
+          const isToday = sameDay(d, now);
+          return (
+            <div key={d.toISOString()} className="group border-r border-border last:border-r-0 px-2 py-2 text-center">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted">{d.toLocaleDateString("en-US", { weekday: "short" })}</div>
+              <div className="mt-1 flex items-center justify-center gap-1">
+                <span className={`inline-flex items-center justify-center text-sm font-semibold ${isToday ? "h-7 w-7 rounded-full bg-accent text-white" : "text-foreground"}`}>{d.getDate()}</span>
+                {canAdd && (
+                  <span className="opacity-0 group-hover:opacity-100 transition">
+                    <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="icon" />
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="space-y-2">
-              {dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
-              {inDay.map((c) => <ClassCard key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}
+          );
+        })}
+      </div>
+      {hasTodos && (
+        <div className="grid border-b border-border bg-background/40" style={{ gridTemplateColumns: cols }}>
+          <div className="border-r border-border pr-2 pt-1.5 text-right text-[9px] font-medium uppercase tracking-wide text-muted">All-day</div>
+          {days.map((d, i) => (
+            <div key={d.toISOString()} className="border-r border-border last:border-r-0 p-1 space-y-1 min-h-[1.75rem]">
+              {dayTodos[i].map((t) => <TodoChip key={t.id} t={t} />)}
             </div>
-          </div>
-        );
-      })}
+          ))}
+        </div>
+      )}
+      <TimeGrid days={days} classes={classes} startHour={startHour} endHour={endHour} now={now} compact canSignUp={canSignUp} signedUpIds={signedUpIds} />
     </div>
   );
 }
