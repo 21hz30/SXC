@@ -7,7 +7,9 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { requireCoach } from "@/lib/auth";
 import { customerScope, nonStaffCustomerWhere } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
+import { createAccount, AccountError } from "@/domain/accounts";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
+import PasswordInput from "@/components/PasswordInput";
 import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +34,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     const phone = String(formData.get("phone") ?? "").trim() || null;
     const tags = String(formData.get("tags") ?? "").trim() || null;
 
+    // A customer gets a login account too (same as admin/coach creation).
+    const username = String(formData.get("username") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    if (!/^[a-z0-9]{3,}$/.test(username)) redirect("/customers?new=1&error=username");
+    if (!(password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password))) redirect("/customers?new=1&error=weak");
+    if (await db.user.findUnique({ where: { username } })) redirect("/customers?new=1&error=dupuser");
+
     // Phone is our human-facing unique handle: if given, it must be unique.
     if (phone) {
       const dupePhone = await db.customer.findFirst({ where: { phone } });
@@ -52,8 +61,17 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         tags,
       },
     });
+    // Create the linked login. If it fails (e.g. username taken in a race),
+    // roll back the just-created profile so we don't leave an account-less one.
+    try {
+      await createAccount({ username, password, name, role: "customer", email, customerId: c.id });
+    } catch (e) {
+      await db.customer.delete({ where: { id: c.id } }).catch(() => {});
+      if (e instanceof AccountError) redirect("/customers?new=1&error=dupuser");
+      throw e;
+    }
     revalidatePath("/customers");
-    redirect(flashUrl(`/customers/${c.id}`, `${c.name} added`));
+    redirect(flashUrl(`/customers/${c.id}`, `${c.name} added with login “${username}”`));
   }
 
   async function updateCustomer(formData: FormData) {
@@ -134,12 +152,30 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 ? "That phone number is already used by another customer."
                 : error === "dupename"
                 ? "A customer with this name already exists. Add a phone, email, or tag to tell them apart."
+                : error === "username"
+                ? "Login name must be 3+ characters, English letters and numbers only."
+                : error === "weak"
+                ? "Password must be at least 8 characters and include a letter and a number."
+                : error === "dupuser"
+                ? "That login name is already taken — pick another."
                 : "Please enter a name."}
             </div>
           )}
           <div className="col-span-2">
             <label className="block text-sm font-medium mb-1.5">Name *</label>
             <input name="name" required className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+          </div>
+          <div className="col-span-2 grid grid-cols-2 gap-4 rounded-lg bg-background border border-border p-3">
+            <div className="col-span-2 text-xs font-medium text-muted uppercase tracking-wide">Login account</div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Login name *</label>
+              <input name="username" required placeholder="letters & numbers, e.g. janedoe" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Password *</label>
+              <PasswordInput name="password" autoComplete="new-password" required />
+            </div>
+            <div className="col-span-2 text-[11px] text-muted">The customer signs in with this. At least 8 characters with a letter and a number.</div>
           </div>
           <div><label className="block text-sm font-medium mb-1.5">Email</label><input name="email" type="email" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
           <div>

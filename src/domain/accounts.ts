@@ -23,6 +23,8 @@ export async function createAccount(input: {
   name?: string;
   role: Role;
   email?: string | null;
+  /** Link the login to an already-created profile instead of making a new one. */
+  customerId?: string;
 }): Promise<{ userId: string; customerId: string }> {
   const username = input.username.trim().toLowerCase();
   const name = (input.name ?? username).trim() || username;
@@ -35,9 +37,9 @@ export async function createAccount(input: {
   const taken = await db.user.findUnique({ where: { username } });
   if (taken) throw new AccountError("That username is already taken.");
 
-  // Try to adopt an existing unlinked profile that matches by email.
-  let customerId: string | null = null;
-  if (email) {
+  // Link to a provided profile; else try to adopt an unlinked one by email.
+  let customerId: string | null = input.customerId ?? null;
+  if (!customerId && email) {
     const existing = await db.customer.findFirst({
       where: { email, userAccount: null },
       select: { id: true },
