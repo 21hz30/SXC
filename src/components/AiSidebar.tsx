@@ -3,9 +3,13 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon, MessagesSquare } from "lucide-react";
-import Markdown from "./Markdown";
+import dynamic from "next/dynamic";
 import { useAiPanel } from "@/lib/stores/aiPanel";
 import { cn } from "@/lib/utils";
+
+// Markdown pulls in react-markdown + remark-gfm (~100KB+). Load it lazily so it
+// isn't in every page's bundle — it's only needed once the chat renders a reply.
+const Markdown = dynamic(() => import("./Markdown"), { loading: () => null });
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Session = {
