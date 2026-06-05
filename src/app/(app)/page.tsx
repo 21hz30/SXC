@@ -8,6 +8,7 @@ import { Calendar, Users, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
+import { backfillCampPlan } from "@/domain/camps";
 import { formatItem } from "@/domain/exercises";
 import { flashUrl } from "@/lib/flash";
 import { classScope, customerScope, campScope, nonStaffCustomerWhere } from "@/lib/access";
@@ -122,10 +123,12 @@ export default async function Dashboard() {
   // Staff approve a pending camp application straight from the dashboard.
   async function approveApplication(formData: FormData) {
     "use server";
-    await requireStaff();
+    const actor = await requireStaff();
     const memberId = String(formData.get("memberId") ?? "");
     if (!memberId) return;
-    const m = await db.campMember.update({ where: { id: memberId }, data: { status: "active" }, select: { campId: true } });
+    const m = await db.campMember.update({ where: { id: memberId }, data: { status: "active" }, select: { campId: true, customerId: true } });
+    // Catch the approved member up on the plan already assigned for this camp.
+    await backfillCampPlan(m.campId, m.customerId, actor.id);
     revalidatePath("/");
     revalidatePath(`/camps/${m.campId}`);
     revalidatePath("/camps");

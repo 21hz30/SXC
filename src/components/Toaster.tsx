@@ -28,7 +28,7 @@ export default function Toaster() {
     if (!message) return;
     const id = ++counter;
     setItems((cur) => [...cur, { id, message }]);
-    setTimeout(() => setItems((cur) => cur.filter((t) => t.id !== id)), 3200);
+    setTimeout(() => setItems((cur) => cur.filter((t) => t.id !== id)), 4800);
   }, []);
 
   // Client-dispatched toasts.

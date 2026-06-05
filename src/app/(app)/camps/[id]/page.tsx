@@ -6,21 +6,33 @@ import { formatDate, formatTime } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import CampSchedule from "@/components/CampSchedule";
+import CampPlanBuilder from "@/components/CampPlanBuilder";
 import { requireStaff, requireUser , getMyCustomerId } from "@/lib/auth";
 import { customerDetail, customerOptionLabel } from "@/domain/customers";
+import { backfillCampPlan } from "@/domain/camps";
 import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
+export default async function CampDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string; planWeek?: string }> }) {
   const user = await requireUser();
   const isStaff = user.role === "admin" || user.role === "coach";
   const { id } = await params;
-  const { edit: editParam } = await searchParams;
-  const edit = isStaff ? editParam : undefined; // only staff get the edit form
+  const sp = await searchParams;
+  const edit = isStaff ? sp.edit : undefined; // only staff get the edit form
+  // The plan builder loads one Mon–Sun week; default to the upcoming Monday (UTC).
+  const defaultMonday = (() => {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    const day = d.getUTCDay();
+    d.setUTCDate(d.getUTCDate() + ((8 - day) % 7 || 7));
+    return d.toISOString().slice(0, 10);
+  })();
+  const planWeek = isStaff && /^\d{4}-\d{2}-\d{2}$/.test(sp.planWeek ?? "") ? sp.planWeek! : defaultMonday;
+  const planBase = new Date(planWeek);
 
   // All independent reads run in parallel — one DB round-trip instead of four.
-  const [camp, allCustomers, allWorkouts, coaches, myCustomerId, planRows] = await Promise.all([
+  const [camp, allCustomers, allWorkouts, coaches, myCustomerId, planRows, weekPlanRows] = await Promise.all([
     db.camp.findUnique({
       where: { id },
       include: {
@@ -53,6 +65,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
           orderBy: { scheduledDate: "asc" },
         })
       : Promise.resolve([]),
+    // Workouts already scheduled in the builder's selected week, so it loads the
+    // saved plan instead of starting blank.
+    isStaff
+      ? db.workoutAssignment.findMany({
+          where: { campId: id, scheduledDate: { gte: planBase, lt: new Date(planBase.getTime() + 7 * 86_400_000) } },
+          select: { scheduledDate: true, workoutId: true, coachSuggestion: true },
+        })
+      : Promise.resolve([]),
   ]);
   if (!camp) notFound();
 
@@ -79,16 +99,21 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
   const planDays = [...planByDay.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
 
-  // Default the plan builder to the upcoming Monday (UTC, to match how
-  // scheduledDate is stored from a YYYY-MM-DD input).
-  const nextMonday = (() => {
-    const d = new Date();
-    d.setUTCHours(0, 0, 0, 0);
-    const day = d.getUTCDay(); // 0=Sun..6=Sat
-    d.setUTCDate(d.getUTCDate() + ((8 - day) % 7 || 7));
-    return d.toISOString().slice(0, 10);
-  })();
-  const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  // Pre-load the builder with the workouts already scheduled for `planWeek`,
+  // grouped per weekday, so it shows the saved plan instead of starting blank.
+  const initialDays = Array.from({ length: 7 }, () => ({
+    workouts: [] as { workoutId: string; note: string }[],
+    classes: [] as { title: string; time: string }[],
+  }));
+  for (const r of weekPlanRows) {
+    if (!r.scheduledDate) continue;
+    const di = Math.round((r.scheduledDate.getTime() - planBase.getTime()) / 86_400_000);
+    if (di < 0 || di > 6) continue;
+    const day = initialDays[di];
+    if (!day.workouts.some((w) => w.workoutId === r.workoutId)) {
+      day.workouts.push({ workoutId: r.workoutId, note: r.coachSuggestion ?? "" });
+    }
+  }
 
   async function updateCamp(formData: FormData) {
     "use server";
@@ -123,7 +148,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
   async function addMember(formData: FormData) {
     "use server";
-    await requireStaff();
+    const actor = await requireStaff();
     const customerId = String(formData.get("customerId"));
     // Staff add → an active member straight away (upsert in case they had a
     // pending application).
@@ -133,6 +158,8 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         create: { campId: id, customerId, status: "active" },
         update: { status: "active" },
       });
+      // Catch the new member up on the plan already assigned for this camp.
+      await backfillCampPlan(id, customerId, actor.id);
     }
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Member added"));
@@ -147,9 +174,11 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
   async function approveMember(formData: FormData) {
     "use server";
-    await requireStaff();
+    const actor = await requireStaff();
     const memberId = String(formData.get("memberId"));
-    await db.campMember.update({ where: { id: memberId }, data: { status: "active" } });
+    const m = await db.campMember.update({ where: { id: memberId }, data: { status: "active" }, select: { customerId: true } });
+    // Newly-approved member catches up on the plan already assigned for this camp.
+    await backfillCampPlan(id, m.customerId, actor.id);
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Application approved"));
   }
@@ -166,6 +195,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       create: { campId: id, customerId: acct.customerId, status: "active" },
       update: { status: "active" },
     });
+    await backfillCampPlan(id, acct.customerId, u.id);
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "You joined the camp"));
   }
@@ -200,36 +230,75 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   async function assignCampPlan(formData: FormData) {
     "use server";
     const actor = await requireStaff();
-    const weekStart = String(formData.get("weekStart") ?? "").trim();
-    if (!weekStart) return;
-    const members = await db.campMember.findMany({
-      where: { campId: id, status: "active" },
-      select: { customerId: true },
-    });
-    if (members.length === 0) redirect(flashUrl(`/camps/${id}`, "No active members to assign to yet"));
-    const memberIdList = members.map((m) => m.customerId);
+    type PlanDay = { workouts?: { workoutId?: string; note?: string }[]; classes?: { title?: string; time?: string }[] };
+    let plan: { weekStart?: string; days?: PlanDay[] };
+    try {
+      plan = JSON.parse(String(formData.get("plan") ?? "{}"));
+    } catch {
+      return;
+    }
+    const weekStart = String(plan.weekStart ?? "").trim();
+    if (!weekStart || !Array.isArray(plan.days)) return;
+    const members = await db.campMember.findMany({ where: { campId: id, status: "active" }, select: { customerId: true } });
+    const memberIds = members.map((m) => m.customerId);
     const base = new Date(weekStart); // YYYY-MM-DD → UTC midnight
-    for (let d = 0; d < 7; d++) {
+    let classesAdded = 0;
+
+    for (let d = 0; d < 7 && d < plan.days.length; d++) {
+      const day = plan.days[d] ?? {};
       const date = new Date(base.getTime() + d * 86_400_000);
-      const workoutId = String(formData.get(`dayWorkout_${d}`) ?? "").trim();
-      const note = String(formData.get(`dayNote_${d}`) ?? "").trim() || null;
-      if (!workoutId) {
-        // Rest day — drop any not-yet-done camp assignment on this date.
-        await db.workoutAssignment.deleteMany({
-          where: { campId: id, scheduledDate: date, status: { not: "completed" }, customerId: { in: memberIdList } },
+      const dateStr = date.toISOString().slice(0, 10);
+
+      // Workouts: make every active member's set for this day match the plan,
+      // keeping any session a member already completed.
+      const dayWorkouts = (day.workouts ?? []).filter((w) => w.workoutId);
+      const wIds = [...new Set(dayWorkouts.map((w) => w.workoutId as string))];
+      if (memberIds.length > 0) {
+        const existing = await db.workoutAssignment.findMany({
+          where: { campId: id, scheduledDate: date, customerId: { in: memberIds } },
+          select: { id: true, customerId: true, workoutId: true, status: true },
         });
-        continue;
+        const have = new Set(existing.map((e) => `${e.customerId}|${e.workoutId}`));
+        const toCreate: { campId: string; customerId: string; workoutId: string; scheduledDate: Date; assignedById: string; coachSuggestion: string | null }[] = [];
+        for (const customerId of memberIds) {
+          for (const w of dayWorkouts) {
+            if (have.has(`${customerId}|${w.workoutId}`)) continue;
+            toCreate.push({ campId: id, customerId, workoutId: w.workoutId as string, scheduledDate: date, assignedById: actor.id, coachSuggestion: w.note?.trim() || null });
+          }
+        }
+        if (toCreate.length) await db.workoutAssignment.createMany({ data: toCreate, skipDuplicates: true });
+        // Push note edits to assignments that stay in the plan.
+        for (const w of dayWorkouts) {
+          await db.workoutAssignment.updateMany({
+            where: { campId: id, scheduledDate: date, workoutId: w.workoutId as string, customerId: { in: memberIds } },
+            data: { coachSuggestion: w.note?.trim() || null },
+          });
+        }
+        // Remove workouts dropped from the plan, but keep completed ones for the record.
+        const removeIds = existing.filter((e) => !wIds.includes(e.workoutId) && e.status !== "completed").map((e) => e.id);
+        if (removeIds.length) await db.workoutAssignment.deleteMany({ where: { id: { in: removeIds } } });
       }
-      for (const customerId of memberIdList) {
-        await db.workoutAssignment.upsert({
-          where: { campId_customerId_scheduledDate: { campId: id, customerId, scheduledDate: date } },
-          create: { campId: id, customerId, workoutId, scheduledDate: date, assignedById: actor.id, coachSuggestion: note },
-          update: { workoutId, coachSuggestion: note }, // leave status/log untouched
-        });
+
+      // Classes: quick-schedule a camp session per entry (deduped on start time
+      // so re-assigning the week doesn't create duplicates).
+      for (const c of day.classes ?? []) {
+        const title = c.title?.trim();
+        if (!title) continue;
+        const startsAt = new Date(`${dateStr}T${c.time || "07:00"}`);
+        if (isNaN(startsAt.getTime())) continue;
+        const dup = await db.class.findFirst({ where: { campId: id, startsAt }, select: { id: true } });
+        if (dup) continue;
+        await db.class.create({ data: { campId: id, title, startsAt, durationMin: 60, capacity: 12, createdById: actor.id } });
+        classesAdded++;
       }
     }
+
     revalidatePath(`/camps/${id}`);
-    redirect(flashUrl(`/camps/${id}`, `Weekly plan assigned to ${members.length} member${members.length === 1 ? "" : "s"}`));
+    revalidatePath("/");
+    revalidatePath("/calendar");
+    const parts = [`assigned to ${memberIds.length} member${memberIds.length === 1 ? "" : "s"}`];
+    if (classesAdded) parts.push(`${classesAdded} class${classesAdded === 1 ? "" : "es"} scheduled`);
+    redirect(flashUrl(`/camps/${id}?planWeek=${weekStart}`, `Plan ${parts.join(" · ")}`));
   }
   // Wipe the camp's plan, keeping any already-completed sessions for the record.
   async function clearCampPlan() {
@@ -385,47 +454,17 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         <section className="mb-6">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Weekly training plan</h2>
-            <span className="text-xs text-muted">For the days between classes — pushed to every member&apos;s dashboard</span>
+            <span className="text-xs text-muted">Workouts land on each member&apos;s dashboard &amp; calendar; classes are scheduled for the camp</span>
           </div>
 
-          <form action={assignCampPlan} className="bg-card border border-border rounded-xl p-5">
-            <div className="flex flex-wrap items-end gap-3 mb-4">
-              <div>
-                <label className="block text-[11px] text-muted mb-1">Week starting (Mon)</label>
-                <input name="weekStart" type="date" required defaultValue={nextMonday} className="rounded-lg border border-border px-3 py-2 text-sm" />
-              </div>
-              <p className="text-xs text-muted flex-1 min-w-[12rem]">
-                Pick a workout for each day (leave a day blank for a rest day). Assigning is safe to repeat —
-                it updates the plan without wiping what members have already completed.
-              </p>
-            </div>
-
-            {allWorkouts.length === 0 ? (
-              <div className="text-sm text-muted border border-dashed border-border rounded-lg p-4 text-center">
-                Add workouts to the library first — then you can build the week here.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {WEEKDAYS.map((label, d) => (
-                  <div key={d} className="border border-border rounded-lg p-3">
-                    <div className="text-xs font-semibold mb-1.5">{label}</div>
-                    <select name={`dayWorkout_${d}`} defaultValue="" className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm mb-2">
-                      <option value="">Rest day</option>
-                      {allWorkouts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                    </select>
-                    <input name={`dayNote_${d}`} placeholder="note (optional)" className="w-full rounded-lg border border-border px-2 py-1 text-xs" />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-muted">{activeMembers.length} active member{activeMembers.length === 1 ? "" : "s"} will receive this plan</span>
-              <button type="submit" disabled={allWorkouts.length === 0 || activeMembers.length === 0} className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
-                Assign to {activeMembers.length} member{activeMembers.length === 1 ? "" : "s"}
-              </button>
-            </div>
-          </form>
+          <CampPlanBuilder
+            key={planWeek}
+            workouts={allWorkouts.map((w) => ({ id: w.id, name: w.name }))}
+            weekStart={planWeek}
+            initialDays={initialDays}
+            memberCount={activeMembers.length}
+            action={assignCampPlan}
+          />
 
           {/* What's currently live */}
           {planDays.length > 0 && (

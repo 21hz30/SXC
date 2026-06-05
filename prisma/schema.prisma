@@ -130,7 +130,9 @@ model WorkoutAssignment {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  @@unique([campId, customerId, scheduledDate])
+  // Multiple workouts can be assigned to the same member on the same camp day,
+  // so per-day uniqueness now includes the workout.
+  @@unique([campId, customerId, scheduledDate, workoutId], map: "WorkoutAssignment_plan_unique")
   @@index([customerId, status])
   @@index([customerId, scheduledDate])
 }
@@ -320,6 +322,8 @@ model Workout {
   classes     ClassWorkout[]
   performances Performance[]
   assignments WorkoutAssignment[]
+
+  @@index([ownerCustomerId])
 }
 
 model WorkoutItem {
