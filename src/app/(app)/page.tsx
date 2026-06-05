@@ -2,10 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser, getMyCustomerId } from "@/lib/auth";
+import { requireUser, requireStaff, getMyCustomerId } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
 import { Calendar, Users, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
 import { formatItem } from "@/domain/exercises";
 import { flashUrl } from "@/lib/flash";
@@ -18,7 +19,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone] = await Promise.all([
+  const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications] = await Promise.all([
     db.class.findMany({
       where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
@@ -59,6 +60,14 @@ export default async function Dashboard() {
     // Which classes they've already given class-overall feedback on.
     myCustomerId
       ? db.performance.findMany({ where: { customerId: myCustomerId, workoutId: null }, select: { classId: true } })
+      : Promise.resolve([]),
+    // Pending camp applications — staff approve/reject these from the dashboard.
+    isStaff
+      ? db.campMember.findMany({
+          where: { status: "pending" },
+          include: { customer: { select: { id: true, name: true } }, camp: { select: { id: true, name: true } } },
+          orderBy: { joinedAt: "asc" },
+        })
       : Promise.resolve([]),
   ]);
 
@@ -110,6 +119,31 @@ export default async function Dashboard() {
     redirect(flashUrl("/", "Added to your plan"));
   }
 
+  // Staff approve a pending camp application straight from the dashboard.
+  async function approveApplication(formData: FormData) {
+    "use server";
+    await requireStaff();
+    const memberId = String(formData.get("memberId") ?? "");
+    if (!memberId) return;
+    const m = await db.campMember.update({ where: { id: memberId }, data: { status: "active" }, select: { campId: true } });
+    revalidatePath("/");
+    revalidatePath(`/camps/${m.campId}`);
+    revalidatePath("/camps");
+    redirect(flashUrl("/", "Application approved"));
+  }
+  // Staff reject (delete) a pending application.
+  async function rejectApplication(formData: FormData) {
+    "use server";
+    await requireStaff();
+    const memberId = String(formData.get("memberId") ?? "");
+    if (!memberId) return;
+    const m = await db.campMember.delete({ where: { id: memberId }, select: { campId: true } });
+    revalidatePath("/");
+    revalidatePath(`/camps/${m.campId}`);
+    revalidatePath("/camps");
+    redirect(flashUrl("/", "Application rejected"));
+  }
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <header className="mb-8">
@@ -123,6 +157,41 @@ export default async function Dashboard() {
         {isStaff && <Stat icon={Users} label="Customers" value={customerCount} href="/customers" />}
         <Stat icon={Dumbbell} label="Workouts" value={workoutCount} href="/workouts" />
       </div>
+
+      {/* Camp applications awaiting a coach's decision — staff only. */}
+      {isStaff && pendingApplications.length > 0 && (
+        <div className="mb-8 bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Tent size={16} className="text-amber-600 shrink-0" />
+            <h2 className="text-sm font-semibold text-amber-900">
+              {pendingApplications.length} camp application{pendingApplications.length === 1 ? "" : "s"} awaiting review
+            </h2>
+          </div>
+          <ul className="divide-y divide-amber-200">
+            {pendingApplications.map((m) => (
+              <li key={m.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <Link href={`/customers/${m.customerId}`} className="text-sm font-medium hover:text-accent">{m.customer.name}</Link>
+                  <div className="text-xs text-muted">
+                    applied to <Link href={`/camps/${m.campId}`} className="font-medium hover:text-accent">{m.camp.name}</Link>
+                    <span className="mx-1">·</span>{formatDate(m.joinedAt)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <form action={approveApplication}>
+                    <input type="hidden" name="memberId" value={m.id} />
+                    <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium hover:opacity-90">Approve</button>
+                  </form>
+                  <form action={rejectApplication}>
+                    <input type="hidden" name="memberId" value={m.id} />
+                    <ConfirmSubmit message={`Reject ${m.customer.name}'s application to ${m.camp.name}?`} className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:text-red-600 hover:bg-amber-100">Reject</ConfirmSubmit>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <section className="lg:col-span-3 space-y-6">
