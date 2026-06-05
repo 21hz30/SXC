@@ -7,6 +7,7 @@ import { createAccount, AccountError } from "@/domain/accounts";
 import { Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import PasswordInput from "@/components/PasswordInput";
+import AccountForm from "@/components/AccountForm";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
 
@@ -24,25 +25,39 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
   });
   const editingUser = edit ? users.find((u) => u.id === edit) ?? null : null;
 
+  // Same flow as adding a customer — staff are athletes too, with a full profile
+  // — only the role differs (admin/coach).
   async function createCoach(formData: FormData) {
     "use server";
     await requireAdmin();
+    const name = String(formData.get("name") ?? "").trim();
+    if (!name) redirect("/coaches?new=1&error=name");
+    const email = String(formData.get("email") ?? "").trim() || null;
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    const tags = String(formData.get("tags") ?? "").trim() || null;
+    const role = String(formData.get("role") ?? "coach") === "admin" ? "admin" : "coach";
     const username = String(formData.get("username") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
-    const name = String(formData.get("name") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim() || null;
-    const role = String(formData.get("role") ?? "coach") === "admin" ? "admin" : "coach";
-    if (!username || !name) redirect("/coaches?new=1&error=missing");
-    // Username = login name: English letters and numbers only.
     if (!/^[a-z0-9]{3,}$/.test(username)) redirect("/coaches?new=1&error=username");
-    // Same password policy as registration: 8+ chars, a letter and a number.
-    const passwordOk = password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
-    if (!passwordOk) redirect("/coaches?new=1&error=weak");
-    // Staff are athletes too: createAccount makes the login + a linked profile.
+    if (!(password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password))) redirect("/coaches?new=1&error=weak");
+    if (await db.user.findUnique({ where: { username } })) redirect("/coaches?new=1&error=dupuser");
+    if (phone) {
+      const dupePhone = await db.customer.findFirst({ where: { phone } });
+      if (dupePhone) redirect("/coaches?new=1&error=phone");
+    }
+    const c = await db.customer.create({
+      data: {
+        name, email, phone, tags,
+        age: Number(formData.get("age")) || null,
+        weightKg: Number(formData.get("weightKg")) || null,
+        heightCm: Number(formData.get("heightCm")) || null,
+      },
+    });
     try {
-      await createAccount({ username, password, name, email, role });
+      await createAccount({ username, password, name, role, email, customerId: c.id });
     } catch (e) {
-      if (e instanceof AccountError) redirect("/coaches?new=1&error=duplicate");
+      await db.customer.delete({ where: { id: c.id } }).catch(() => {});
+      if (e instanceof AccountError) redirect("/coaches?new=1&error=dupuser");
       throw e;
     }
     revalidatePath("/coaches");
@@ -129,40 +144,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
         </Link>
       </header>
 
-      {isNew && (
-        <form action={createCoach} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
-          <div><label className="block text-sm font-medium mb-1.5">Full name</label><input name="name" required placeholder="e.g. Maya Rodríguez" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5">Username <span className="text-accent font-semibold">· login name</span></label>
-            <input name="username" required pattern="[A-Za-z0-9]{3,}" minLength={3} title="English letters and numbers only — no spaces or special characters." placeholder="e.g. mayarod" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div><label className="block text-sm font-medium mb-1.5">Email <span className="text-muted font-normal">(optional)</span></label><input name="email" type="email" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5">Role</label>
-            <select name="role" defaultValue="coach" className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm">
-              <option value="coach">Coach</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <div className="col-span-2">
-            <label className="block text-sm font-medium mb-1.5">Password</label>
-            <PasswordInput
-              name="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              pattern="(?=.*[A-Za-z])(?=.*\d).{8,}"
-              title="At least 8 characters, with one letter and one number."
-            />
-            <p className="mt-1.5 text-xs text-muted">At least 8 characters, mixing letters and numbers.</p>
-          </div>
-          {error && <div className="col-span-2 text-sm text-red-600">{error === "duplicate" ? "Username already in use." : error === "username" ? "Username must be English letters and numbers only (at least 3, no spaces or symbols)." : error === "weak" ? "Password must be at least 8 characters and include a letter and a number." : "Missing fields."}</div>}
-          <div className="col-span-2 flex justify-end gap-2">
-            <Link href="/coaches" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
-            <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Create</button>
-          </div>
-        </form>
-      )}
+      {isNew && <AccountForm action={createCoach} error={error} showRole cancelHref="/coaches" submitLabel="Create user" />}
 
       {editingUser && (
         <form action={updateUser} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-2 gap-4">
