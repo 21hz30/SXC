@@ -365,6 +365,8 @@ model Class {
   capacity    Int      @default(12)
   notes       String?
   dropInAllowed Boolean @default(false)  // when true, athletes outside the camp can join
+  /// Set when a coach asks the class's members to submit post-class feedback.
+  feedbackRequestedAt DateTime?
   campId      String?
   camp        Camp?    @relation(fields: [campId], references: [id])
   createdById String?
@@ -481,6 +483,16 @@ model ClassWatchData {
   zone3Sec     Int?
   zone4Sec     Int?
   zone5Sec     Int?
+
+  // Garmin-style training metrics
+  aerobicTE    Float?   // aerobic training effect (0.0–5.0)
+  anaerobicTE  Float?   // anaerobic training effect (0.0–5.0)
+  exerciseLoad Int?     // session training load
+
+  // Nutrition & hydration
+  restingCalories Int?
+  activeCalories  Int?
+  sweatLossMl     Int?  // estimated sweat loss
 
   source       String   @default("manual") // manual | garmin | apple | whoop | polar
   notes        String?

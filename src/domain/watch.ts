@@ -22,6 +22,12 @@ export type WatchDataDTO = {
   zone3Sec: number | null;
   zone4Sec: number | null;
   zone5Sec: number | null;
+  aerobicTE: number | null;
+  anaerobicTE: number | null;
+  exerciseLoad: number | null;
+  restingCalories: number | null;
+  activeCalories: number | null;
+  sweatLossMl: number | null;
   source: string;
   notes: string | null;
 };
@@ -39,6 +45,12 @@ export const WATCH_NUMERIC_FIELDS = [
   "zone3Sec",
   "zone4Sec",
   "zone5Sec",
+  "aerobicTE",
+  "anaerobicTE",
+  "exerciseLoad",
+  "restingCalories",
+  "activeCalories",
+  "sweatLossMl",
 ] as const;
 
 export async function listWatchData(_ctx: Ctx, classId: string): Promise<WatchDataDTO[]> {
@@ -56,6 +68,12 @@ export async function listWatchData(_ctx: Ctx, classId: string): Promise<WatchDa
     zone3Sec: r.zone3Sec,
     zone4Sec: r.zone4Sec,
     zone5Sec: r.zone5Sec,
+    aerobicTE: r.aerobicTE,
+    anaerobicTE: r.anaerobicTE,
+    exerciseLoad: r.exerciseLoad,
+    restingCalories: r.restingCalories,
+    activeCalories: r.activeCalories,
+    sweatLossMl: r.sweatLossMl,
     source: r.source,
     notes: r.notes,
   }));
@@ -77,6 +95,12 @@ export async function upsertWatchData(
     zone3Sec: number | null;
     zone4Sec: number | null;
     zone5Sec: number | null;
+    aerobicTE: number | null;
+    anaerobicTE: number | null;
+    exerciseLoad: number | null;
+    restingCalories: number | null;
+    activeCalories: number | null;
+    sweatLossMl: number | null;
     source: string;
     notes: string | null;
   }>,

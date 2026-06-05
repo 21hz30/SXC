@@ -9,7 +9,7 @@ import { flashUrl } from "@/lib/flash";
 import { formatItem } from "@/domain/exercises";
 import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
-import { listWatchData } from "@/domain/watch";
+import { listWatchData, upsertWatchData } from "@/domain/watch";
 import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
 import ClassWorkoutList from "@/components/ClassWorkoutList";
 import WorkoutCreateDrawer from "@/components/WorkoutCreateDrawer";
@@ -55,6 +55,45 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
     const myEntry = myCustomerId ? cls.roster.find((r) => r.customerId === myCustomerId) ?? null : null;
     const isFull = cls.roster.length >= cls.capacity;
+    // Feedback opens once the class has started (or the coach explicitly asks).
+    const classStarted = cls.startsAt.getTime() <= Date.now();
+    const showFeedback = !!myCustomerId && (classStarted || !!cls.feedbackRequestedAt);
+    const [myPerf, myWatch] = myCustomerId
+      ? await Promise.all([
+          db.performance.findFirst({ where: { classId: id, customerId: myCustomerId, workoutId: null } }),
+          db.classWatchData.findUnique({ where: { classId_customerId: { classId: id, customerId: myCustomerId } } }),
+        ])
+      : [null, null];
+
+    // The athlete's own post-class feedback: how it felt + watch & nutrition
+    // numbers. Scoped to their own ids — never trusts a client-supplied id.
+    async function submitFeedback(formData: FormData) {
+      "use server";
+      const u = await requireUser();
+      const mine = (await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } }))?.customerId;
+      if (!mine) redirect("/profile");
+      const num = (k: string) => { const v = String(formData.get(k) ?? "").trim(); return v ? Number(v) : null; };
+      const perf = {
+        status: "completed",
+        rpe: num("rpe"),
+        fatiguePct: num("fatiguePct"),
+        feeling: String(formData.get("feeling") ?? "").trim() || null,
+        injuryNote: String(formData.get("injuryNote") ?? "").trim() || null,
+        notes: String(formData.get("notes") ?? "").trim() || null,
+      };
+      // Class-overall Performance row (workoutId null can't be upserted in Prisma).
+      const existing = await db.performance.findFirst({ where: { classId: id, customerId: mine, workoutId: null }, select: { id: true } });
+      if (existing) await db.performance.update({ where: { id: existing.id }, data: perf });
+      else await db.performance.create({ data: { classId: id, customerId: mine, workoutId: null, ...perf } });
+      // Watch + nutrition numbers.
+      await upsertWatchData({ user: u }, id, mine, {
+        avgHr: num("avgHr"), maxHr: num("maxHr"),
+        aerobicTE: num("aerobicTE"), anaerobicTE: num("anaerobicTE"), exerciseLoad: num("exerciseLoad"),
+        restingCalories: num("restingCalories"), activeCalories: num("activeCalories"), sweatLossMl: num("sweatLossMl"),
+      });
+      revalidatePath(`/classes/${id}`);
+      redirect(flashUrl(`/classes/${id}`, "Thanks — your feedback is saved"));
+    }
 
     async function signUp() {
       "use server";
@@ -126,6 +165,76 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             </form>
           )}
         </div>
+
+        {/* Post-class feedback — feeling + watch & nutrition numbers */}
+        {showFeedback && (
+          <div className="bg-card border border-border rounded-xl p-5 mb-6">
+            <div className="flex items-baseline justify-between mb-1">
+              <h2 className="text-sm font-medium uppercase tracking-wide text-muted">Post-class feedback</h2>
+              {myPerf && <span className="text-[11px] font-medium text-emerald-700">✓ Submitted</span>}
+            </div>
+            {cls.feedbackRequestedAt && !myPerf && (
+              <p className="text-xs text-accent mb-2">Your coach asked the class to share how this session went.</p>
+            )}
+            <form action={submitFeedback} className="space-y-4">
+              {/* How it felt */}
+              <div>
+                <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">How it felt</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-muted mb-1">Effort (RPE 1–10)</label>
+                    <input name="rpe" type="number" min={1} max={10} defaultValue={myPerf?.rpe ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-muted mb-1">Tiredness</label>
+                    <select name="fatiguePct" defaultValue={myPerf?.fatiguePct != null ? String(myPerf.fatiguePct) : ""} className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
+                      <option value="">—</option>
+                      <option value="15">Fresh</option>
+                      <option value="40">A bit tired</option>
+                      <option value="65">Tired</option>
+                      <option value="85">Very tired</option>
+                      <option value="95">Wrecked</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[11px] text-muted mb-1">Feeling about the session</label>
+                    <input name="feeling" defaultValue={myPerf?.feeling ?? ""} placeholder="e.g. strong on the row, legs heavy" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                  </div>
+                  <div className="col-span-2 sm:col-span-4">
+                    <label className="block text-[11px] text-muted mb-1">Any injury / not feeling well?</label>
+                    <input name="injuryNote" defaultValue={myPerf?.injuryNote ?? ""} placeholder="anything off — niggles, illness, dizziness…" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Watch data */}
+              <div>
+                <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">Watch data <span className="normal-case text-muted/70">(from your watch / Garmin)</span></div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div><label className="block text-[11px] text-muted mb-1">Avg HR</label><input name="avgHr" type="number" defaultValue={myWatch?.avgHr ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Max HR</label><input name="maxHr" type="number" defaultValue={myWatch?.maxHr ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Aerobic (0–5)</label><input name="aerobicTE" type="number" step="0.1" min={0} max={5} defaultValue={myWatch?.aerobicTE ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Anaerobic (0–5)</label><input name="anaerobicTE" type="number" step="0.1" min={0} max={5} defaultValue={myWatch?.anaerobicTE ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Exercise load</label><input name="exerciseLoad" type="number" defaultValue={myWatch?.exerciseLoad ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                </div>
+              </div>
+
+              {/* Nutrition & hydration */}
+              <div>
+                <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">Nutrition &amp; hydration</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div><label className="block text-[11px] text-muted mb-1">Resting calories</label><input name="restingCalories" type="number" defaultValue={myWatch?.restingCalories ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Active calories</label><input name="activeCalories" type="number" defaultValue={myWatch?.activeCalories ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Est. sweat loss (ml)</label><input name="sweatLossMl" type="number" defaultValue={myWatch?.sweatLossMl ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">{myPerf ? "Update feedback" : "Submit feedback"}</button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* Exercise plan — read-only */}
         <section>
@@ -208,6 +317,10 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       .map((p) => ({ ...p, workoutId: cw.workoutId } as WorkoutPerfRow)),
   }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
+  // Post-class feedback collection: a member "responded" once they have a
+  // class-overall Performance row (workoutId null).
+  const feedbackResponders = new Set(performances.filter((p) => p.workoutId === null).map((p) => p.customerId));
+  const feedbackRespondedCount = cls.roster.filter((r) => feedbackResponders.has(r.customerId)).length;
 
   // The whole shared library is shown in the picker (with a tag filter); ones
   // already on this class are flagged so a coach always sees their full library.
@@ -249,6 +362,16 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       redirect(flashUrl(`/camps/${target.campId}`, "Class deleted"));
     }
     redirect(flashUrl("/calendar", "Class deleted"));
+  }
+
+  // Coach asks the class to fill in post-class feedback (members get prompted on
+  // their dashboard + a form on this class page).
+  async function requestFeedback() {
+    "use server";
+    await requireCoach();
+    await db.class.update({ where: { id }, data: { feedbackRequestedAt: new Date() } });
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Feedback requested from all members"));
   }
 
   async function setAttendance(formData: FormData) {
@@ -323,12 +446,25 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             )}
           </div>
         </div>
-        <Link
-          href={edit ? `/classes/${id}` : `/classes/${id}?edit=1`}
-          className="text-xs text-accent hover:underline shrink-0 mt-1"
-        >
-          {edit ? "Cancel" : "Edit class"}
-        </Link>
+        <div className="shrink-0 flex flex-col items-end gap-2 mt-1">
+          <Link
+            href={edit ? `/classes/${id}` : `/classes/${id}?edit=1`}
+            className="text-xs text-accent hover:underline"
+          >
+            {edit ? "Cancel" : "Edit class"}
+          </Link>
+          {/* Ask the class for post-class feedback */}
+          <form action={requestFeedback} className="text-right">
+            <button type="submit" className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-accent hover:text-accent">
+              {cls.feedbackRequestedAt ? "Re-request feedback" : "Request feedback"}
+            </button>
+            <div className="text-[11px] text-muted mt-1">
+              {cls.feedbackRequestedAt
+                ? `Requested · ${feedbackRespondedCount}/${cls.roster.length} responded`
+                : `${feedbackRespondedCount}/${cls.roster.length} have given feedback`}
+            </div>
+          </form>
+        </div>
       </header>
 
       {edit && (

@@ -18,6 +18,12 @@ export type WatchRow = {
   zone3Sec: number | null;
   zone4Sec: number | null;
   zone5Sec: number | null;
+  aerobicTE: number | null;
+  anaerobicTE: number | null;
+  exerciseLoad: number | null;
+  restingCalories: number | null;
+  activeCalories: number | null;
+  sweatLossMl: number | null;
   source: string;
   notes: string | null;
 };
@@ -30,6 +36,8 @@ function blank(customerId: string): WatchRow {
     durationSec: null, distanceM: null, avgHr: null, maxHr: null,
     caloriesKcal: null, avgCadence: null,
     zone1Sec: null, zone2Sec: null, zone3Sec: null, zone4Sec: null, zone5Sec: null,
+    aerobicTE: null, anaerobicTE: null, exerciseLoad: null,
+    restingCalories: null, activeCalories: null, sweatLossMl: null,
     source: "manual", notes: null,
   };
 }
@@ -203,6 +211,48 @@ export default function WatchDataPanel({
                           </Field>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1.5">Training (Garmin)</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label="Aerobic (0–5)">
+                        <input type="number" step="0.1" min={0} max={5} defaultValue={r.aerobicTE ?? ""}
+                          onBlur={(e) => patch(m.customerId, { aerobicTE: e.target.value ? Number(e.target.value) : null })}
+                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                      </Field>
+                      <Field label="Anaerobic (0–5)">
+                        <input type="number" step="0.1" min={0} max={5} defaultValue={r.anaerobicTE ?? ""}
+                          onBlur={(e) => patch(m.customerId, { anaerobicTE: e.target.value ? Number(e.target.value) : null })}
+                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                      </Field>
+                      <Field label="Exercise load">
+                        <input type="number" min={0} defaultValue={r.exerciseLoad ?? ""}
+                          onBlur={(e) => patch(m.customerId, { exerciseLoad: e.target.value ? Number(e.target.value) : null })}
+                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                      </Field>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1.5">Nutrition &amp; hydration</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label="Resting cal">
+                        <input type="number" min={0} defaultValue={r.restingCalories ?? ""}
+                          onBlur={(e) => patch(m.customerId, { restingCalories: e.target.value ? Number(e.target.value) : null })}
+                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                      </Field>
+                      <Field label="Active cal">
+                        <input type="number" min={0} defaultValue={r.activeCalories ?? ""}
+                          onBlur={(e) => patch(m.customerId, { activeCalories: e.target.value ? Number(e.target.value) : null })}
+                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                      </Field>
+                      <Field label="Sweat loss (ml)">
+                        <input type="number" min={0} defaultValue={r.sweatLossMl ?? ""}
+                          onBlur={(e) => patch(m.customerId, { sweatLossMl: e.target.value ? Number(e.target.value) : null })}
+                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                      </Field>
                     </div>
                   </div>
 
