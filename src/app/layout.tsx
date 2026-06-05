@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "SXC — Hyrox Coach",
   description: "AI-powered training dashboard for Hyrox coaches.",
+  appleWebApp: { title: "SRC", statusBarStyle: "default" },
 };
 
 export const viewport = {

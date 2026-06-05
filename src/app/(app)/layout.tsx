@@ -1,6 +1,8 @@
 import { clearSession, getAccount } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import Image from "next/image";
 import { LogOut } from "lucide-react";
+import srcLogo from "@/assets/brand/src-logo.png";
 import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 import Toaster from "@/components/Toaster";
@@ -48,8 +50,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen">
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-60 border-r border-border bg-white flex-col z-20">
         <div className="px-5 py-5 shrink-0">
-          <div className="text-2xl font-semibold tracking-tight">SXC</div>
-          <div className="text-xs text-muted mt-0.5">Hyrox Coach</div>
+          <Image src={srcLogo} alt="SRC by Peoplearth" width={48} height={48} priority className="h-12 w-12" />
+          <div className="text-xs text-muted mt-1.5">Hyrox Coach</div>
         </div>
         <SidebarNav items={nav} />
         <ChatSessionsPanel />

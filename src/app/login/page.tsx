@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { login, getSessionUser } from "@/lib/auth";
 import PasswordInput from "@/components/PasswordInput";
+import srcLogo from "@/assets/brand/src-logo.png";
 
 export default async function LoginPage({
   searchParams,
@@ -23,9 +25,9 @@ export default async function LoginPage({
   return (
     <main className="flex-1 flex items-center justify-center p-8">
       <form action={doLogin} className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 shadow-sm">
-        <div className="mb-6">
-          <div className="text-3xl font-semibold tracking-tight">SXC</div>
-          <div className="text-sm text-muted mt-1">Hyrox Coach Dashboard</div>
+        <div className="mb-6 flex flex-col items-center text-center">
+          <Image src={srcLogo} alt="SRC by Peoplearth" width={112} height={112} priority />
+          <div className="text-sm text-muted mt-2">Hyrox Coach Dashboard</div>
         </div>
         <label className="block text-sm font-medium mb-1.5">Username</label>
         <input
