@@ -85,18 +85,32 @@ function fmtSec(s: number) {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-/** Pretty-print an item for display, e.g. "SkiErg — 1000m · 4:00/km · 4:00" */
-export function formatItem(item: WorkoutItemInput): { title: string; details: string } {
-  const title = item.label?.trim() || categoryLabel(item.category);
+/** The display title for an item — its custom label, else the category name. */
+export function itemTitle(item: WorkoutItemInput): string {
+  return item.label?.trim() || categoryLabel(item.category);
+}
+
+/**
+ * The measurable targets of an item as separate chips (no title, no notes) —
+ * e.g. ["4 × 12", "1000 m", "102 kg", "4:00/km", "4:00"]. Lets the UI render
+ * each metric as its own pill instead of one run-on string.
+ */
+export function itemChips(item: WorkoutItemInput): string[] {
   const bits: string[] = [];
   if (item.sets != null && item.reps != null) bits.push(`${item.sets} × ${item.reps}`);
   else if (item.reps != null) bits.push(`${item.reps} reps`);
   else if (item.sets != null) bits.push(`${item.sets} sets`);
-  if (item.distanceM != null) bits.push(`${item.distanceM}m`);
+  if (item.distanceM != null) bits.push(`${item.distanceM} m`);
   if (item.weightKg != null) bits.push(`${item.weightKg} kg`);
-  if (item.heightM != null) bits.push(`target ${item.heightM}m`);
+  if (item.heightM != null) bits.push(`target ${item.heightM} m`);
   if (item.paceSecPerKm != null) bits.push(`${fmtSec(item.paceSecPerKm)}/km`);
   if (item.timeSec != null) bits.push(fmtSec(item.timeSec));
+  return bits;
+}
+
+/** Pretty-print an item for display, e.g. "SkiErg — 1000 m · 4:00/km · 4:00" */
+export function formatItem(item: WorkoutItemInput): { title: string; details: string } {
+  const bits = itemChips(item);
   if (item.notes) bits.push(item.notes);
-  return { title, details: bits.join(" · ") };
+  return { title: itemTitle(item), details: bits.join(" · ") };
 }

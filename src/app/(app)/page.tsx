@@ -9,7 +9,7 @@ import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
 import { backfillCampPlan } from "@/domain/camps";
-import { formatItem } from "@/domain/exercises";
+import ExerciseList from "@/components/ExerciseList";
 import { flashUrl } from "@/lib/flash";
 import { classScope, customerScope, campScope, nonStaffCustomerWhere } from "@/lib/access";
 
@@ -76,7 +76,33 @@ export default async function Dashboard() {
   const needFeedback = myPastRoster.filter((r) => !feedbackDoneClassIds.has(r.classId)).slice(0, 6);
 
   const todoItems = todos;
-  const todayKey = startOfDay().toISOString().slice(0, 10);
+  // Group the athlete's plan into day sections (Today / Tomorrow / weekday) so
+  // it reads as a schedule. Using the local calendar date keeps grouping and the
+  // "Today" check consistent with how dates render (no UTC-slice day shift).
+  const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const todayK = dayKey(new Date());
+  const tomorrowK = dayKey(addDays(new Date(), 1));
+  type PlanItem = (typeof myAssignments)[number];
+  const planGroups: { key: string; label: string; dateText: string; todo: number; items: PlanItem[] }[] = [];
+  const planGroupIdx = new Map<string, number>();
+  for (const a of myAssignments) {
+    const key = a.scheduledDate ? dayKey(a.scheduledDate) : "anytime";
+    let gi = planGroupIdx.get(key);
+    if (gi == null) {
+      gi = planGroups.length;
+      planGroupIdx.set(key, gi);
+      let label = "Anytime";
+      let dateText = "";
+      if (a.scheduledDate) {
+        const [wd, ...rest] = formatDate(a.scheduledDate).split(", ");
+        dateText = rest.join(", ");
+        label = key === todayK ? "Today" : key === tomorrowK ? "Tomorrow" : wd;
+      }
+      planGroups.push({ key, label, dateText, todo: 0, items: [] });
+    }
+    planGroups[gi].items.push(a);
+    if (a.status !== "completed") planGroups[gi].todo += 1;
+  }
   // Show the plan card to every athlete (customers always; staff only once they
   // have something assigned — they manage plans elsewhere).
   const showPlan = !!myCustomerId && (myAssignments.length > 0 || !isStaff);
@@ -210,69 +236,65 @@ export default async function Dashboard() {
                   Nothing assigned right now. Add one of your own workouts below, or your coach will post the week&apos;s plan.
                 </div>
               ) : (
-                <ul className="space-y-3">
-                  {myAssignments.map((a) => {
-                    const done = a.status === "completed";
-                    const dateLabel = !a.scheduledDate
-                      ? "Anytime"
-                      : a.scheduledDate.toISOString().slice(0, 10) === todayKey
-                        ? "Today"
-                        : formatDate(a.scheduledDate);
-                    return (
-                      <li key={a.id} className={`bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[11px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-zinc-100 text-zinc-600">{dateLabel}</span>
-                              <span className="font-semibold">{a.workout.name}</span>
-                              {a.camp && <span className="text-[10px] text-accent">· {a.camp.name}</span>}
-                              {done && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-700">done</span>}
-                            </div>
-                            {a.workout.items.length > 0 && (
-                              <div className="mt-1.5 text-xs text-muted flex flex-wrap gap-x-3 gap-y-0.5">
-                                {a.workout.items.map((it) => {
-                                  const { title, details } = formatItem(it as never);
-                                  return <span key={it.id}>{title}{details ? ` (${details})` : ""}</span>;
-                                })}
+                <div className="space-y-5">
+                  {planGroups.map((g) => (
+                    <section key={g.key}>
+                      <div className="flex items-baseline gap-2 mb-2 px-0.5">
+                        <h3 className="text-sm font-semibold tracking-tight">{g.label}</h3>
+                        {g.dateText && <span className="text-xs text-muted">{g.dateText}</span>}
+                        <span className="ml-auto text-[11px] text-muted">{g.todo > 0 ? `${g.todo} to do` : "all done"}</span>
+                      </div>
+                      <ul className="space-y-3">
+                        {g.items.map((a) => {
+                          const done = a.status === "completed";
+                          return (
+                            <li key={a.id} className={`bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold">{a.workout.name}</span>
+                                {a.camp && <span className="text-[11px] text-accent">· {a.camp.name}</span>}
+                                {done && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">done</span>}
                               </div>
-                            )}
-                            {(a.coachSuggestion || a.foodAdvice) && (
-                              <div className="mt-1.5 space-y-0.5">
-                                {a.coachSuggestion && <div className="text-xs"><span className="font-medium text-accent">Coach:</span> {a.coachSuggestion}</div>}
-                                {a.foodAdvice && <div className="text-xs"><span className="font-medium text-emerald-700">Food:</span> {a.foodAdvice}</div>}
-                              </div>
-                            )}
-                            {done && (a.rpe != null || a.feeling) && (
-                              <div className="mt-1 text-xs text-muted">{a.rpe != null ? `RPE ${a.rpe}` : ""}{a.feeling ? ` · ${a.feeling}` : ""}</div>
-                            )}
-                          </div>
-                        </div>
 
-                        {!done && (
-                          <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-                            <input type="hidden" name="assignmentId" value={a.id} />
-                            <input type="hidden" name="status" value="completed" />
-                            <div>
-                              <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
-                              <input name="rpe" type="number" min={1} max={10} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
-                              <input name="feeling" placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="block text-[10px] text-muted mb-0.5">Notes</label>
-                              <input name="notes" placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                            </div>
-                            <div className="col-span-2 sm:col-span-4 flex justify-end">
-                              <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
-                            </div>
-                          </form>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                              <ExerciseList items={a.workout.items} />
+
+                              {(a.coachSuggestion || a.foodAdvice) && (
+                                <div className="mt-3 space-y-1">
+                                  {a.coachSuggestion && <div className="text-xs rounded-lg bg-accent/5 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-accent">Coach</span> · {a.coachSuggestion}</div>}
+                                  {a.foodAdvice && <div className="text-xs rounded-lg bg-emerald-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-emerald-700">Food</span> · {a.foodAdvice}</div>}
+                                </div>
+                              )}
+                              {done && (a.rpe != null || a.feeling) && (
+                                <div className="mt-2 text-xs text-muted">{a.rpe != null ? `RPE ${a.rpe}` : ""}{a.feeling ? `${a.rpe != null ? " · " : ""}${a.feeling}` : ""}</div>
+                              )}
+
+                              {!done && (
+                                <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+                                  <input type="hidden" name="assignmentId" value={a.id} />
+                                  <input type="hidden" name="status" value="completed" />
+                                  <div>
+                                    <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
+                                    <input name="rpe" type="number" min={1} max={10} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
+                                    <input name="feeling" placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                  </div>
+                                  <div className="col-span-2">
+                                    <label className="block text-[10px] text-muted mb-0.5">Notes</label>
+                                    <input name="notes" placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                  </div>
+                                  <div className="col-span-2 sm:col-span-4 flex justify-end">
+                                    <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
+                                  </div>
+                                </form>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
               )}
 
               {/* Self-add one of your own workouts */}
