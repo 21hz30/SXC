@@ -4,14 +4,14 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, requireStaff, getMyCustomerId } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
-import { Calendar, Users, Dumbbell, Tent } from "lucide-react";
+import { Calendar, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
 import { backfillCampPlan } from "@/domain/camps";
 import ExerciseList from "@/components/ExerciseList";
 import { flashUrl } from "@/lib/flash";
-import { classScope, customerScope, campScope, nonStaffCustomerWhere } from "@/lib/access";
+import { classScope, customerScope } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, customerCount, campCount, workoutCount, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications] = await Promise.all([
+  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow] = await Promise.all([
     db.class.findMany({
       where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
@@ -32,9 +32,6 @@ export default async function Dashboard() {
       take: 5,
       include: { camp: true, roster: true },
     }),
-    db.customer.count({ where: { ...customerScope(user), ...nonStaffCustomerWhere() } }),
-    db.camp.count({ where: campScope(user) }),
-    db.workout.count(),
     db.activityData.findMany({ where: { customer: customerScope(user) }, orderBy: { date: "desc" }, take: 5, include: { customer: true } }),
     listTodos({ user }),
     // The signed-in athlete's own training plan: everything not yet done, plus
@@ -42,7 +39,7 @@ export default async function Dashboard() {
     myCustomerId
       ? db.workoutAssignment.findMany({
           where: { customerId: myCustomerId, OR: [{ status: { not: "completed" } }, { scheduledDate: { gte: startOfDay() } }] },
-          include: { workout: { select: { name: true, items: { orderBy: { order: "asc" } } } }, camp: { select: { name: true } } },
+          include: { workout: { select: { id: true, name: true, items: { orderBy: { order: "asc" } } } }, camp: { select: { name: true } } },
           orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
@@ -70,6 +67,13 @@ export default async function Dashboard() {
           orderBy: { joinedAt: "asc" },
         })
       : Promise.resolve([]),
+    // The single next class on the schedule (in the viewer's scope) for the
+    // header summary — uncapped, so "next class" is always accurate.
+    db.class.findFirst({
+      where: { startsAt: { gte: now }, ...classScope(user) },
+      orderBy: { startsAt: "asc" },
+      select: { id: true, title: true, startsAt: true },
+    }),
   ]);
 
   const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
@@ -103,6 +107,15 @@ export default async function Dashboard() {
     planGroups[gi].items.push(a);
     if (a.status !== "completed") planGroups[gi].todo += 1;
   }
+  // Glance summaries for the header: today's workout(s) and the next class.
+  const todayItems = planGroups.find((g) => g.key === todayK)?.items ?? [];
+  const todayTodo = todayItems.filter((a) => a.status !== "completed");
+  const classDayLabel = (d: Date) => {
+    const k = dayKey(d);
+    return k === todayK ? "Today" : k === tomorrowK ? "Tomorrow" : formatDate(d);
+  };
+  const nextClass = nextClassRow;
+
   // Show the plan card to every athlete (customers always; staff only once they
   // have something assigned — they manage plans elsewhere).
   const showPlan = !!myCustomerId && (myAssignments.length > 0 || !isStaff);
@@ -180,11 +193,31 @@ export default async function Dashboard() {
         <h1 className="text-3xl font-semibold tracking-tight mt-1">Welcome back, {user.name.split(" ")[0]}</h1>
       </header>
 
-      <div className={`grid grid-cols-2 ${isStaff ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-4 mb-8`}>
-        <Stat icon={Calendar} label="Classes today" value={todayClasses.length} href="/calendar" />
-        <Stat icon={Tent} label={isStaff ? "Active camps" : "My camps"} value={campCount} href="/camps" />
-        {isStaff && <Stat icon={Users} label="Customers" value={customerCount} href="/customers" />}
-        <Stat icon={Dumbbell} label="Workouts" value={workoutCount} href="/workouts" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+        <SummaryCard
+          icon={Dumbbell}
+          label="Today's workout"
+          title={todayItems.length === 0 ? "Rest day" : (todayTodo[0]?.workout.name ?? todayItems[0].workout.name)}
+          sub={
+            todayItems.length === 0
+              ? "Nothing scheduled — enjoy the recovery"
+              : todayTodo.length === 0
+                ? "All done for today ✓"
+                : todayItems.length > 1
+                  ? `+${todayItems.length - 1} more · tap to view`
+                  : "Tap to view the exercises"
+          }
+          href={todayItems.length === 1 ? `/workouts/${todayItems[0].workout.id}` : "/calendar?view=day"}
+          muted={todayItems.length === 0}
+        />
+        <SummaryCard
+          icon={Calendar}
+          label="Next class"
+          title={nextClass ? nextClass.title : "No upcoming classes"}
+          sub={nextClass ? `${classDayLabel(nextClass.startsAt)} · ${formatTime(nextClass.startsAt)}` : "Nothing on the schedule"}
+          href={nextClass ? `/classes/${nextClass.id}` : "/calendar"}
+          muted={!nextClass}
+        />
       </div>
 
       {/* Camp applications awaiting a coach's decision — staff only. */}
@@ -414,14 +447,15 @@ export default async function Dashboard() {
   );
 }
 
-function Stat({ icon: Icon, label, value, href }: { icon: React.ComponentType<{ size?: number; className?: string }>; label: string; value: number; href: string }) {
+function SummaryCard({ icon: Icon, label, title, sub, href, muted = false }: { icon: React.ComponentType<{ size?: number; className?: string }>; label: string; title: string; sub?: string; href: string; muted?: boolean }) {
   return (
     <Link href={href} className="bg-card border border-border rounded-xl p-5 hover:border-accent transition block">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted uppercase tracking-wide">{label}</div>
-        <Icon size={16} className="text-muted" />
+        <Icon size={16} className="text-muted shrink-0" />
       </div>
-      <div className="text-3xl font-semibold mt-2 tabular-nums">{value}</div>
+      <div className={`text-lg font-semibold mt-2 leading-tight truncate ${muted ? "text-muted" : ""}`}>{title}</div>
+      {sub && <div className="text-xs text-muted mt-1 truncate">{sub}</div>}
     </Link>
   );
 }

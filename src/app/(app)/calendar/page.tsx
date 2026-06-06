@@ -63,7 +63,7 @@ export default async function CalendarPage({
       ? db.workoutAssignment.findMany({
           where: { customerId: myCustomerId, scheduledDate: { gte: queryStart, lte: queryEnd } },
           orderBy: { scheduledDate: "asc" },
-          include: { workout: { select: { name: true } }, camp: { select: { name: true } } },
+          include: { workout: { select: { id: true, name: true } }, camp: { select: { name: true } } },
         })
       : Promise.resolve([]),
   ]);
@@ -117,7 +117,7 @@ export default async function CalendarPage({
 
 type ClassWithRel = Awaited<ReturnType<typeof db.class.findMany>>[number] & { roster: { attendance: string }[]; camp: { name: string } | null };
 type TodoRow = Awaited<ReturnType<typeof db.todo.findMany>>[number];
-type AssignmentRow = Awaited<ReturnType<typeof db.workoutAssignment.findMany>>[number] & { workout: { name: string }; camp: { name: string } | null };
+type AssignmentRow = Awaited<ReturnType<typeof db.workoutAssignment.findMany>>[number] & { workout: { id: string; name: string }; camp: { name: string } | null };
 
 const HOUR_PX = 52;
 const HOUR_LINE = `repeating-linear-gradient(to bottom, var(--border) 0px, var(--border) 1px, transparent 1px, transparent ${HOUR_PX}px)`;
@@ -400,29 +400,35 @@ function TodoCard({ t }: { t: TodoRow }) {
 
 function AssignmentChip({ a, draggable = false }: { a: AssignmentRow; draggable?: boolean }) {
   const done = a.status === "completed";
+  // A draggable <Link> still fires the delegated dragstart (reschedule) for staff,
+  // while a plain click opens the workout's exercises — so it does both.
   return (
-    <div
+    <Link
+      href={`/workouts/${a.workout.id}`}
       draggable={draggable}
       data-drag-type="assignment"
       data-drag-id={a.id}
-      className={`text-[10px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${done ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`text-[10px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${done ? "bg-background text-muted line-through hover:text-foreground" : "bg-violet-100 text-violet-800 hover:bg-violet-200"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       title={a.camp ? `${a.workout.name} · ${a.camp.name}` : a.workout.name}
     >
       <Dumbbell size={10} className="shrink-0" /> {a.workout.name}
-    </div>
+    </Link>
   );
 }
 
 function AssignmentCard({ a }: { a: AssignmentRow }) {
   const done = a.status === "completed";
   return (
-    <div className={`flex items-start gap-2 p-2.5 rounded-lg border ${done ? "bg-background border-border opacity-60" : "bg-violet-50 border-violet-200"}`}>
+    <Link
+      href={`/workouts/${a.workout.id}`}
+      className={`flex items-start gap-2 p-2.5 rounded-lg border transition ${done ? "bg-background border-border opacity-60 hover:opacity-90" : "bg-violet-50 border-violet-200 hover:border-violet-300"}`}
+    >
       <Dumbbell size={14} className={`mt-0.5 shrink-0 ${done ? "text-emerald-500" : "text-violet-600"}`} />
       <div className="min-w-0">
         <div className={`text-xs leading-snug ${done ? "line-through text-muted" : "text-foreground font-medium"}`}>{a.workout.name}</div>
         {a.camp && <div className="text-[10px] text-muted truncate">{a.camp.name}</div>}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -552,9 +558,9 @@ function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classe
               </div>
               <div className="space-y-1">
                 {dayAssignments.slice(0, 2).map((a) => (
-                  <div key={a.id} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${a.status === "completed" ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800"}`}>
+                  <Link key={a.id} href={`/workouts/${a.workout.id}`} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${a.status === "completed" ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800 hover:bg-violet-200"}`}>
                     <Dumbbell size={10} /> {a.workout.name}
-                  </div>
+                  </Link>
                 ))}
                 {dayTodos.slice(0, 2).map((t) => (
                   t.source === "note" ? (
