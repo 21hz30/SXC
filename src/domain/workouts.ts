@@ -34,6 +34,7 @@ export type WorkoutItemDTO = {
   paceSecPerKm: number | null;
   heightM: number | null;
   notes: string | null;
+  tag: string | null;
 };
 
 export type WorkoutDTO = {
@@ -64,6 +65,7 @@ function toItemDTO(r: Awaited<ReturnType<typeof db.workoutItem.findFirst>>): Wor
     paceSecPerKm: r!.paceSecPerKm,
     heightM: r!.heightM,
     notes: r!.notes,
+    tag: r!.tag,
   };
 }
 
@@ -127,6 +129,7 @@ export async function saveWorkout(
         paceSecPerKm: it.paceSecPerKm ?? null,
         heightM: it.heightM ?? null,
         notes: it.notes ?? null,
+        tag: it.tag ?? null,
       })),
     }),
   ]);
@@ -184,6 +187,7 @@ export async function adjustClassWorkout(
           paceSecPerKm: it.paceSecPerKm ?? null,
           heightM: it.heightM ?? null,
           notes: it.notes ?? null,
+          tag: it.tag ?? null,
         })),
       },
     },
@@ -222,6 +226,7 @@ export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: 
           paceSecPerKm: it.paceSecPerKm,
           heightM: it.heightM,
           notes: it.notes,
+          tag: it.tag,
         })),
       },
     },

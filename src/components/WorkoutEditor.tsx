@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2, Check, GripVertical } from "lucide-react";
 import { toast } from "@/components/Toaster";
-import { CATEGORIES, FIELD_META, formatItem, type Category, type FieldKey } from "@/domain/exercises";
+import { CATEGORIES, FIELD_META, EXERCISE_TAGS, formatItem, type Category, type FieldKey } from "@/domain/exercises";
 
 export type Item = {
   id: string; // local id (may be temp for new items)
@@ -18,6 +18,7 @@ export type Item = {
   paceSecPerKm: number | null;
   heightM: number | null;
   notes: string | null;
+  tag: string | null;
 };
 
 let tmpCounter = 0;
@@ -247,10 +248,10 @@ export function ItemForm({
   onCancel: () => void;
 }) {
   const [category, setCategory] = useState<Category>(initial?.category ?? "ski");
+  const [tag, setTag] = useState<string>(initial?.tag ?? "");
   const [values, setValues] = useState<Record<string, string>>(() => ({
     label: initial?.label ?? "",
     distanceM: initial?.distanceM?.toString() ?? "",
-    timeSec: initial?.timeSec?.toString() ?? "",
     weightKg: initial?.weightKg?.toString() ?? "",
     reps: initial?.reps?.toString() ?? "",
     sets: initial?.sets?.toString() ?? "",
@@ -258,23 +259,31 @@ export function ItemForm({
     heightM: initial?.heightM?.toString() ?? "",
     notes: initial?.notes ?? "",
   }));
+  // Duration is entered as minutes + seconds and stored as total seconds.
+  const [timeMin, setTimeMin] = useState(initial?.timeSec != null ? String(Math.floor(initial.timeSec / 60)) : "");
+  const [timeSecPart, setTimeSecPart] = useState(initial?.timeSec != null ? String(initial.timeSec % 60) : "");
   const fields = CATEGORIES[category].fields;
   const setField = (k: string, v: string) => setValues((cur) => ({ ...cur, [k]: v }));
+
+  const inputCls = "w-full rounded-lg border border-border bg-white px-3 py-2 text-sm";
+  const labelCls = "block text-xs font-medium text-muted uppercase tracking-wide mb-1.5";
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const num = (k: string) => (values[k] && values[k].length > 0 ? Number(values[k]) : null);
+    const timeSec = timeMin === "" && timeSecPart === "" ? null : Number(timeMin || 0) * 60 + Number(timeSecPart || 0);
     onSubmit({
       category,
       label: values.label?.trim() || null,
       distanceM: num("distanceM"),
-      timeSec: num("timeSec"),
+      timeSec,
       weightKg: num("weightKg"),
       reps: num("reps"),
       sets: num("sets"),
       paceSecPerKm: num("paceSecPerKm"),
       heightM: num("heightM"),
       notes: values.notes?.trim() || null,
+      tag: tag || null,
     });
   }
 
@@ -282,30 +291,50 @@ export function ItemForm({
     <form onSubmit={submit} className="bg-background border border-accent/40 rounded-xl p-4 space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Exercise</label>
-          <select value={category} onChange={(e) => setCategory(e.target.value as Category)} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm">
+          <label className={labelCls}>Exercise</label>
+          <select value={category} onChange={(e) => setCategory(e.target.value as Category)} className={inputCls}>
             {(Object.keys(CATEGORIES) as Category[]).map((c) => <option key={c} value={c}>{CATEGORIES[c].label}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">{category === "other" ? "Exercise name" : "Label (optional)"}</label>
-          <input value={values.label ?? ""} onChange={(e) => setField("label", e.target.value)} placeholder={category === "other" ? "Type a custom exercise, e.g. Box jumps" : "e.g. Round 1"} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
+          <label className={labelCls}>{category === "other" ? "Exercise name" : "Label (optional)"}</label>
+          <input value={values.label ?? ""} onChange={(e) => setField("label", e.target.value)} placeholder={category === "other" ? "Type a custom exercise, e.g. Box jumps" : "e.g. Round 1"} className={inputCls} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Tag (optional)</label>
+          <select value={tag} onChange={(e) => setTag(e.target.value)} className={inputCls}>
+            <option value="">No tag</option>
+            {EXERCISE_TAGS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
         </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {(fields as FieldKey[]).filter((f) => f !== "notes").map((f) => (
-          <div key={f}>
-            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">
-              {FIELD_META[f].label}{FIELD_META[f].suffix ? ` (${FIELD_META[f].suffix})` : ""}
-            </label>
-            <input type="number" step={f === "heightM" || f === "weightKg" ? "0.1" : "1"} value={values[f] ?? ""} onChange={(e) => setField(f, e.target.value)} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
-          </div>
-        ))}
+        {(fields as FieldKey[]).filter((f) => f !== "notes").map((f) =>
+          f === "timeSec" ? (
+            <div key={f}>
+              <label className={labelCls}>Duration (min : sec)</label>
+              <div className="flex items-center gap-1">
+                <input type="number" min={0} step={1} value={timeMin} onChange={(e) => setTimeMin(e.target.value)} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+                <span className="text-muted shrink-0">:</span>
+                <input type="number" min={0} max={59} step={1} value={timeSecPart} onChange={(e) => setTimeSecPart(e.target.value)} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+              </div>
+            </div>
+          ) : (
+            <div key={f}>
+              <label className={labelCls}>
+                {FIELD_META[f].label}{FIELD_META[f].suffix ? ` (${FIELD_META[f].suffix})` : ""}
+              </label>
+              <input type="number" step={f === "heightM" || f === "weightKg" ? "0.1" : "1"} value={values[f] ?? ""} onChange={(e) => setField(f, e.target.value)} className={inputCls} />
+            </div>
+          )
+        )}
       </div>
       {fields.includes("notes") && (
         <div>
-          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Notes</label>
-          <input value={values.notes ?? ""} onChange={(e) => setField("notes", e.target.value)} placeholder="e.g. @ goal pace + 10s" className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
+          <label className={labelCls}>Notes</label>
+          <input value={values.notes ?? ""} onChange={(e) => setField("notes", e.target.value)} placeholder="e.g. @ goal pace + 10s" className={inputCls} />
         </div>
       )}
       <div className="flex justify-end gap-2">

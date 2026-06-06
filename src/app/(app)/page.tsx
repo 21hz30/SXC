@@ -72,7 +72,7 @@ export default async function Dashboard() {
     db.class.findFirst({
       where: { startsAt: { gte: now }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
-      select: { id: true, title: true, startsAt: true },
+      select: { id: true, title: true, startsAt: true, location: true, camp: { select: { division: true } } },
     }),
   ]);
 
@@ -215,6 +215,8 @@ export default async function Dashboard() {
           label="Next class"
           title={nextClass ? nextClass.title : "No upcoming classes"}
           sub={nextClass ? `${classDayLabel(nextClass.startsAt)} · ${formatTime(nextClass.startsAt)}` : "Nothing on the schedule"}
+          sub2={nextClass?.location ? `at ${nextClass.location}` : undefined}
+          badge={divisionMeta(nextClass?.camp?.division)}
           href={nextClass ? `/classes/${nextClass.id}` : "/calendar"}
           muted={!nextClass}
         />
@@ -275,7 +277,6 @@ export default async function Dashboard() {
                       <div className="flex items-baseline gap-2 mb-2 px-0.5">
                         <h3 className="text-sm font-semibold tracking-tight">{g.label}</h3>
                         {g.dateText && <span className="text-xs text-muted">{g.dateText}</span>}
-                        <span className="ml-auto text-[11px] text-muted">{g.todo > 0 ? `${g.todo} to do` : "all done"}</span>
                       </div>
                       <ul className="space-y-3">
                         {g.items.map((a) => {
@@ -447,15 +448,30 @@ export default async function Dashboard() {
   );
 }
 
-function SummaryCard({ icon: Icon, label, title, sub, href, muted = false }: { icon: React.ComponentType<{ size?: number; className?: string }>; label: string; title: string; sub?: string; href: string; muted?: boolean }) {
+function divisionMeta(division?: string | null): { label: string; cls: string } | undefined {
+  if (!division) return undefined;
+  const cls: Record<string, string> = {
+    open: "bg-sky-100 text-sky-700",
+    pro: "bg-violet-100 text-violet-700",
+    doubles: "bg-amber-100 text-amber-700",
+    relay: "bg-teal-100 text-teal-700",
+  };
+  return { label: division.charAt(0).toUpperCase() + division.slice(1), cls: cls[division] ?? "bg-zinc-100 text-zinc-600" };
+}
+
+function SummaryCard({ icon: Icon, label, title, sub, sub2, badge, href, muted = false }: { icon: React.ComponentType<{ size?: number; className?: string }>; label: string; title: string; sub?: string; sub2?: string; badge?: { label: string; cls: string }; href: string; muted?: boolean }) {
   return (
     <Link href={href} className="bg-card border border-border rounded-xl p-5 hover:border-accent transition block">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted uppercase tracking-wide">{label}</div>
         <Icon size={16} className="text-muted shrink-0" />
       </div>
-      <div className={`text-lg font-semibold mt-2 leading-tight truncate ${muted ? "text-muted" : ""}`}>{title}</div>
+      <div className="flex items-center gap-2 mt-2">
+        <span className={`text-lg font-semibold leading-tight truncate ${muted ? "text-muted" : ""}`}>{title}</span>
+        {badge && <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>}
+      </div>
       {sub && <div className="text-xs text-muted mt-1 truncate">{sub}</div>}
+      {sub2 && <div className="text-xs text-muted mt-0.5 truncate">{sub2}</div>}
     </Link>
   );
 }

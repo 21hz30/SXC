@@ -45,8 +45,8 @@ export const CATEGORIES: Record<Category, CategoryDef> = {
   wallball:  { label: "Wall balls",         fields: ["reps", "weightKg", "heightM", "timeSec", "notes"] },
   run:       { label: "Run",                fields: ["distanceM", "paceSecPerKm", "timeSec", "notes"] },
   rest:      { label: "Rest",               fields: ["timeSec", "notes"] },
-  strength:  { label: "Strength",           fields: ["sets", "reps", "weightKg", "timeSec", "notes"] },
-  other:     { label: "Other",              fields: ["distanceM", "reps", "weightKg", "timeSec", "notes"] },
+  strength:  { label: "Strength",           fields: ["reps", "sets", "weightKg", "timeSec", "notes"] },
+  other:     { label: "Other",              fields: ["reps", "sets", "weightKg", "distanceM", "timeSec", "notes"] },
 };
 
 export const FIELD_META: Record<FieldKey, { label: string; suffix?: string; type: "number" | "text" }> = {
@@ -64,6 +64,21 @@ export function categoryLabel(category: string): string {
   return CATEGORIES[category as Category]?.label ?? category;
 }
 
+// Training tags an exercise can carry (warm-up, strength, …) — drive a colored
+// badge in the UI and let athletes see the shape of a session at a glance.
+export type ExerciseTag = "warmup" | "strength" | "cardio" | "core" | "mobility" | "cooldown";
+export const EXERCISE_TAGS: { key: ExerciseTag; label: string; badge: string }[] = [
+  { key: "warmup",   label: "Warm-up",   badge: "bg-amber-100 text-amber-800" },
+  { key: "strength", label: "Strength",  badge: "bg-violet-100 text-violet-800" },
+  { key: "cardio",   label: "Cardio",    badge: "bg-sky-100 text-sky-800" },
+  { key: "core",     label: "Core",      badge: "bg-rose-100 text-rose-800" },
+  { key: "mobility", label: "Mobility",  badge: "bg-teal-100 text-teal-800" },
+  { key: "cooldown", label: "Cool-down", badge: "bg-emerald-100 text-emerald-800" },
+];
+export function tagMeta(tag?: string | null) {
+  return EXERCISE_TAGS.find((t) => t.key === tag) ?? null;
+}
+
 export type WorkoutItemInput = {
   id?: string;
   category: Category;
@@ -76,13 +91,23 @@ export type WorkoutItemInput = {
   paceSecPerKm?: number | null;
   heightM?: number | null;
   notes?: string | null;
+  tag?: string | null;
   order?: number;
 };
 
+// Pace etc. — always mm:ss.
 function fmtSec(s: number) {
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+// A duration the way a coach reads it: "20s" under a minute, "30 min" for whole
+// minutes, "1:30" otherwise — so a 60-minute run isn't shown as "60:00".
+export function fmtDuration(s: number): string {
+  if (s < 60) return `${s}s`;
+  if (s % 60 === 0) return `${s / 60} min`;
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 }
 
 /** The display title for an item — its custom label, else the category name. */
@@ -97,14 +122,15 @@ export function itemTitle(item: WorkoutItemInput): string {
  */
 export function itemChips(item: WorkoutItemInput): string[] {
   const bits: string[] = [];
-  if (item.sets != null && item.reps != null) bits.push(`${item.sets} × ${item.reps}`);
+  // Reps and sets/rounds, spelled out so "8 reps × 4 sets" can't be misread.
+  if (item.reps != null && item.sets != null) bits.push(`${item.reps} reps × ${item.sets} ${item.sets === 1 ? "set" : "sets"}`);
   else if (item.reps != null) bits.push(`${item.reps} reps`);
-  else if (item.sets != null) bits.push(`${item.sets} sets`);
+  else if (item.sets != null) bits.push(`${item.sets} ${item.sets === 1 ? "set" : "sets"}`);
   if (item.distanceM != null) bits.push(`${item.distanceM} m`);
   if (item.weightKg != null) bits.push(`${item.weightKg} kg`);
   if (item.heightM != null) bits.push(`target ${item.heightM} m`);
   if (item.paceSecPerKm != null) bits.push(`${fmtSec(item.paceSecPerKm)}/km`);
-  if (item.timeSec != null) bits.push(fmtSec(item.timeSec));
+  if (item.timeSec != null) bits.push(fmtDuration(item.timeSec));
   return bits;
 }
 

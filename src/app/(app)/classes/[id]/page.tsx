@@ -125,7 +125,17 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             {formatDate(cls.startsAt)} · {formatTime(cls.startsAt)} · {cls.location ?? "—"} · {cls.durationMin} min
             {cls.camp && (<> · <Link href={`/camps/${cls.campId}`} className="text-accent hover:underline">{cls.camp.name}</Link></>)}
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight mt-1">{cls.title}</h1>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <h1 className="text-3xl font-semibold tracking-tight">{cls.title}</h1>
+            {cls.camp?.division && (
+              <span className={`text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                cls.camp.division === "pro" ? "bg-violet-100 text-violet-700"
+                : cls.camp.division === "open" ? "bg-sky-100 text-sky-700"
+                : cls.camp.division === "doubles" ? "bg-amber-100 text-amber-700"
+                : "bg-teal-100 text-teal-700"
+              }`}>{cls.camp.division.charAt(0).toUpperCase() + cls.camp.division.slice(1)}</span>
+            )}
+          </div>
           {cls.notes && <p className="text-sm text-muted mt-2 whitespace-pre-wrap">{cls.notes}</p>}
         </header>
 
@@ -439,8 +449,16 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             {cls.camp && (<> · <Link href={`/camps/${cls.campId}`} className="text-accent hover:underline">{cls.camp.name}</Link></>)}
             {cls.createdBy && (<> · Created by {cls.createdBy.name}</>)}
           </div>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <h1 className="text-3xl font-semibold tracking-tight">{cls.title}</h1>
+            {cls.camp?.division && (
+              <span className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${
+                cls.camp.division === "pro" ? "bg-violet-100 text-violet-700"
+                : cls.camp.division === "open" ? "bg-sky-100 text-sky-700"
+                : cls.camp.division === "doubles" ? "bg-amber-100 text-amber-700"
+                : "bg-teal-100 text-teal-700"
+              }`}>{cls.camp.division.charAt(0).toUpperCase() + cls.camp.division.slice(1)}</span>
+            )}
             {cls.dropInAllowed && (
               <span className="text-[11px] font-semibold uppercase tracking-wide rounded px-2 py-1 bg-emerald-100 text-emerald-700">Drop-in</span>
             )}
@@ -563,6 +581,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                         paceSecPerKm: it.paceSecPerKm,
                         heightM: it.heightM,
                         notes: it.notes,
+                        tag: it.tag,
                       }))}
                     />
                     <div className="px-5 pt-4 pb-1 text-[11px] font-medium text-muted uppercase tracking-wide">

@@ -341,6 +341,9 @@ model WorkoutItem {
   paceSecPerKm Int?
   heightM      Float?
   notes        String?
+  /// Optional training tag for grouping/coloring an exercise: warmup | strength
+  /// | cardio | core | mobility | cooldown. Null = untagged.
+  tag          String?
 
   @@index([workoutId, order])
 }
