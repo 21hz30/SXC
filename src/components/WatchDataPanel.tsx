@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Watch, HeartPulse } from "lucide-react";
+import HrZoneBars from "./HrZoneBars";
 
 export type WatchMember = { customerId: string; name: string };
 
@@ -178,21 +179,14 @@ export default function WatchDataPanel({
                 </div>
               </div>
 
+              {(r.zone1Sec || r.zone2Sec || r.zone3Sec || r.zone4Sec || r.zone5Sec) ? (
+                <div className="px-3 pb-2 -mt-1">
+                  <HrZoneBars zones={[r.zone1Sec, r.zone2Sec, r.zone3Sec, r.zone4Sec, r.zone5Sec]} />
+                </div>
+              ) : null}
+
               {isOpen && (
                 <div className="bg-background/60 px-3 py-3 space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <Field label="Distance (m)">
-                      <input type="number" min={0} defaultValue={r.distanceM ?? ""}
-                        onBlur={(e) => patch(m.customerId, { distanceM: e.target.value ? Number(e.target.value) : null })}
-                        placeholder="e.g. 5400" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                    </Field>
-                    <Field label="Avg cadence (spm)">
-                      <input type="number" min={0} defaultValue={r.avgCadence ?? ""}
-                        onBlur={(e) => patch(m.customerId, { avgCadence: e.target.value ? Number(e.target.value) : null })}
-                        placeholder="e.g. 168" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                    </Field>
-                  </div>
-
                   <div>
                     <div className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1.5">
                       Time in HR zones (mm:ss)
@@ -201,7 +195,7 @@ export default function WatchDataPanel({
                       {([1, 2, 3, 4, 5] as const).map((z) => {
                         const key = `zone${z}Sec` as const;
                         return (
-                          <Field key={z} label={`Z${z}`}>
+                          <Field key={z} label={`Zone ${z}`}>
                             <input
                               defaultValue={fmtSec(r[key])}
                               onBlur={(e) => patch(m.customerId, { [key]: toSec(e.target.value) } as Partial<WatchRow>)}
@@ -211,27 +205,6 @@ export default function WatchDataPanel({
                           </Field>
                         );
                       })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] font-medium text-muted uppercase tracking-wide mb-1.5">Training (Garmin)</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Field label="Aerobic (0–5)">
-                        <input type="number" step="0.1" min={0} max={5} defaultValue={r.aerobicTE ?? ""}
-                          onBlur={(e) => patch(m.customerId, { aerobicTE: e.target.value ? Number(e.target.value) : null })}
-                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                      </Field>
-                      <Field label="Anaerobic (0–5)">
-                        <input type="number" step="0.1" min={0} max={5} defaultValue={r.anaerobicTE ?? ""}
-                          onBlur={(e) => patch(m.customerId, { anaerobicTE: e.target.value ? Number(e.target.value) : null })}
-                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                      </Field>
-                      <Field label="Exercise load">
-                        <input type="number" min={0} defaultValue={r.exerciseLoad ?? ""}
-                          onBlur={(e) => patch(m.customerId, { exerciseLoad: e.target.value ? Number(e.target.value) : null })}
-                          className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                      </Field>
                     </div>
                   </div>
 

@@ -144,69 +144,29 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         </Link>
       </header>
 
-      {isNew && <AccountForm action={createCustomer} error={error} cancelHref="/customers" submitLabel="Create customer" />}
-
-      {editingCustomer && (
-        <form action={updateCustomer} className="bg-card border border-border rounded-xl p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {error && (
-            <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              {error === "phone"
-                ? "That phone number is already used by another customer."
-                : error === "dupename"
-                ? "A customer with this name already exists. Add a phone, email, or tag to tell them apart."
-                : "Please enter a name."}
-            </div>
-          )}
-          <input type="hidden" name="customerId" value={editingCustomer.id} />
-          <div className="col-span-2">
-            <label className="block text-sm font-medium mb-1.5">Name *</label>
-            <input name="name" required defaultValue={editingCustomer.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div><label className="block text-sm font-medium mb-1.5">Email</label><input name="email" type="email" defaultValue={editingCustomer.email ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5">Phone</label>
-            <input name="phone" defaultValue={editingCustomer.phone ?? ""} placeholder="Used to keep customers unique" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-          </div>
-          <div><label className="block text-sm font-medium mb-1.5">Age</label><input name="age" type="number" defaultValue={editingCustomer.age ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div><label className="block text-sm font-medium mb-1.5">Weight (kg)</label><input name="weightKg" type="number" step="0.1" defaultValue={editingCustomer.weightKg ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div><label className="block text-sm font-medium mb-1.5">Height (cm)</label><input name="heightCm" type="number" step="0.1" defaultValue={editingCustomer.heightCm ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div><label className="block text-sm font-medium mb-1.5">Tags (comma-separated)</label><input name="tags" defaultValue={editingCustomer.tags ?? ""} placeholder="competing,Oct" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-          <div className="col-span-2 flex gap-2 justify-end">
-            <Link href="/customers" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
-            <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Save changes</button>
-          </div>
-        </form>
-      )}
-
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-background text-muted">
-            <tr className="text-left">
-              <th className="px-5 py-3 font-medium">Name</th>
-              <th className="px-5 py-3 font-medium">Tags</th>
-              <th className="px-5 py-3 font-medium">Hyrox PB</th>
-              <th className="px-5 py-3 font-medium text-right">Attendance</th>
-              <th className="px-5 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {customers.map((c) => {
-              const attended = c.rosterEntries.filter((r) => r.attendance === "attended").length;
-              const total = c.rosterEntries.filter((r) => r.attendance !== "pending").length;
-              return (
-                <tr key={c.id} className="hover:bg-background group">
-                  <td className="px-5 py-4">
-                    <Link href={`/customers/${c.id}`} className="font-medium hover:text-accent">{c.name}</Link>
-                    <div className="text-xs text-muted">{customerDetail(c) || c.email || "—"}</div>
-                  </td>
-                  <td className="px-5 py-4 text-muted">{c.tags ?? "—"}</td>
-                  <td className="px-5 py-4 tabular-nums">{formatSec(c.hyroxPbSec)}</td>
-                  <td className="px-5 py-4 text-right tabular-nums">{attended}/{total}</td>
-                  <td className="px-5 py-4 text-right">
-                    <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100">
-                      <Link href={`/customers?edit=${c.id}`} className="text-muted hover:text-foreground" aria-label={`Edit ${c.name}`}>
-                        <Pencil size={14} />
-                      </Link>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* Customers list — a sidebar (left on desktop; below the form on mobile) */}
+        <aside className="lg:col-span-1 order-2 lg:order-1">
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted border-b border-border">All customers</div>
+            <ul className="divide-y divide-border max-h-[72vh] overflow-y-auto">
+              {customers.length === 0 && <li className="px-4 py-8 text-center text-sm text-muted">No customers yet.</li>}
+              {customers.map((c) => {
+                const attended = c.rosterEntries.filter((r) => r.attendance === "attended").length;
+                const total = c.rosterEntries.filter((r) => r.attendance !== "pending").length;
+                const active = editingCustomer?.id === c.id;
+                return (
+                  <li key={c.id} className={`group flex items-center gap-2 px-4 py-3 hover:bg-background ${active ? "bg-accent/5" : ""}`}>
+                    <Link href={`/customers/${c.id}`} className="min-w-0 flex-1">
+                      <div className="font-medium truncate hover:text-accent">{c.name}</div>
+                      <div className="text-xs text-muted truncate">
+                        {customerDetail(c) || c.email || "—"}
+                        {c.hyroxPbSec != null && <> · PB {formatSec(c.hyroxPbSec)}</>}
+                        {total > 0 && <> · {attended}/{total} att.</>}
+                      </div>
+                    </Link>
+                    <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100">
+                      <Link href={`/customers?edit=${c.id}`} className="text-muted hover:text-foreground" aria-label={`Edit ${c.name}`}><Pencil size={14} /></Link>
                       <form action={deleteCustomer}>
                         <input type="hidden" name="customerId" value={c.id} />
                         <ConfirmSubmit
@@ -217,12 +177,53 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                         </ConfirmSubmit>
                       </form>
                     </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </aside>
+
+        {/* Main content — the add/edit form, or a hint on desktop */}
+        <div className="lg:col-span-2 order-1 lg:order-2 space-y-6">
+          {isNew ? (
+            <AccountForm action={createCustomer} error={error} cancelHref="/customers" submitLabel="Create customer" />
+          ) : editingCustomer ? (
+            <form action={updateCustomer} className="bg-card border border-border rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {error && (
+                <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {error === "phone"
+                    ? "That phone number is already used by another customer."
+                    : error === "dupename"
+                    ? "A customer with this name already exists. Add a phone, email, or tag to tell them apart."
+                    : "Please enter a name."}
+                </div>
+              )}
+              <input type="hidden" name="customerId" value={editingCustomer.id} />
+              <div className="col-span-2">
+                <label className="block text-sm font-medium mb-1.5">Name *</label>
+                <input name="name" required defaultValue={editingCustomer.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+              </div>
+              <div><label className="block text-sm font-medium mb-1.5">Email</label><input name="email" type="email" defaultValue={editingCustomer.email ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Phone</label>
+                <input name="phone" defaultValue={editingCustomer.phone ?? ""} placeholder="Used to keep customers unique" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+              </div>
+              <div><label className="block text-sm font-medium mb-1.5">Age</label><input name="age" type="number" defaultValue={editingCustomer.age ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+              <div><label className="block text-sm font-medium mb-1.5">Weight (kg)</label><input name="weightKg" type="number" step="0.1" defaultValue={editingCustomer.weightKg ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+              <div><label className="block text-sm font-medium mb-1.5">Height (cm)</label><input name="heightCm" type="number" step="0.1" defaultValue={editingCustomer.heightCm ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+              <div><label className="block text-sm font-medium mb-1.5">Tags (comma-separated)</label><input name="tags" defaultValue={editingCustomer.tags ?? ""} placeholder="competing,Oct" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+              <div className="col-span-2 flex gap-2 justify-end">
+                <Link href="/customers" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
+                <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Save changes</button>
+              </div>
+            </form>
+          ) : (
+            <div className="hidden lg:flex items-center justify-center text-center bg-card border border-border border-dashed rounded-xl p-10 text-sm text-muted min-h-[16rem]">
+              <span>Pick a customer to edit, open one for full details, or <Link href="/customers?new=1" className="text-accent hover:underline">add a new customer</Link>.</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

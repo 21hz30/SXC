@@ -14,9 +14,10 @@ import ClassWorkoutEditor from "@/components/ClassWorkoutEditor";
 import ClassWorkoutList from "@/components/ClassWorkoutList";
 import WorkoutCreateDrawer from "@/components/WorkoutCreateDrawer";
 import AddWorkoutPicker from "@/components/AddWorkoutPicker";
-import WorkoutFeedbackPanel, { type WorkoutPerfRow } from "@/components/WorkoutFeedbackPanel";
 import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
+import HrZoneBars from "@/components/HrZoneBars";
 import { canAccessCamp } from "@/lib/access";
+import { classStatus, canSignUp, CLASS_STATUS_META } from "@/lib/classStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -44,17 +45,18 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     const myCustomerId = await getMyCustomerId();
     // Access: a drop-in / free-standing class is open; a camp class needs an
     // active membership in that camp.
-    let allowed = !cls.campId || cls.dropInAllowed;
-    if (!allowed && cls.campId && myCustomerId) {
-      const mem = await db.campMember.findFirst({
-        where: { campId: cls.campId, customerId: myCustomerId, status: "active" },
-      });
-      allowed = !!mem;
-    }
+    const isMember = !!(cls.campId && myCustomerId && (await db.campMember.findFirst({
+      where: { campId: cls.campId, customerId: myCustomerId, status: "active" }, select: { id: true },
+    })));
+    const allowed = !cls.campId || isMember || cls.dropInAllowed;
     if (!allowed) redirect(cls.campId ? `/camps/${cls.campId}` : "/calendar");
+    // Joining a camp class you're not a member of is a drop-in application.
+    const isDropIn = !!cls.campId && !isMember;
 
     const myEntry = myCustomerId ? cls.roster.find((r) => r.customerId === myCustomerId) ?? null : null;
-    const isFull = cls.roster.length >= cls.capacity;
+    const status = classStatus({ canceledAt: cls.canceledAt, startsAt: cls.startsAt, durationMin: cls.durationMin, capacity: cls.capacity, rosterCount: cls.roster.length });
+    // The coach reveals the session plan 30 minutes before it starts.
+    const planRevealed = Date.now() >= cls.startsAt.getTime() - 30 * 60_000;
     // Feedback opens once the class has started (or the coach explicitly asks).
     const classStarted = cls.startsAt.getTime() <= Date.now();
     const showFeedback = !!myCustomerId && (classStarted || !!cls.feedbackRequestedAt);
@@ -64,6 +66,9 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           db.classWatchData.findUnique({ where: { classId_customerId: { classId: id, customerId: myCustomerId } } }),
         ])
       : [null, null];
+    // HR-zone times → minutes for the inputs; the % split is drawn by HrZoneBars.
+    const zSec = [myWatch?.zone1Sec ?? null, myWatch?.zone2Sec ?? null, myWatch?.zone3Sec ?? null, myWatch?.zone4Sec ?? null, myWatch?.zone5Sec ?? null];
+    const zMin = zSec.map((s) => (s != null ? Math.round((s / 60) * 10) / 10 : ""));
 
     // The athlete's own post-class feedback: how it felt + watch & nutrition
     // numbers. Scoped to their own ids — never trusts a client-supplied id.
@@ -76,7 +81,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       const perf = {
         status: "completed",
         rpe: num("rpe"),
-        fatiguePct: num("fatiguePct"),
         feeling: String(formData.get("feeling") ?? "").trim() || null,
         injuryNote: String(formData.get("injuryNote") ?? "").trim() || null,
         notes: String(formData.get("notes") ?? "").trim() || null,
@@ -85,10 +89,11 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       const existing = await db.performance.findFirst({ where: { classId: id, customerId: mine, workoutId: null }, select: { id: true } });
       if (existing) await db.performance.update({ where: { id: existing.id }, data: perf });
       else await db.performance.create({ data: { classId: id, customerId: mine, workoutId: null, ...perf } });
-      // Watch + nutrition numbers.
+      // Heart-rate (avg/max + minutes per zone) + optional nutrition.
+      const minToSec = (m: number | null) => (m == null ? null : Math.round(m * 60));
       await upsertWatchData({ user: u }, id, mine, {
         avgHr: num("avgHr"), maxHr: num("maxHr"),
-        aerobicTE: num("aerobicTE"), anaerobicTE: num("anaerobicTE"), exerciseLoad: num("exerciseLoad"),
+        zone1Sec: minToSec(num("zone1Min")), zone2Sec: minToSec(num("zone2Min")), zone3Sec: minToSec(num("zone3Min")), zone4Sec: minToSec(num("zone4Min")), zone5Sec: minToSec(num("zone5Min")),
         restingCalories: num("restingCalories"), activeCalories: num("activeCalories"), sweatLossMl: num("sweatLossMl"),
       });
       revalidatePath(`/classes/${id}`);
@@ -100,13 +105,14 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       const u = await requireUser();
       const a = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
       if (!a?.customerId) redirect("/profile");
-      const fresh = await db.class.findUnique({ where: { id }, select: { capacity: true, _count: { select: { roster: true } } } });
+      const fresh = await db.class.findUnique({ where: { id }, select: { capacity: true, canceledAt: true, startsAt: true, durationMin: true, _count: { select: { roster: true } } } });
       const existing = await db.rosterEntry.findUnique({ where: { classId_customerId: { classId: id, customerId: a.customerId } } });
-      if (!existing && fresh && fresh._count.roster < fresh.capacity) {
+      const st = fresh ? classStatus({ canceledAt: fresh.canceledAt, startsAt: fresh.startsAt, durationMin: fresh.durationMin, capacity: fresh.capacity, rosterCount: fresh._count.roster }) : "canceled";
+      if (!existing && canSignUp(st)) {
         await db.rosterEntry.create({ data: { classId: id, customerId: a.customerId } });
       }
       revalidatePath(`/classes/${id}`);
-      redirect(flashUrl(`/classes/${id}`, existing ? "You're already signed up" : "You're signed up!"));
+      redirect(flashUrl(`/classes/${id}`, existing ? "You're already signed up" : canSignUp(st) ? "You're signed up!" : `Can't join — class is ${st}`));
     }
     async function cancelSignUp() {
       "use server";
@@ -135,6 +141,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                 : "bg-teal-100 text-teal-700"
               }`}>{cls.camp.division.charAt(0).toUpperCase() + cls.camp.division.slice(1)}</span>
             )}
+            <span className={`text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${CLASS_STATUS_META[status].cls}`}>{CLASS_STATUS_META[status].label}</span>
           </div>
           {cls.notes && <p className="text-sm text-muted mt-2 whitespace-pre-wrap">{cls.notes}</p>}
         </header>
@@ -145,15 +152,21 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             <div className="text-sm font-medium">
               {myEntry ? (
                 <span className="text-emerald-700">✓ You&apos;re signed up</span>
-              ) : isFull ? (
+              ) : status === "canceled" ? (
+                <span className="text-red-600">This class was canceled</span>
+              ) : status === "finished" ? (
+                <span className="text-muted">Class finished — review only</span>
+              ) : status === "full" ? (
                 <span className="text-muted">Class is full</span>
+              ) : isDropIn ? (
+                "Drop-in spot available"
               ) : (
                 "Open for sign-up"
               )}
             </div>
             <div className="text-xs text-muted mt-0.5 tabular-nums">{cls.roster.length} / {cls.capacity} spots filled</div>
           </div>
-          {myEntry ? (
+          {myEntry && (status === "open" || status === "full") ? (
             <form action={cancelSignUp}>
               <ConfirmSubmit
                 message={`Cancel your sign-up for "${cls.title}" on ${formatDate(cls.startsAt)}?`}
@@ -162,17 +175,17 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                 Cancel sign-up
               </ConfirmSubmit>
             </form>
-          ) : isFull ? (
-            <span className="rounded-lg border border-border px-4 py-2 text-sm text-muted">Full</span>
-          ) : (
+          ) : !myEntry && status === "open" ? (
             <form action={signUp}>
               <ConfirmSubmit
-                message={`Sign up for "${cls.title}" on ${formatDate(cls.startsAt)} at ${formatTime(cls.startsAt)}?`}
+                message={`${isDropIn ? "Apply for a drop-in spot in" : "Sign up for"} "${cls.title}" on ${formatDate(cls.startsAt)} at ${formatTime(cls.startsAt)}?`}
                 className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90"
               >
-                Sign up
+                {isDropIn ? "Apply for drop-in" : "Sign up"}
               </ConfirmSubmit>
             </form>
+          ) : (
+            <span className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${CLASS_STATUS_META[status].cls}`}>{CLASS_STATUS_META[status].label}</span>
           )}
         </div>
 
@@ -187,57 +200,62 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
               <p className="text-xs text-accent mb-2">Your coach asked the class to share how this session went.</p>
             )}
             <form action={submitFeedback} className="space-y-4">
-              {/* How it felt */}
+              {/* How it felt — RPE (explained) + a simple 5-level feeling + injury */}
               <div>
                 <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">How it felt</div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] text-muted mb-1">Effort (RPE 1–10)</label>
+                    <label className="block text-[11px] text-muted mb-1">Effort — RPE (1–10)</label>
                     <input name="rpe" type="number" min={1} max={10} defaultValue={myPerf?.rpe ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                    <div className="text-[10px] text-muted mt-1 leading-snug">RPE = Rate of Perceived Exertion — how hard it felt. 1 = very easy, 10 = all-out max.</div>
                   </div>
                   <div>
-                    <label className="block text-[11px] text-muted mb-1">Tiredness</label>
-                    <select name="fatiguePct" defaultValue={myPerf?.fatiguePct != null ? String(myPerf.fatiguePct) : ""} className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
-                      <option value="">—</option>
-                      <option value="15">Fresh</option>
-                      <option value="40">A bit tired</option>
-                      <option value="65">Tired</option>
-                      <option value="85">Very tired</option>
-                      <option value="95">Wrecked</option>
-                    </select>
-                  </div>
-                  <div className="col-span-2">
                     <label className="block text-[11px] text-muted mb-1">Feeling about the session</label>
-                    <input name="feeling" defaultValue={myPerf?.feeling ?? ""} placeholder="e.g. strong on the row, legs heavy" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
+                    <select name="feeling" defaultValue={myPerf?.feeling ?? ""} className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm">
+                      <option value="">—</option>
+                      <option value="很弱">很弱 · Very weak</option>
+                      <option value="弱">弱 · Weak</option>
+                      <option value="中等">中等 · Medium</option>
+                      <option value="强">强 · Strong</option>
+                      <option value="很强">很强 · Very strong</option>
+                    </select>
+                    <div className="text-[10px] text-muted mt-1 leading-snug">How strong you felt overall during the session.</div>
                   </div>
-                  <div className="col-span-2 sm:col-span-4">
+                  <div className="sm:col-span-2">
                     <label className="block text-[11px] text-muted mb-1">Any injury / not feeling well?</label>
                     <input name="injuryNote" defaultValue={myPerf?.injuryNote ?? ""} placeholder="anything off — niggles, illness, dizziness…" className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />
                   </div>
                 </div>
               </div>
 
-              {/* Watch data */}
+              {/* Heart rate — avg/max + minutes per HR zone (the % split is derived) */}
               <div>
-                <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">Watch data <span className="normal-case text-muted/70">(from your watch / Garmin)</span></div>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  <div><label className="block text-[11px] text-muted mb-1">Avg HR</label><input name="avgHr" type="number" defaultValue={myWatch?.avgHr ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
-                  <div><label className="block text-[11px] text-muted mb-1">Max HR</label><input name="maxHr" type="number" defaultValue={myWatch?.maxHr ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
-                  <div><label className="block text-[11px] text-muted mb-1">Aerobic (0–5)</label><input name="aerobicTE" type="number" step="0.1" min={0} max={5} defaultValue={myWatch?.aerobicTE ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
-                  <div><label className="block text-[11px] text-muted mb-1">Anaerobic (0–5)</label><input name="anaerobicTE" type="number" step="0.1" min={0} max={5} defaultValue={myWatch?.anaerobicTE ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
-                  <div><label className="block text-[11px] text-muted mb-1">Exercise load</label><input name="exerciseLoad" type="number" defaultValue={myWatch?.exerciseLoad ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">Heart rate <span className="normal-case text-muted/70">(from your watch)</span></div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div><label className="block text-[11px] text-muted mb-1">Avg HR (bpm)</label><input name="avgHr" type="number" defaultValue={myWatch?.avgHr ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
+                  <div><label className="block text-[11px] text-muted mb-1">Max HR (bpm)</label><input name="maxHr" type="number" defaultValue={myWatch?.maxHr ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
                 </div>
+                <div className="text-[11px] text-muted mb-1.5">Minutes in each HR zone — Z1 easy → Z5 max. The % split is worked out for you.</div>
+                <div className="grid grid-cols-5 gap-2">
+                  {([1, 2, 3, 4, 5] as const).map((z) => (
+                    <div key={z}>
+                      <label className="block text-[10px] text-muted mb-1 text-center">Zone {z}</label>
+                      <input name={`zone${z}Min`} type="number" min={0} step="0.1" defaultValue={zMin[z - 1]} placeholder="min" className="w-full rounded-lg border border-border px-1.5 py-1.5 text-sm text-center" />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3"><HrZoneBars zones={zSec} showLegend /></div>
               </div>
 
-              {/* Nutrition & hydration */}
-              <div>
-                <div className="text-[11px] font-medium text-muted uppercase tracking-wide mb-1.5">Nutrition &amp; hydration</div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Nutrition & hydration — optional, collapsed by default */}
+              <details className="rounded-lg border border-border bg-background/40 px-3 py-2">
+                <summary className="text-[11px] font-medium text-muted uppercase tracking-wide cursor-pointer select-none">Nutrition &amp; hydration <span className="normal-case text-muted/70">· optional</span></summary>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
                   <div><label className="block text-[11px] text-muted mb-1">Resting calories</label><input name="restingCalories" type="number" defaultValue={myWatch?.restingCalories ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
                   <div><label className="block text-[11px] text-muted mb-1">Active calories</label><input name="activeCalories" type="number" defaultValue={myWatch?.activeCalories ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
                   <div><label className="block text-[11px] text-muted mb-1">Est. sweat loss (ml)</label><input name="sweatLossMl" type="number" defaultValue={myWatch?.sweatLossMl ?? ""} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" /></div>
                 </div>
-              </div>
+              </details>
 
               <div className="flex justify-end">
                 <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">{myPerf ? "Update feedback" : "Submit feedback"}</button>
@@ -252,6 +270,10 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           {cls.workouts.length === 0 ? (
             <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
               No workout posted yet — check back before class.
+            </div>
+          ) : !planRevealed ? (
+            <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
+              🔒 The coach reveals the workout <span className="font-medium text-foreground">30 minutes before</span> the class — at {formatTime(new Date(cls.startsAt.getTime() - 30 * 60_000))}.
             </div>
           ) : (
             <div className="space-y-4">
@@ -313,19 +335,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
   const reportByCustomer = new Map(reports.map((r) => [r.customerId, r]));
   const perfCustomerIds = new Set(performances.map((p) => p.customerId));
-  // Map each workout to its exercises (for per-workout feedback inputs) and to
-  // the subset of performance rows scoped to it.
-  const workoutFeedbackData = cls.workouts.map((cw) => ({
-    workoutId: cw.workoutId,
-    name: cw.workout.name,
-    exercises: cw.workout.items.map((it) => {
-      const { title, details } = formatItem(it as never);
-      return { id: it.id, label: details ? `${title} (${details})` : title };
-    }),
-    initial: performances
-      .filter((p) => p.workoutId === cw.workoutId)
-      .map((p) => ({ ...p, workoutId: cw.workoutId } as WorkoutPerfRow)),
-  }));
   const members = cls.roster.map((r) => ({ customerId: r.customerId, name: r.customer.name }));
   // Post-class feedback collection: a member "responded" once they have a
   // class-overall Performance row (workoutId null).
@@ -439,6 +448,18 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     redirect(flashUrl(`/classes/${id}`, msg));
   }
 
+  // Coach cancels (or reopens) the class. Other statuses are derived.
+  async function toggleCancel() {
+    "use server";
+    await requireCoach();
+    const c = await db.class.findUnique({ where: { id }, select: { canceledAt: true } });
+    await db.class.update({ where: { id }, data: { canceledAt: c?.canceledAt ? null : new Date() } });
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, c?.canceledAt ? "Class reopened" : "Class canceled"));
+  }
+
+  const status = classStatus({ canceledAt: cls.canceledAt, startsAt: cls.startsAt, durationMin: cls.durationMin, capacity: cls.capacity, rosterCount: cls.roster.length });
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <BackButton fallback={cls.campId ? `/camps/${cls.campId}` : "/calendar"} label="Back" />
@@ -462,6 +483,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             {cls.dropInAllowed && (
               <span className="text-[11px] font-semibold uppercase tracking-wide rounded px-2 py-1 bg-emerald-100 text-emerald-700">Drop-in</span>
             )}
+            <span className={`text-[11px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${CLASS_STATUS_META[status].cls}`}>{CLASS_STATUS_META[status].label}</span>
           </div>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-2 mt-1">
@@ -471,6 +493,14 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           >
             {edit ? "Cancel" : "Edit class"}
           </Link>
+          <form action={toggleCancel}>
+            <ConfirmSubmit
+              message={cls.canceledAt ? `Reopen "${cls.title}"?` : `Cancel "${cls.title}"? Athletes won't be able to join, but the roster and history stay.`}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${cls.canceledAt ? "border-border hover:border-accent hover:text-accent" : "border-border text-muted hover:border-red-300 hover:text-red-600"}`}
+            >
+              {cls.canceledAt ? "Reopen class" : "Cancel class"}
+            </ConfirmSubmit>
+          </form>
           {/* Ask the class for post-class feedback */}
           <form action={requestFeedback} className="text-right">
             <button type="submit" className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-accent hover:text-accent">
@@ -557,8 +587,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
         ) : (
           <ClassWorkoutList
             classId={cls.id}
-            items={cls.workouts.map((cw, idx) => {
-              const fb = workoutFeedbackData[idx];
+            items={cls.workouts.map((cw) => {
               return {
                 workoutId: cw.workoutId,
                 rounds: cw.rounds,
@@ -583,16 +612,6 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                         notes: it.notes,
                         tag: it.tag,
                       }))}
-                    />
-                    <div className="px-5 pt-4 pb-1 text-[11px] font-medium text-muted uppercase tracking-wide">
-                      Athlete feedback for this workout
-                    </div>
-                    <WorkoutFeedbackPanel
-                      classId={cls.id}
-                      workoutId={cw.workoutId}
-                      members={members}
-                      exercises={fb.exercises}
-                      initial={fb.initial}
                     />
                   </div>
                 ),

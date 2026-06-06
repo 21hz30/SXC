@@ -374,6 +374,9 @@ model Class {
   dropInAllowed Boolean @default(false)  // when true, athletes outside the camp can join
   /// Set when a coach asks the class's members to submit post-class feedback.
   feedbackRequestedAt DateTime?
+  /// Set when a coach cancels the class. Drives the "canceled" status; the rest
+  /// (open / full / finished) is derived from capacity + start time.
+  canceledAt  DateTime?
   campId      String?
   camp        Camp?    @relation(fields: [campId], references: [id])
   createdById String?

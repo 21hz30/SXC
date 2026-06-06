@@ -54,7 +54,15 @@ export function nonStaffCustomerWhere(): Record<string, unknown> {
 /** Class `where` filter: staff = all, customer = classes in their camps. */
 export function classScope(u: SessionUser): Record<string, unknown> {
   if (isStaff(u)) return {};
-  if (u.role === "customer") return { camp: { members: { some: { customer: { userAccount: { id: u.id } } } } } };
+  // A customer sees their own camps' classes PLUS any drop-in class (so they can
+  // discover and apply for sessions outside their camp).
+  if (u.role === "customer")
+    return {
+      OR: [
+        { camp: { members: { some: { customer: { userAccount: { id: u.id } } } } } },
+        { dropInAllowed: true },
+      ],
+    };
   return { id: "__none__" };
 }
 

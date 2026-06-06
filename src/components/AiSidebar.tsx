@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
-import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon, MessagesSquare } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useAiPanel } from "@/lib/stores/aiPanel";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,8 @@ function parseSlashLine(text: string) {
   return m ? { cmd: m[1].toLowerCase(), rest: m[2] } : null;
 }
 
-export default function AiSidebar({ user: _user }: { user: { name: string; role: string } }) {
+export default function AiSidebar({ user }: { user: { name: string; role: string } }) {
+  const isStaff = user.role === "admin" || user.role === "coach";
   const open = useAiPanel((s) => s.open);
   const setOpen = useAiPanel((s) => s.setOpen);
   const [session, setSession] = useState<Session | null>(null);
@@ -49,11 +50,25 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showSlash, setShowSlash] = useState(false);
+  // Staff can scope a NEW chat to a customer ("project"); athletes just talk.
+  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
+  const [draftCustomerId, setDraftCustomerId] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const loadedRef = useRef<string | null>(null);
 
+  const router = useRouter();
   const searchParams = useSearchParams();
   const activeId = searchParams.get("chat");
+
+  // Staff get the customer list for the "talk about a customer" picker.
+  useEffect(() => {
+    if (!isStaff) return;
+    fetch("/api/customers")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setCustomers(Array.isArray(list) ? list.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })) : []))
+      .catch(() => {});
+  }, [isStaff]);
 
   // Let other UI (e.g. the chat list) open the panel via a custom event.
   // Open/close state itself lives in the Zustand store.
@@ -63,15 +78,21 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
     return () => window.removeEventListener("sxc:open-ai", opener);
   }, [setOpen]);
 
-  // Load the active session whenever ?chat=ID changes
+  // Load the active session whenever ?chat=ID changes — but skip the one we just
+  // created locally (loadedRef), so we don't clobber an in-flight reply.
   useEffect(() => {
-    if (!activeId) { setSession(null); setMessages([]); return; }
+    if (!activeId) {
+      if (loadedRef.current !== null) { setSession(null); setMessages([]); loadedRef.current = null; }
+      return;
+    }
+    if (activeId === loadedRef.current) return;
     (async () => {
       const sRes = await fetch("/api/chat/sessions");
       if (!sRes.ok) return;
       const list: Session[] = await sRes.json();
       const found = list.find((s) => s.id === activeId);
-      if (!found) { setSession(null); setMessages([]); return; }
+      if (!found) { setSession(null); setMessages([]); loadedRef.current = null; return; }
+      loadedRef.current = found.id;
       setSession(found);
       const mRes = await fetch(`/api/chat/sessions/${found.id}/messages`);
       setMessages(mRes.ok ? await mRes.json() : []);
@@ -114,13 +135,40 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
   }
 
   async function send(text: string) {
-    if (!text.trim() || loading || !session) return;
+    if (!text.trim() || loading) return;
     setInput("");
     setShowSlash(false);
 
+    // "Just talk": with no chat yet, start one (optionally scoped to a customer
+    // the coach picked) so the user never has to select a session first.
+    let sess = session;
+    let created = false;
+    if (!sess) {
+      try {
+        const res = await fetch("/api/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: text.replace(/^\//, "").slice(0, 48), customerId: draftCustomerId || null }),
+        });
+        if (!res.ok) throw new Error("Couldn't start the chat.");
+        sess = (await res.json()) as Session;
+        created = true;
+        loadedRef.current = sess.id;
+        setSession(sess);
+        setDraftCustomerId("");
+        const params = new URLSearchParams(window.location.search);
+        params.set("chat", sess.id);
+        router.replace(`${window.location.pathname}?${params.toString()}`);
+        notifySessionsChanged();
+      } catch (e) {
+        setMessages((m) => [...m, { role: "user", content: text }, { role: "assistant", content: `⚠️ ${(e as Error).message}` }]);
+        return;
+      }
+    }
+
     if (await executeSlash(text)) return;
 
-    const next: Msg[] = [...messages, { role: "user", content: text }];
+    const next: Msg[] = [...(created ? [] : messages), { role: "user", content: text }];
     setMessages(next);
     setLoading(true);
 
@@ -128,7 +176,7 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: session.id, messages: next }),
+        body: JSON.stringify({ sessionId: sess.id, messages: next }),
       });
       if (!res.ok || !res.body) {
         const txt = await res.text().catch(() => "");
@@ -208,70 +256,80 @@ export default function AiSidebar({ user: _user }: { user: { name: string; role:
           </button>
         </div>
 
-        {/* Body */}
-        {!session ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-muted">
-            <MessagesSquare size={28} className="mb-3" />
-            <div className="text-sm font-medium text-foreground">No chat selected</div>
-            <div className="text-xs mt-1 max-w-[14rem]">Pick a chat from the left sidebar or tap + to start a new one.</div>
-          </div>
-        ) : (
-          <>
-            <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-3">
-              {messages.length === 0 && (
-                <div className="space-y-1.5">
-                  <div className="text-xs text-muted uppercase tracking-wide">Try</div>
-                  {SUGGESTIONS.map((s) => (
-                    <button key={s} onClick={() => send(s)} className="block w-full text-left text-sm bg-background border border-border rounded-lg px-3 py-2 hover:border-accent">{s}</button>
-                  ))}
+        {/* Body — past messages, or a welcome when starting fresh */}
+        <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-3">
+          {messages.length === 0 ? (
+            <div className="space-y-3">
+              <div className="text-sm font-medium text-foreground">
+                {session ? "Continue the conversation" : "Hi — I'm your AI co-coach. Just ask."}
+              </div>
+              {isStaff && !session && (
+                <div>
+                  <label className="block text-[11px] text-muted uppercase tracking-wide mb-1">Talk about (optional)</label>
+                  <select
+                    value={draftCustomerId}
+                    onChange={(e) => setDraftCustomerId(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                  >
+                    <option value="">General — no customer</option>
+                    {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
               )}
-              {messages.map((m, i) => (
-                <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={
-                      m.role === "user"
-                        ? "max-w-[85%] bg-foreground text-white rounded-2xl rounded-tr-sm px-3.5 py-2 text-sm whitespace-pre-wrap break-words"
-                        : "max-w-[85%] bg-background border border-border rounded-2xl rounded-tl-sm px-3.5 py-2 break-words"
-                    }
-                  >
-                    {m.role === "assistant"
-                      ? m.content ? <Markdown>{m.content}</Markdown> : (loading && i === messages.length - 1 ? <span className="text-sm">…</span> : null)
-                      : m.content}
-                  </div>
+              <div className="space-y-1.5">
+                <div className="text-xs text-muted uppercase tracking-wide">Try</div>
+                {SUGGESTIONS.map((s) => (
+                  <button key={s} onClick={() => send(s)} className="block w-full text-left text-sm bg-background border border-border rounded-lg px-3 py-2 hover:border-accent">{s}</button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={
+                    m.role === "user"
+                      ? "max-w-[85%] bg-foreground text-white rounded-2xl rounded-tr-sm px-3.5 py-2 text-sm whitespace-pre-wrap break-words"
+                      : "max-w-[85%] bg-background border border-border rounded-2xl rounded-tl-sm px-3.5 py-2 break-words"
+                  }
+                >
+                  {m.role === "assistant"
+                    ? m.content ? <Markdown>{m.content}</Markdown> : (loading && i === messages.length - 1 ? <span className="text-sm">…</span> : null)
+                    : m.content}
                 </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Input — always available, so you can just start talking */}
+        <div className="relative border-t border-border">
+          {showSlash && (
+            <div className="absolute left-3 right-3 bottom-full mb-2 bg-white border border-border rounded-xl shadow-lg overflow-hidden">
+              <div className="px-3 py-2 text-xs text-muted bg-background border-b border-border">Commands</div>
+              {SLASH_CMDS.map((cmd) => (
+                <button key={cmd.name} onClick={() => { setInput(`/${cmd.name} `); setShowSlash(false); inputRef.current?.focus(); }} className="flex items-start gap-3 w-full text-left px-3 py-2.5 hover:bg-background">
+                  <cmd.icon size={16} className="text-accent mt-0.5 shrink-0" />
+                  <div><div className="text-sm font-medium">/{cmd.name}</div><div className="text-xs text-muted">{cmd.description}</div></div>
+                </button>
               ))}
             </div>
-
-            <div className="relative border-t border-border">
-              {showSlash && (
-                <div className="absolute left-3 right-3 bottom-full mb-2 bg-white border border-border rounded-xl shadow-lg overflow-hidden">
-                  <div className="px-3 py-2 text-xs text-muted bg-background border-b border-border">Commands</div>
-                  {SLASH_CMDS.map((cmd) => (
-                    <button key={cmd.name} onClick={() => { setInput(`/${cmd.name} `); setShowSlash(false); inputRef.current?.focus(); }} className="flex items-start gap-3 w-full text-left px-3 py-2.5 hover:bg-background">
-                      <cmd.icon size={16} className="text-accent mt-0.5 shrink-0" />
-                      <div><div className="text-sm font-medium">/{cmd.name}</div><div className="text-xs text-muted">{cmd.description}</div></div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="p-3 flex gap-2">
-                <input
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => onInputChange(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Escape") setShowSlash(false); }}
-                  placeholder="Ask anything or type /"
-                  disabled={loading}
-                  className="flex-1 rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent"
-                />
-                <button type="submit" disabled={loading || !input.trim()} className="rounded-lg bg-foreground text-white px-3 disabled:opacity-40 hover:opacity-90">
-                  <Send size={16} />
-                </button>
-              </form>
-            </div>
-          </>
-        )}
+          )}
+          <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="p-3 flex gap-2">
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setShowSlash(false); }}
+              placeholder={session ? "Reply…" : "Ask anything or type /"}
+              disabled={loading}
+              className="flex-1 rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <button type="submit" disabled={loading || !input.trim()} className="rounded-lg bg-foreground text-white px-3 disabled:opacity-40 hover:opacity-90">
+              <Send size={16} />
+            </button>
+          </form>
+        </div>
       </aside>
     </>
   );

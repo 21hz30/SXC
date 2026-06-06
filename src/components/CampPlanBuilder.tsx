@@ -7,18 +7,17 @@ import { mondayOf } from "@/lib/utils";
 
 type WorkoutOpt = { id: string; name: string };
 type WRow = { key: number; workoutId: string; note: string };
-type CRow = { key: number; title: string; time: string };
-type Day = { workouts: WRow[]; classes: CRow[] };
+type Day = { workouts: WRow[] };
 
 function emptyWeek(): Day[] {
-  return Array.from({ length: 7 }, () => ({ workouts: [], classes: [] }));
+  return Array.from({ length: 7 }, () => ({ workouts: [] }));
 }
 
 /**
  * Weekly camp-plan builder. The coach lays out each day of a Mon–Sun week with
- * any number of workouts (assigned to every active member) and/or classes
- * (group sessions scheduled for the whole camp). The whole week is serialized
- * into a single hidden `plan` field and handed to the server action.
+ * any number of workouts, assigned to every active member. The whole week is
+ * serialized into a single hidden `plan` field and handed to the server action.
+ * (Classes are scheduled separately on the calendar — not from the plan.)
  */
 export default function CampPlanBuilder({
   workouts,
@@ -29,7 +28,7 @@ export default function CampPlanBuilder({
 }: {
   workouts: WorkoutOpt[];
   weekStart: string;
-  initialDays: { workouts: { workoutId: string; note: string }[]; classes: { title: string; time: string }[] }[];
+  initialDays: { workouts: { workoutId: string; note: string }[] }[];
   memberCount: number;
   action: (formData: FormData) => void | Promise<void>;
 }) {
@@ -45,7 +44,6 @@ export default function CampPlanBuilder({
     let k = 0;
     return initialDays.map((d) => ({
       workouts: d.workouts.map((w) => ({ key: (k += 1), workoutId: w.workoutId, note: w.note })),
-      classes: d.classes.map((c) => ({ key: (k += 1), title: c.title, time: c.time })),
     }));
   });
 
@@ -68,18 +66,12 @@ export default function CampPlanBuilder({
   const setWorkout = (d: number, key: number, patch: Partial<WRow>) => update(d, (day) => ({ ...day, workouts: day.workouts.map((w) => (w.key === key ? { ...w, ...patch } : w)) }));
   const removeWorkout = (d: number, key: number) => update(d, (day) => ({ ...day, workouts: day.workouts.filter((w) => w.key !== key) }));
 
-  const addClass = (d: number) => update(d, (day) => ({ ...day, classes: [...day.classes, { key: nextId(), title: "", time: "07:00" }] }));
-  const setClass = (d: number, key: number, patch: Partial<CRow>) => update(d, (day) => ({ ...day, classes: day.classes.map((c) => (c.key === key ? { ...c, ...patch } : c)) }));
-  const removeClass = (d: number, key: number) => update(d, (day) => ({ ...day, classes: day.classes.filter((c) => c.key !== key) }));
-
   const totalWorkouts = days.reduce((n, day) => n + day.workouts.filter((w) => w.workoutId).length, 0);
-  const totalClasses = days.reduce((n, day) => n + day.classes.filter((c) => c.title.trim()).length, 0);
 
   const payload = JSON.stringify({
     weekStart,
     days: days.map((day) => ({
       workouts: day.workouts.filter((w) => w.workoutId).map((w) => ({ workoutId: w.workoutId, note: w.note.trim() })),
-      classes: day.classes.filter((c) => c.title.trim()).map((c) => ({ title: c.title.trim(), time: c.time || "07:00" })),
     })),
   });
 
@@ -100,7 +92,7 @@ export default function CampPlanBuilder({
           />
         </div>
         <p className="text-xs text-muted flex-1 min-w-[14rem]">
-          Add any number of workouts and classes to each day. Workouts go to every active member&apos;s plan; classes are scheduled for the whole camp. Re-assigning updates the plan without wiping what members already completed.
+          Add any number of workouts to each day — they go to every active member&apos;s plan. Re-assigning updates the plan without wiping what members already completed.
         </p>
       </div>
 
@@ -148,28 +140,6 @@ export default function CampPlanBuilder({
             >
               {noWorkouts ? "no workouts in library" : "+ workout"}
             </button>
-
-            {/* Classes */}
-            <div className="mt-2 pt-2 border-t border-border space-y-1.5">
-              {days[d].classes.map((c) => (
-                <div key={c.key} className="flex items-center gap-1">
-                  <input
-                    value={c.title}
-                    onChange={(e) => setClass(d, c.key, { title: e.target.value })}
-                    placeholder="Class title"
-                    className="flex-1 min-w-0 rounded border border-border px-1.5 py-1 text-xs"
-                  />
-                  <input
-                    type="time"
-                    value={c.time}
-                    onChange={(e) => setClass(d, c.key, { time: e.target.value })}
-                    className="shrink-0 w-[5.25rem] rounded border border-border px-1 py-1 text-[11px]"
-                  />
-                  <button type="button" onClick={() => removeClass(d, c.key)} className="shrink-0 text-muted hover:text-red-600 leading-none px-1 text-sm" aria-label="Remove class">×</button>
-                </div>
-              ))}
-              <button type="button" onClick={() => addClass(d)} className="self-start text-[11px] font-medium text-accent hover:underline">+ class</button>
-            </div>
           </div>
           );
         })}
@@ -178,9 +148,8 @@ export default function CampPlanBuilder({
       <div className="flex items-center justify-between mt-4 gap-3 flex-wrap">
         <span className="text-xs text-muted">
           {totalWorkouts} workout{totalWorkouts === 1 ? "" : "s"} → {memberCount} member{memberCount === 1 ? "" : "s"}
-          {totalClasses > 0 && ` · ${totalClasses} class${totalClasses === 1 ? "" : "es"}`}
         </span>
-        <AssignButton disabled={!((totalWorkouts > 0 && memberCount > 0) || totalClasses > 0)} />
+        <AssignButton disabled={!(totalWorkouts > 0 && memberCount > 0)} />
       </div>
     </form>
   );

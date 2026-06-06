@@ -106,7 +106,6 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   // grouped per weekday, so it shows the saved plan instead of starting blank.
   const initialDays = Array.from({ length: 7 }, () => ({
     workouts: [] as { workoutId: string; note: string }[],
-    classes: [] as { title: string; time: string }[],
   }));
   for (const r of weekPlanRows) {
     if (!r.scheduledDate) continue;
@@ -234,7 +233,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   async function assignCampPlan(formData: FormData) {
     "use server";
     const actor = await requireStaff();
-    type PlanDay = { workouts?: { workoutId?: string; note?: string }[]; classes?: { title?: string; time?: string }[] };
+    type PlanDay = { workouts?: { workoutId?: string; note?: string }[] };
     let plan: { weekStart?: string; days?: PlanDay[] };
     try {
       plan = JSON.parse(String(formData.get("plan") ?? "{}"));
@@ -246,7 +245,6 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     const members = await db.campMember.findMany({ where: { campId: id, status: "active" }, select: { customerId: true } });
     const memberIds = members.map((m) => m.customerId);
     const base = new Date(weekStart); // YYYY-MM-DD → UTC midnight
-    let classesAdded = 0;
 
     // Re-assigning fully *covers* the old plan: wipe every not-yet-completed
     // workout across the camp first, then fan out the new week. Completed
@@ -256,7 +254,6 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     for (let d = 0; d < 7 && d < plan.days.length; d++) {
       const day = plan.days[d] ?? {};
       const date = new Date(base.getTime() + d * 86_400_000);
-      const dateStr = date.toISOString().slice(0, 10);
 
       // Workouts: fan this day's set out to every active member (deduped per day).
       const seen = new Set<string>();
@@ -274,27 +271,12 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         }
         if (toCreate.length) await db.workoutAssignment.createMany({ data: toCreate, skipDuplicates: true });
       }
-
-      // Classes: quick-schedule a camp session per entry (deduped on start time
-      // so re-assigning the week doesn't create duplicates).
-      for (const c of day.classes ?? []) {
-        const title = c.title?.trim();
-        if (!title) continue;
-        const startsAt = new Date(`${dateStr}T${c.time || "07:00"}`);
-        if (isNaN(startsAt.getTime())) continue;
-        const dup = await db.class.findFirst({ where: { campId: id, startsAt }, select: { id: true } });
-        if (dup) continue;
-        await db.class.create({ data: { campId: id, title, startsAt, durationMin: 60, capacity: 12, createdById: actor.id } });
-        classesAdded++;
-      }
     }
 
     revalidatePath(`/camps/${id}`);
     revalidatePath("/");
     revalidatePath("/calendar");
-    const parts = [`assigned to ${memberIds.length} member${memberIds.length === 1 ? "" : "s"}`];
-    if (classesAdded) parts.push(`${classesAdded} class${classesAdded === 1 ? "" : "es"} scheduled`);
-    redirect(flashUrl(`/camps/${id}?planWeek=${weekStart}`, `Plan ${parts.join(" · ")}`));
+    redirect(flashUrl(`/camps/${id}?planWeek=${weekStart}`, `Plan assigned to ${memberIds.length} member${memberIds.length === 1 ? "" : "s"}`));
   }
   // Wipe the camp's plan, keeping any already-completed sessions for the record.
   async function clearCampPlan() {
@@ -450,7 +432,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         <section className="mb-6">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between mb-3">
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Weekly training plan</h2>
-            <span className="text-xs text-muted">Workouts land on each member&apos;s dashboard &amp; calendar; classes are scheduled for the camp</span>
+            <span className="text-xs text-muted">Workouts land on each member&apos;s dashboard &amp; calendar. Schedule classes from the &ldquo;Add a class&rdquo; panel below or the calendar.</span>
           </div>
 
           <CampPlanBuilder
