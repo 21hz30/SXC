@@ -3,13 +3,12 @@
 import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
+import { mondayOf } from "@/lib/utils";
 
 type WorkoutOpt = { id: string; name: string };
 type WRow = { key: number; workoutId: string; note: string };
 type CRow = { key: number; title: string; time: string };
 type Day = { workouts: WRow[]; classes: CRow[] };
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function emptyWeek(): Day[] {
   return Array.from({ length: 7 }, () => ({ workouts: [], classes: [] }));
@@ -50,11 +49,16 @@ export default function CampPlanBuilder({
     }));
   });
 
-  const dayLabel = (d: number) => {
+  // Each column's weekday + date is derived from the real date (weekStart + d),
+  // so the label always matches the calendar — never a hard-coded Mon→Sun list.
+  const dayInfo = (d: number) => {
     const base = new Date(weekStart + "T00:00:00");
-    if (isNaN(base.getTime())) return "";
+    if (isNaN(base.getTime())) return { weekday: "", date: "" };
     const dt = new Date(base.getTime() + d * 86_400_000);
-    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return {
+      weekday: dt.toLocaleDateString("en-US", { weekday: "short" }),
+      date: dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    };
   };
 
   const update = (d: number, fn: (day: Day) => Day) =>
@@ -87,11 +91,11 @@ export default function CampPlanBuilder({
 
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
-          <label className="block text-[11px] text-muted mb-1">Week starting (Mon)</label>
+          <label className="block text-[11px] text-muted mb-1">Week (any day — snaps to its Mon)</label>
           <input
             type="date"
             value={weekStart}
-            onChange={(e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) router.push(`${pathname}?planWeek=${v}`); }}
+            onChange={(e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) router.push(`${pathname}?planWeek=${mondayOf(v)}`); }}
             className="rounded-lg border border-border px-3 py-2 text-sm"
           />
         </div>
@@ -101,11 +105,13 @@ export default function CampPlanBuilder({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {WEEKDAYS.map((label, d) => (
+        {Array.from({ length: 7 }, (_, d) => {
+          const info = dayInfo(d);
+          return (
           <div key={d} className="border border-border rounded-lg p-3 flex flex-col">
             <div className="flex items-baseline justify-between mb-2">
-              <span className="text-xs font-semibold">{label}</span>
-              <span className="text-[10px] text-muted tabular-nums">{dayLabel(d)}</span>
+              <span className="text-xs font-semibold">{info.weekday}</span>
+              <span className="text-[10px] text-muted tabular-nums">{info.date}</span>
             </div>
 
             {/* Workouts */}
@@ -165,7 +171,8 @@ export default function CampPlanBuilder({
               <button type="button" onClick={() => addClass(d)} className="self-start text-[11px] font-medium text-accent hover:underline">+ class</button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex items-center justify-between mt-4 gap-3 flex-wrap">

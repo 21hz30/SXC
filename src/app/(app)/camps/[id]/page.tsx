@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
-import { formatDate, formatTime } from "@/lib/utils";
+import { formatDate, formatTime, mondayOf } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import CampSchedule from "@/components/CampSchedule";
@@ -28,7 +28,10 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     d.setUTCDate(d.getUTCDate() + ((8 - day) % 7 || 7));
     return d.toISOString().slice(0, 10);
   })();
-  const planWeek = isStaff && /^\d{4}-\d{2}-\d{2}$/.test(sp.planWeek ?? "") ? sp.planWeek! : defaultMonday;
+  // Always anchor the plan grid to a Monday, even if a non-Monday date arrives
+  // via ?planWeek — that keeps every column's weekday label matching its date.
+  const rawWeek = isStaff && /^\d{4}-\d{2}-\d{2}$/.test(sp.planWeek ?? "") ? sp.planWeek! : defaultMonday;
+  const planWeek = mondayOf(rawWeek);
   const planBase = new Date(planWeek);
 
   // All independent reads run in parallel — one DB round-trip instead of four.

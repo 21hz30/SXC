@@ -57,6 +57,18 @@ export function startOfWeek(d = new Date()) {
   x.setDate(x.getDate() + diff);
   return x;
 }
+/**
+ * The Monday (as YYYY-MM-DD) of the Mon–Sun week containing `ymd`. Pure
+ * calendar-date math in UTC so it never drifts by a day across timezones —
+ * use it to snap a week picker so weekday labels always match the real dates.
+ */
+export function mondayOf(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  if (isNaN(d.getTime())) return ymd;
+  const day = d.getUTCDay(); // 0=Sun … 6=Sat
+  d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  return d.toISOString().slice(0, 10);
+}
 export function startOfMonth(d = new Date()) {
   const x = new Date(d.getFullYear(), d.getMonth(), 1);
   return x;
