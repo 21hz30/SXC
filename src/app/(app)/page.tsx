@@ -10,6 +10,7 @@ import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
 import { backfillCampPlan } from "@/domain/camps";
 import ExerciseList from "@/components/ExerciseList";
+import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
 import { flashUrl } from "@/lib/flash";
 import { classScope, customerScope } from "@/lib/access";
 
@@ -20,7 +21,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow] = await Promise.all([
+  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults] = await Promise.all([
     db.class.findMany({
       where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
@@ -38,7 +39,9 @@ export default async function Dashboard() {
     // anything dated today or later (so completed-today sessions still show).
     myCustomerId
       ? db.workoutAssignment.findMany({
-          where: { customerId: myCustomerId, OR: [{ status: { not: "completed" } }, { scheduledDate: { gte: startOfDay() } }] },
+          // Keep the dashboard clean: only today + upcoming (and undated), never
+          // past-dated workouts — those stay on the calendar but drop off here.
+          where: { customerId: myCustomerId, OR: [{ scheduledDate: { gte: startOfDay() } }, { scheduledDate: null }] },
           include: { workout: { select: { id: true, name: true, items: { orderBy: { order: "asc" } } } }, camp: { select: { name: true } } },
           orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
         })
@@ -74,6 +77,15 @@ export default async function Dashboard() {
       orderBy: { startsAt: "asc" },
       select: { id: true, title: true, startsAt: true, location: true, camp: { select: { division: true } } },
     }),
+    // The athlete's recent mock-test results, to review on the dashboard.
+    myCustomerId
+      ? db.mockResult.findMany({
+          where: { customerId: myCustomerId },
+          orderBy: { recordedAt: "desc" },
+          take: 5,
+          include: { class: { select: { id: true, title: true, startsAt: true } } },
+        })
+      : Promise.resolve([]),
   ]);
 
   const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
@@ -289,7 +301,7 @@ export default async function Dashboard() {
                                 {done && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">done</span>}
                               </div>
 
-                              <ExerciseList items={a.workout.items} />
+                              {done ? <ExerciseList items={a.workout.items} /> : <PlanExerciseChecklist items={a.workout.items} storageKey={a.id} />}
 
                               {(a.coachSuggestion || a.foodAdvice) && (
                                 <div className="mt-3 space-y-1">
@@ -370,6 +382,33 @@ export default async function Dashboard() {
                     </Link>
                   </li>
                 ))}
+              </ul>
+            </div>
+          )}
+
+          {myMockResults.length > 0 && (
+            <div>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Recent mock tests</h2>
+              <ul className="bg-card border border-border rounded-xl divide-y divide-border">
+                {myMockResults.map((mr) => {
+                  let count = 0;
+                  try { count = mr.timesJson ? Object.keys(JSON.parse(mr.timesJson) as Record<string, number>).length : 0; } catch {}
+                  const total = mr.totalSec != null ? `${Math.floor(mr.totalSec / 60)}:${String(mr.totalSec % 60).padStart(2, "0")}` : null;
+                  return (
+                    <li key={mr.id}>
+                      <Link href={`/classes/${mr.class.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-background">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{mr.class.title}</div>
+                          <div className="text-xs text-muted">{formatDate(mr.class.startsAt)}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {total && <div className="text-sm font-semibold tabular-nums">{total}</div>}
+                          <div className="text-[11px] text-muted">{count > 0 ? `${count} exercise${count === 1 ? "" : "s"}` : total ? "total time" : "—"}</div>
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}

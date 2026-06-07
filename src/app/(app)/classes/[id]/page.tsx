@@ -36,9 +36,73 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       roster: { include: { customer: true }, orderBy: { customer: { name: "asc" } } },
       camp: true,
       createdBy: { select: { name: true } },
+      mockResults: true,
     },
   });
   if (!cls) notFound();
+
+  // Mock-test helpers (shared by the athlete + staff views).
+  const mockExercises = cls.workouts.flatMap((cw) => cw.workout.items.map((it) => ({ id: it.id, title: it.label?.trim() || it.category })));
+  const mockByCustomer = new Map(cls.mockResults.map((mr) => [mr.customerId, mr]));
+  const fmtMock = (sec: number | null | undefined) => (sec == null ? "" : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
+  // Save one athlete's mock result. Staff may save for anyone; a customer only
+  // for themselves. Reads per-exercise inputs (time_<itemId>) + an optional total.
+  async function saveMockResult(formData: FormData) {
+    "use server";
+    const u = await requireUser();
+    const target = String(formData.get("customerId") ?? "");
+    if (!target) return;
+    const staff = u.role === "admin" || u.role === "coach";
+    const myCid = (await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } }))?.customerId ?? null;
+    if (!staff && target !== myCid) redirect(`/classes/${id}`);
+    const toSec = (v: string): number | null => {
+      const t = v.trim(); if (!t) return null;
+      if (t.includes(":")) { const [m, s] = t.split(":"); return Math.round(Number(m || 0) * 60 + Number(s || 0)); }
+      const n = Number(t); return isNaN(n) ? null : Math.round(n);
+    };
+    const times: Record<string, number> = {};
+    for (const [k, v] of formData.entries()) {
+      if (k.startsWith("time_")) { const sec = toSec(String(v)); if (sec != null) times[k.slice(5)] = sec; }
+    }
+    const totalSec = toSec(String(formData.get("totalSec") ?? ""));
+    await db.mockResult.upsert({
+      where: { classId_customerId: { classId: id, customerId: target } },
+      create: { classId: id, customerId: target, timesJson: Object.keys(times).length ? JSON.stringify(times) : null, totalSec },
+      update: { timesJson: Object.keys(times).length ? JSON.stringify(times) : null, totalSec },
+    });
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Mock result saved"));
+  }
+  // A mock-test entry form for one athlete: a time per exercise + a total.
+  const mockFormFor = (customerId: string) => {
+    const mr = mockByCustomer.get(customerId);
+    let times: Record<string, number> = {};
+    try { times = mr?.timesJson ? (JSON.parse(mr.timesJson) as Record<string, number>) : {}; } catch {}
+    return (
+      <form action={saveMockResult} className="space-y-2">
+        <input type="hidden" name="customerId" value={customerId} />
+        {mockExercises.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {mockExercises.map((ex) => (
+              <div key={ex.id}>
+                <label className="block text-[10px] text-muted mb-0.5 truncate" title={ex.title}>{ex.title}</label>
+                <input name={`time_${ex.id}`} defaultValue={fmtMock(times[ex.id])} placeholder="mm:ss" className="w-full rounded-md border border-border px-2 py-1 text-xs tabular-nums" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] text-muted">No exercises on this class — just record the total time.</div>
+        )}
+        <div className="flex items-end gap-2">
+          <div className="w-28">
+            <label className="block text-[10px] text-muted mb-0.5">Total time</label>
+            <input name="totalSec" defaultValue={fmtMock(mr?.totalSec)} placeholder="mm:ss" className="w-full rounded-md border border-border px-2 py-1 text-xs tabular-nums" />
+          </div>
+          <button type="submit" className="rounded-lg bg-foreground text-white px-3 py-1.5 text-xs font-medium">Save</button>
+        </div>
+      </form>
+    );
+  };
 
   // ---- Customer (athlete) view: read-only plan + self sign-up ----
   if (!isStaff) {
@@ -188,6 +252,15 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             <span className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${CLASS_STATUS_META[status].cls}`}>{CLASS_STATUS_META[status].label}</span>
           )}
         </div>
+
+        {/* Mock test — the athlete records their own time per exercise */}
+        {cls.isMockTest && myCustomerId && (
+          <div className="bg-card border border-border rounded-xl p-5 mb-6">
+            <h2 className="text-sm font-medium uppercase tracking-wide text-muted">Mock test — your result</h2>
+            <p className="text-xs text-muted mt-0.5 mb-3">Record your time per exercise (mm:ss), or just the total.</p>
+            {mockFormFor(myCustomerId)}
+          </div>
+        )}
 
         {/* Post-class feedback — feeling + watch & nutrition numbers */}
         {showFeedback && (
@@ -366,6 +439,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
         capacity: Number(formData.get("capacity")) || 12,
         location: String(formData.get("location") ?? "").trim() || null,
         dropInAllowed: formData.get("dropInAllowed") === "on",
+        isMockTest: formData.get("isMockTest") === "on",
       },
     });
     revalidatePath(`/classes/${id}`);
@@ -545,6 +619,10 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             <input type="checkbox" name="dropInAllowed" defaultChecked={cls.dropInAllowed} className="rounded border-border" />
             Allow drop-ins
           </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted pb-2 cursor-pointer">
+            <input type="checkbox" name="isMockTest" defaultChecked={cls.isMockTest} className="rounded border-border" />
+            Mock test
+          </label>
           <div className="flex gap-2 ml-auto">
             <Link href={`/classes/${id}`} className="px-3 py-2 text-sm rounded-lg border border-border">Cancel</Link>
             <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Save</button>
@@ -620,6 +698,33 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           />
         )}
       </section>
+
+      {/* Mock test results — coach can record/edit each athlete's times */}
+      {cls.isMockTest && (
+        <section className="bg-card border border-border rounded-xl p-6 mb-6">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-1">Mock test results</h2>
+          <p className="text-xs text-muted mb-4">A time per exercise (mm:ss) or a total, per athlete. Athletes can also enter their own from this class page.</p>
+          {cls.roster.length === 0 ? (
+            <div className="text-sm text-muted">No athletes on the roster yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {cls.roster.map((r) => {
+                const mr = mockByCustomer.get(r.customerId);
+                const summary = mr?.totalSec != null ? fmtMock(mr.totalSec) : mr?.timesJson ? "recorded" : "—";
+                return (
+                  <details key={r.id} className="border border-border rounded-lg px-3 py-2">
+                    <summary className="flex items-center justify-between cursor-pointer text-sm">
+                      <span className="font-medium">{r.customer.name}</span>
+                      <span className="text-xs text-muted tabular-nums">{summary}</span>
+                    </summary>
+                    <div className="mt-3">{mockFormFor(r.customerId)}</div>
+                  </details>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 2. ROSTER — compact attendance bar + add athlete */}
       <section className="bg-card border border-border rounded-xl p-6 mb-6">

@@ -96,6 +96,7 @@ model Customer {
   raceGoals     RaceGoal[]
   classReports  ClassReport[]
   watchData     ClassWatchData[]
+  mockResults   MockResult[]
   ownedWorkouts Workout[]     @relation("CustomerOwnedWorkouts")
   racePlans     RacePlan[]
   assignments   WorkoutAssignment[]
@@ -377,6 +378,9 @@ model Class {
   /// Set when a coach cancels the class. Drives the "canceled" status; the rest
   /// (open / full / finished) is derived from capacity + start time.
   canceledAt  DateTime?
+  /// A "mock test" class: athletes record a time per exercise (or one total
+  /// time) and can review the result on their dashboard/profile.
+  isMockTest  Boolean  @default(false)
   campId      String?
   camp        Camp?    @relation(fields: [campId], references: [id])
   createdById String?
@@ -388,6 +392,25 @@ model Class {
   performances Performance[]
   reports      ClassReport[]
   watchData    ClassWatchData[]
+  mockResults  MockResult[]
+}
+
+/// One athlete's result for a mock-test class: a time per exercise (keyed by
+/// WorkoutItem id) and/or a single total time as a fallback.
+model MockResult {
+  id         String   @id @default(cuid())
+  classId    String
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  totalSec   Int?     // single total time, when per-exercise isn't recorded
+  timesJson  String?  // JSON map { "<workoutItemId>": seconds }
+  notes      String?
+  recordedAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([classId, customerId])
+  @@index([customerId, recordedAt])
 }
 
 model RosterEntry {
