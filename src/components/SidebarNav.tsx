@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Calendar, Dumbbell, Gauge, Home, MessageSquare, Shield, Tent, User, Users, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const icons = {
+export const icons = {
   calendar: Calendar,
   camps: Tent,
   customers: Users,

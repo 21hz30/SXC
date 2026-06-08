@@ -80,6 +80,12 @@ export default async function CalendarPage({
 
   return (
     <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      {/* Phone: Apple-style agenda (training plan first). Desktop: full grid. */}
+      <div className="md:hidden">
+        <MobileCalendar classes={classes} todos={todos} assignments={assignments} cursor={cursor} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />
+      </div>
+
+      <div className="hidden md:block">
       <header className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex items-baseline gap-2 sm:gap-3 min-w-0">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Calendar</h1>
@@ -111,6 +117,7 @@ export default async function CalendarPage({
       {view === "day" && <DayView classes={classes} todos={todos} assignments={assignments} cursor={cursor} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
       {view === "week" && <WeekView classes={classes} todos={todos} assignments={assignments} weekStart={rangeStart} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
       {view === "month" && <MonthView classes={classes} todos={todos} assignments={assignments} monthStart={rangeStart} canAdd={isStaff} />}
+      </div>
     </div>
   );
 }
@@ -588,6 +595,125 @@ function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classe
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── Mobile (H5) ─────────────────────────────────────────────────────────────
+// A phone-friendly agenda à la Apple Calendar: a tappable week strip on top,
+// then the selected day's items as a list — training plan first.
+
+function MobileClassRow({ c, canSignUp, signedUp }: { c: ClassWithRel; canSignUp: boolean; signedUp: boolean }) {
+  const attended = c.roster.filter((r) => r.attendance === "attended").length;
+  return (
+    <div className={`rounded-xl border p-3 ${signedUp ? "border-emerald-300 bg-emerald-50/60" : "border-border bg-card"}`}>
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 w-12 text-center">
+          <div className={`text-sm font-semibold tabular-nums leading-tight ${signedUp ? "text-emerald-700" : "text-accent"}`}>{formatTime(c.startsAt)}</div>
+          <div className="text-[10px] text-muted">{c.durationMin}m</div>
+        </div>
+        <span className={`mt-0.5 self-stretch w-1 rounded-full ${signedUp ? "bg-emerald-500" : "bg-accent"}`} />
+        <Link href={`/classes/${c.id}`} className="min-w-0 flex-1">
+          <div className="font-medium truncate">{c.title}</div>
+          <div className="text-xs text-muted truncate">
+            {c.camp?.name ?? "Open class"} · {c.roster.length}/{c.capacity}{attended > 0 ? ` · ${attended} ✓` : ""}
+          </div>
+        </Link>
+      </div>
+      {canSignUp && (
+        <div className="mt-2">
+          <ClassSignupButton classId={c.id} signedUp={signedUp} isFull={c.roster.length >= c.capacity} size="xs" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileCalendar({ classes, todos, assignments, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; assignments: AssignmentRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
+  const now = new Date();
+  const weekStart = startOfWeek(cursor);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const isoDay = (d: Date) => d.toISOString().split("T")[0];
+  const hasItems = (d: Date) =>
+    classes.some((c) => sameDay(new Date(c.startsAt), d)) ||
+    assignments.some((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), d)) ||
+    todos.some((t) => t.dueDate && sameDay(new Date(t.dueDate), d));
+
+  const dayClasses = classes
+    .filter((c) => sameDay(new Date(c.startsAt), cursor))
+    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  const dayAssignments = assignments.filter((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), cursor));
+  const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
+  const empty = dayClasses.length === 0 && dayAssignments.length === 0 && dayTodos.length === 0;
+
+  const monthTitle = cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const dayTitle = sameDay(cursor, now)
+    ? `Today · ${cursor.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}`
+    : cursor.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h1 className="text-2xl font-semibold tracking-tight truncate">{monthTitle}</h1>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Link href={`/calendar?d=${isoDay(addDays(cursor, -7))}`} aria-label="Previous week" className="p-2 rounded-lg border border-border hover:bg-background"><ChevronLeft size={16} /></Link>
+          <Link href="/calendar" className="px-3 py-2 rounded-lg border border-border text-sm hover:bg-background">Today</Link>
+          <Link href={`/calendar?d=${isoDay(addDays(cursor, 7))}`} aria-label="Next week" className="p-2 rounded-lg border border-border hover:bg-background"><ChevronRight size={16} /></Link>
+        </div>
+      </div>
+
+      {/* Week strip */}
+      <div className="flex items-stretch bg-card border border-border rounded-2xl px-1 py-2">
+        {days.map((d) => {
+          const isSel = sameDay(d, cursor);
+          const isToday = sameDay(d, now);
+          const has = hasItems(d);
+          return (
+            <Link key={isoDay(d)} href={`/calendar?d=${isoDay(d)}`} className="flex flex-col items-center gap-1 flex-1 py-1" aria-current={isSel ? "date" : undefined}>
+              <span className="text-[10px] font-medium uppercase text-muted">{d.toLocaleDateString("en-US", { weekday: "narrow" })}</span>
+              <span className={`flex items-center justify-center h-9 w-9 rounded-full text-sm font-semibold ${isSel ? "bg-accent text-white" : isToday ? "text-accent" : "text-foreground"}`}>
+                {d.getDate()}
+              </span>
+              <span className={`h-1.5 w-1.5 rounded-full ${has ? (isSel ? "bg-accent" : "bg-accent/50") : "bg-transparent"}`} />
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* Selected-day agenda — training plan first */}
+      <div className="mt-5 space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold tracking-tight">{dayTitle}</h2>
+          {canAdd && <DayQuickAdd date={isoDay(cursor)} returnTo={`/calendar?d=${isoDay(cursor)}`} variant="text" label="Add" />}
+        </div>
+
+        {dayAssignments.length > 0 && (
+          <section>
+            <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5"><Dumbbell size={12} /> Training plan</h3>
+            <div className="space-y-2">{dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} />)}</div>
+          </section>
+        )}
+
+        {dayClasses.length > 0 && (
+          <section>
+            <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Classes</h3>
+            <div className="space-y-2">{dayClasses.map((c) => <MobileClassRow key={c.id} c={c} canSignUp={canSignUp} signedUp={signedUpIds.has(c.id)} />)}</div>
+          </section>
+        )}
+
+        {dayTodos.length > 0 && (
+          <section>
+            <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">To-dos &amp; notes</h3>
+            <div className="space-y-2">{dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}</div>
+          </section>
+        )}
+
+        {empty && (
+          <div className="text-center text-sm text-muted py-12 bg-card border border-dashed border-border rounded-xl">
+            Nothing scheduled for this day.{canAdd ? " Tap Add to create something." : ""}
+          </div>
+        )}
       </div>
     </div>
   );

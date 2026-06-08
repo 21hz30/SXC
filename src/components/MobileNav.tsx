@@ -1,15 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
-import { Menu, X, LogOut } from "lucide-react";
-import SidebarNav, { type SidebarNavItem } from "./SidebarNav";
+import { Menu, X, LogOut, User, Sparkles } from "lucide-react";
+import SidebarNav, { icons, type SidebarNavItem } from "./SidebarNav";
 import srcLogo from "@/assets/brand/src-logo.png";
+import { cn } from "@/lib/utils";
+import { useAiPanel } from "@/lib/stores/aiPanel";
+
+// The pages that get a bottom-bar tab (in order). The rest live behind "More".
+// Profile moved to the top-right avatar; the 4th slot is the AI co-coach.
+const TAB_HREFS = ["/", "/calendar", "/workouts"];
 
 /**
- * Mobile-only top bar + slide-in nav drawer. The desktop sidebar is
- * `hidden md:flex`, so on phones this is the only way to move between pages.
+ * Mobile-only chrome (phones; the desktop sidebar is `hidden md:flex`):
+ *  - a slim top bar: logo (tap → dashboard) + avatar (tap → profile)
+ *  - an app-style bottom tab bar: main pages + AI chat + a "More" tab
+ *  - the full nav in a slide-in drawer (opened from "More")
  */
 export default function MobileNav({
   items,
@@ -22,6 +31,8 @@ export default function MobileNav({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const aiOpen = useAiPanel((s) => s.open);
+  const setAiOpen = useAiPanel((s) => s.setOpen);
   // The (app) layout persists across navigations, so close the drawer on route
   // change. React's "adjust state during render" pattern — no effect needed.
   const [lastPath, setLastPath] = useState(pathname);
@@ -30,17 +41,58 @@ export default function MobileNav({
     if (open) setOpen(false);
   }
 
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+
+  const tabs = TAB_HREFS
+    .map((h) => items.find((i) => i.href === h))
+    .filter((x): x is SidebarNavItem => !!x);
+
+  const tabCls = (active: boolean) =>
+    cn(
+      "flex flex-col items-center justify-center gap-0.5 flex-1 text-[10px] font-medium leading-none transition-colors",
+      active ? "text-accent" : "text-muted hover:text-foreground",
+    );
+
   return (
     <>
       <header className="md:hidden sticky top-0 z-30 flex items-center justify-between h-14 px-4 bg-white border-b border-border">
-        <div className="flex items-center gap-2">
+        <Link href="/" aria-label="Go to dashboard" className="flex items-center rounded-lg hover:opacity-80 transition-opacity">
           <Image src={srcLogo} alt="SRC by Peoplearth" width={32} height={32} className="h-8 w-8" priority />
-          <span className="text-xs text-muted">Hyrox Coach</span>
-        </div>
-        <button onClick={() => setOpen(true)} aria-label="Open menu" className="-mr-2 p-2 rounded-lg hover:bg-background">
-          <Menu size={22} />
-        </button>
+        </Link>
+        {/* Avatar → profile (where you can edit your details). */}
+        <a
+          href="/profile"
+          aria-label="Your profile"
+          className="flex items-center justify-center h-9 w-9 rounded-full bg-background border border-border text-foreground hover:border-accent transition-colors"
+        >
+          <User size={18} />
+        </a>
       </header>
+
+      {/* App-style bottom tab bar */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-stretch justify-around h-14">
+          {tabs.map(({ href, label, icon }) => {
+            const Icon = icons[icon];
+            const active = isActive(href);
+            return (
+              <Link key={href} href={href} aria-current={active ? "page" : undefined} className={tabCls(active)}>
+                <Icon size={20} strokeWidth={active ? 2.4 : 2} />
+                <span className="truncate max-w-full px-0.5">{href === "/" ? "Home" : label}</span>
+              </Link>
+            );
+          })}
+          <button onClick={() => setAiOpen(true)} aria-label="AI co-coach" className={tabCls(aiOpen)}>
+            <Sparkles size={20} strokeWidth={aiOpen ? 2.4 : 2} />
+            <span>AI</span>
+          </button>
+          <button onClick={() => setOpen(true)} aria-label="More" className={tabCls(false)}>
+            <Menu size={20} />
+            <span>More</span>
+          </button>
+        </div>
+      </nav>
 
       {open && (
         <div className="md:hidden fixed inset-0 z-50">

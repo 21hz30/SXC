@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon } from "lucide-react";
+import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon, MessagesSquare, Plus } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useAiPanel } from "@/lib/stores/aiPanel";
 import { cn } from "@/lib/utils";
+import ChatSessionsPanel from "./ChatSessionsPanel";
 
 // Markdown pulls in react-markdown + remark-gfm (~100KB+). Load it lazily so it
 // isn't in every page's bundle — it's only needed once the chat renders a reply.
@@ -50,6 +51,7 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showSlash, setShowSlash] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   // Staff can scope a NEW chat to a customer ("project"); athletes just talk.
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [draftCustomerId, setDraftCustomerId] = useState("");
@@ -102,6 +104,22 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // Opening a session (from the history list or elsewhere) drops back to the chat.
+  useEffect(() => { if (activeId) setShowHistory(false); }, [activeId]);
+
+  // Start a brand-new conversation: clear the active session so the next message
+  // opens a fresh chat, and leave the history view.
+  function startNewChat() {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("chat");
+    router.replace(`${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+    loadedRef.current = null;
+    setSession(null);
+    setMessages([]);
+    setShowHistory(false);
+    inputRef.current?.focus();
+  }
 
   function onInputChange(v: string) {
     setInput(v);
@@ -214,7 +232,8 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
       <button
         onClick={() => setOpen(true)}
         className={cn(
-          "fixed right-4 bottom-4 w-12 h-12 rounded-full bg-foreground text-white shadow-lg flex items-center justify-center hover:opacity-90 z-50 transition-opacity duration-200",
+          // Sits above the mobile bottom tab bar on phones; back to the corner from md up.
+          "fixed right-4 bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))] md:bottom-4 w-12 h-12 rounded-full bg-foreground text-white shadow-lg flex items-center justify-center hover:opacity-90 z-50 transition-opacity duration-200",
           open ? "opacity-0 pointer-events-none" : "opacity-100",
         )}
         aria-label="Open AI Co-Coach"
@@ -241,22 +260,38 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
         aria-hidden={!open}
       >
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-          <Sparkles size={16} className="text-accent shrink-0" />
-          <div className="font-semibold text-sm truncate flex-1">
-            {session?.title ?? "AI Co-Coach"}
+        <div className="px-3 py-3 border-b border-border flex items-center gap-1">
+          <Sparkles size={16} className="text-accent shrink-0 ml-1" />
+          <div className="font-semibold text-sm truncate flex-1 px-1">
+            {showHistory ? "Chats" : (session?.title ?? "AI Co-Coach")}
           </div>
-          {session?.customerName && (
+          {!showHistory && session?.customerName && (
             <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
               <UserIcon size={10} /> {session.customerName}
             </span>
           )}
-          <button onClick={() => setOpen(false)} className="text-muted hover:text-foreground p-1 rounded hover:bg-background">
+          <button onClick={startNewChat} aria-label="New chat" title="New chat" className="text-muted hover:text-foreground p-1.5 rounded hover:bg-background shrink-0">
+            <Plus size={18} />
+          </button>
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            aria-label="Chat history"
+            title="Chat history"
+            className={cn("p-1.5 rounded hover:bg-background shrink-0", showHistory ? "text-accent bg-accent/10" : "text-muted hover:text-foreground")}
+          >
+            <MessagesSquare size={18} />
+          </button>
+          <button onClick={() => setOpen(false)} aria-label="Close" className="text-muted hover:text-foreground p-1.5 rounded hover:bg-background shrink-0">
             <ChevronRight size={18} />
           </button>
         </div>
 
-        {/* Body — past messages, or a welcome when starting fresh */}
+        {/* Body — chat history list, past messages, or a welcome when fresh */}
+        {showHistory ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <ChatSessionsPanel />
+        </div>
+        ) : (
         <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-3">
           {messages.length === 0 ? (
             <div className="space-y-3">
@@ -301,8 +336,10 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
             ))
           )}
         </div>
+        )}
 
-        {/* Input — always available, so you can just start talking */}
+        {/* Input — always available, so you can just start talking (hidden in history) */}
+        {!showHistory && (
         <div className="relative border-t border-border">
           {showSlash && (
             <div className="absolute left-3 right-3 bottom-full mb-2 bg-white border border-border rounded-xl shadow-lg overflow-hidden">
@@ -330,6 +367,7 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
             </button>
           </form>
         </div>
+        )}
       </aside>
     </>
   );
