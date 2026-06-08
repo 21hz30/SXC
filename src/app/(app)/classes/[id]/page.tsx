@@ -56,6 +56,12 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       : [];
   const mockByCustomer = new Map(cls.mockResults.map((mr) => [mr.customerId, mr]));
   const fmtMock = (sec: number | null | undefined) => (sec == null ? "" : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
+  // The total can exceed an hour (a full Hyrox is ~60–90 min), so show h:mm:ss.
+  const fmtTotal = (sec: number | null | undefined) => {
+    if (sec == null) return "";
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+  };
   // Save one athlete's mock result. Staff may save for anyone; a customer only
   // for themselves. Reads per-exercise inputs (time_<itemId>) + an optional total.
   async function saveMockResult(formData: FormData) {
@@ -68,7 +74,12 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     if (!staff && target !== myCid) redirect(`/classes/${id}`);
     const toSec = (v: string): number | null => {
       const t = v.trim(); if (!t) return null;
-      if (t.includes(":")) { const [m, s] = t.split(":"); return Math.round(Number(m || 0) * 60 + Number(s || 0)); }
+      if (t.includes(":")) {
+        // Accept h:mm:ss (e.g. a ~1h Hyrox total) as well as mm:ss.
+        const p = t.split(":").map((x) => Number(x) || 0);
+        const [h, m, s] = p.length === 3 ? p : [0, p[0] ?? 0, p[1] ?? 0];
+        return Math.round(h * 3600 + m * 60 + s);
+      }
       const n = Number(t); return isNaN(n) ? null : Math.round(n);
     };
     const times: Record<string, number> = {};
@@ -107,10 +118,10 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
         ) : (
           <div className="text-[11px] text-muted">No exercises on this class — just record the total time.</div>
         )}
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 border-t border-border pt-2 mt-1">
           <div className="w-28">
-            <label className="block text-[10px] text-muted mb-0.5">Total time</label>
-            <input name="totalSec" defaultValue={fmtMock(mr?.totalSec)} placeholder="mm:ss" className="w-full rounded-md border border-border px-2 py-1 text-xs tabular-nums" />
+            <label className="block text-[10px] font-semibold text-foreground mb-0.5">Total time *</label>
+            <input name="totalSec" defaultValue={fmtTotal(mr?.totalSec)} placeholder="1:02:34" className="w-full rounded-md border border-border px-2 py-1 text-xs tabular-nums" />
           </div>
           <button type="submit" className="rounded-lg bg-foreground text-white px-3 py-1.5 text-xs font-medium">Save</button>
         </div>
@@ -717,19 +728,23 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       {cls.isMockTest && (
         <section className="bg-card border border-border rounded-xl p-6 mb-6">
           <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-1">Mock test results</h2>
-          <p className="text-xs text-muted mb-4">A time per exercise (mm:ss) or a total, per athlete. Athletes can also enter their own from this class page.</p>
+          <p className="text-xs text-muted mb-4">Record each athlete&apos;s time per exercise (mm:ss) <span className="font-medium text-foreground">and their total time</span> — athletes can also enter their own from this page. Athletes still to record open ready to fill in.</p>
           {cls.roster.length === 0 ? (
             <div className="text-sm text-muted">No athletes on the roster yet.</div>
           ) : (
             <div className="space-y-2">
               {cls.roster.map((r) => {
                 const mr = mockByCustomer.get(r.customerId);
-                const summary = mr?.totalSec != null ? fmtMock(mr.totalSec) : mr?.timesJson ? "recorded" : "—";
+                let splits = 0;
+                try { splits = mr?.timesJson ? Object.keys(JSON.parse(mr.timesJson) as Record<string, number>).length : 0; } catch {}
+                const summary = mr
+                  ? `${mr.totalSec != null ? `Total ${fmtTotal(mr.totalSec)}` : "no total"}${splits ? ` · ${splits} split${splits === 1 ? "" : "s"}` : ""}`
+                  : "not recorded yet";
                 return (
-                  <details key={r.id} className="border border-border rounded-lg px-3 py-2">
+                  <details key={r.id} open={!mr} className="border border-border rounded-lg px-3 py-2">
                     <summary className="flex items-center justify-between cursor-pointer text-sm">
                       <span className="font-medium">{r.customer.name}</span>
-                      <span className="text-xs text-muted tabular-nums">{summary}</span>
+                      <span className={`text-xs tabular-nums ${mr ? "text-foreground" : "text-muted"}`}>{summary}</span>
                     </summary>
                     <div className="mt-3">{mockFormFor(r.customerId)}</div>
                   </details>

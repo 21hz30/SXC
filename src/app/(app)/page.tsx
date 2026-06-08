@@ -401,7 +401,11 @@ export default async function Dashboard() {
                 {myMockResults.map((mr) => {
                   let count = 0;
                   try { count = mr.timesJson ? Object.keys(JSON.parse(mr.timesJson) as Record<string, number>).length : 0; } catch {}
-                  const total = mr.totalSec != null ? `${Math.floor(mr.totalSec / 60)}:${String(mr.totalSec % 60).padStart(2, "0")}` : null;
+                  const total = mr.totalSec != null
+                    ? (mr.totalSec >= 3600
+                        ? `${Math.floor(mr.totalSec / 3600)}:${String(Math.floor((mr.totalSec % 3600) / 60)).padStart(2, "0")}:${String(mr.totalSec % 60).padStart(2, "0")}`
+                        : `${Math.floor(mr.totalSec / 60)}:${String(mr.totalSec % 60).padStart(2, "0")}`)
+                    : null;
                   return (
                     <li key={mr.id}>
                       <Link href={`/classes/${mr.class.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-background">
