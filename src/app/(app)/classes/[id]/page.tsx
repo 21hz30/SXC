@@ -18,6 +18,7 @@ import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import HrZoneBars from "@/components/HrZoneBars";
 import { canAccessCamp } from "@/lib/access";
 import { classStatus, canSignUp, CLASS_STATUS_META } from "@/lib/classStatus";
+import { HYROX_MOCK_STATIONS } from "@/lib/hyrox";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,17 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   if (!cls) notFound();
 
   // Mock-test helpers (shared by the athlete + staff views).
-  const mockExercises = cls.workouts.flatMap((cw) => cw.workout.items.map((it) => ({ id: it.id, title: it.label?.trim() || it.category })));
+  // A mock always asks for a time per exercise. Prefer the class's own workout
+  // stations; if the coach only flagged the class as a mock without attaching a
+  // workout, fall back to the standard Hyrox stations so the athlete can still
+  // record a split for each exercise (not just one total time).
+  const classMockExercises = cls.workouts.flatMap((cw) => cw.workout.items.map((it) => ({ id: it.id, title: it.label?.trim() || it.category })));
+  const mockExercises =
+    classMockExercises.length > 0
+      ? classMockExercises
+      : cls.isMockTest
+      ? HYROX_MOCK_STATIONS.map((s) => ({ id: s.key, title: s.title }))
+      : [];
   const mockByCustomer = new Map(cls.mockResults.map((mr) => [mr.customerId, mr]));
   const fmtMock = (sec: number | null | undefined) => (sec == null ? "" : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
   // Save one athlete's mock result. Staff may save for anyone; a customer only
@@ -82,14 +93,17 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       <form action={saveMockResult} className="space-y-2">
         <input type="hidden" name="customerId" value={customerId} />
         {mockExercises.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {mockExercises.map((ex) => (
-              <div key={ex.id}>
-                <label className="block text-[10px] text-muted mb-0.5 truncate" title={ex.title}>{ex.title}</label>
-                <input name={`time_${ex.id}`} defaultValue={fmtMock(times[ex.id])} placeholder="mm:ss" className="w-full rounded-md border border-border px-2 py-1 text-xs tabular-nums" />
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="text-[11px] text-muted">Record your time for each exercise (mm:ss). Leave any you didn&apos;t time blank — the total is enough on its own.</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {mockExercises.map((ex) => (
+                <div key={ex.id}>
+                  <label className="block text-[10px] text-muted mb-0.5 truncate" title={ex.title}>{ex.title}</label>
+                  <input name={`time_${ex.id}`} defaultValue={fmtMock(times[ex.id])} placeholder="mm:ss" className="w-full rounded-md border border-border px-2 py-1 text-xs tabular-nums" />
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <div className="text-[11px] text-muted">No exercises on this class — just record the total time.</div>
         )}
