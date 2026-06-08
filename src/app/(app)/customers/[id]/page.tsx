@@ -14,6 +14,7 @@ import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, gender
 import { canAccessCustomer } from "@/lib/access";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
+import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,18 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   const attended = c.rosterEntries.filter((r) => r.attendance === "attended").length;
   const totalMarked = c.rosterEntries.filter((r) => r.attendance !== "pending").length;
   const rate = totalMarked > 0 ? Math.round((attended / totalMarked) * 100) : 0;
+
+  // Training-plan tracking: the athlete's assigned workouts and whether they
+  // marked each one done (plus the effort they logged). Lets a coach see, from
+  // the customer's profile, who's keeping up with their plan — and the athlete
+  // see it on their own profile too.
+  const planItems = await db.workoutAssignment.findMany({
+    where: { customerId: id },
+    orderBy: [{ scheduledDate: "desc" }, { createdAt: "desc" }],
+    take: 40,
+    include: { workout: { select: { id: true, name: true } }, camp: { select: { name: true } } },
+  });
+  const { done: planDoneDue, missed: planMissed, upcoming: planUpcoming, pct: planPct } = planAdherence(planItems);
 
   async function chatAboutCustomer() {
     "use server";
@@ -517,6 +530,53 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           <ChartCard title="Distance (km)" points={distPoints} unit="km" format={(v) => v.toFixed(1)} />
         </div>
       </section>
+
+      {(planItems.length > 0 || isStaff) && (
+      <section className="mb-6">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Training plan</h2>
+          {planItems.length > 0 && (
+            <div className="flex items-center gap-1.5 text-xs flex-wrap">
+              {planPct != null && <span className="font-semibold text-foreground">{planPct}% of due done</span>}
+              <span className="rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">{planDoneDue} done</span>
+              {planMissed > 0 && <span className="rounded-full px-2 py-0.5 bg-red-100 text-red-700">{planMissed} missed</span>}
+              {planUpcoming > 0 && <span className="rounded-full px-2 py-0.5 bg-background border border-border text-muted">{planUpcoming} upcoming</span>}
+            </div>
+          )}
+        </div>
+        {planItems.length === 0 ? (
+          <div className="bg-card border border-dashed border-border rounded-xl p-6 text-center text-sm text-muted">
+            No training plan assigned yet — assign workouts from a camp plan, or the athlete can add their own.
+          </div>
+        ) : (
+          <div className="bg-card border border-border rounded-xl divide-y divide-border overflow-hidden">
+            {planItems.slice(0, 15).map((a) => {
+              const st = planState(a);
+              const meta = PLAN_STATE_META[st];
+              const done = st === "done";
+              const fb = done && (a.rpe != null || a.feeling)
+                ? [a.rpe != null ? `RPE ${a.rpe}` : null, a.feeling].filter(Boolean).join(" · ")
+                : null;
+              return (
+                <div key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="w-14 shrink-0 text-[11px] text-muted tabular-nums leading-tight">
+                    {a.scheduledDate ? new Date(a.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Anytime"}
+                  </div>
+                  <Link href={`/workouts/${a.workout.id}`} className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate hover:text-accent">{a.workout.name}</div>
+                    {(a.camp?.name || fb) && (
+                      <div className="text-[11px] text-muted truncate">{[a.camp?.name, fb].filter(Boolean).join(" · ")}</div>
+                    )}
+                  </Link>
+                  <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${meta.cls}`}>{meta.label}</span>
+                </div>
+              );
+            })}
+            {planItems.length > 15 && <div className="px-4 py-2 text-[11px] text-muted">+{planItems.length - 15} earlier</div>}
+          </div>
+        )}
+      </section>
+      )}
 
       <section className="mb-6 grid grid-cols-2 gap-6">
         <div>
