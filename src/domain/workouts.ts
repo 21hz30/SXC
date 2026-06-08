@@ -41,6 +41,7 @@ export type WorkoutDTO = {
   id: string;
   name: string;
   description: string | null;
+  type: string | null;
   tags: string | null;
   ownerCustomerId: string | null;
   items: WorkoutItemDTO[];
@@ -79,6 +80,14 @@ export async function listWorkouts(_ctx: Ctx) {
   });
 }
 
+/** All distinct tags used across the workout library, for the tag picker. */
+export async function listWorkoutTags(): Promise<string[]> {
+  const rows = await db.workout.findMany({ select: { tags: true } });
+  const set = new Set<string>();
+  for (const r of rows) (r.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean).forEach((t) => set.add(t));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 export async function getWorkout(_ctx: Ctx, id: string): Promise<WorkoutDTO | null> {
   const w = await db.workout.findUnique({
     where: { id },
@@ -89,6 +98,7 @@ export async function getWorkout(_ctx: Ctx, id: string): Promise<WorkoutDTO | nu
     id: w.id,
     name: w.name,
     description: w.description,
+    type: w.type,
     tags: w.tags,
     ownerCustomerId: w.ownerCustomerId,
     items: w.items.map(toItemDTO),
@@ -102,7 +112,7 @@ export async function getWorkout(_ctx: Ctx, id: string): Promise<WorkoutDTO | nu
 export async function saveWorkout(
   ctx: Ctx,
   id: string,
-  input: { name: string; description?: string | null; tags?: string | null; items: WorkoutItemInput[] }
+  input: { name: string; description?: string | null; type?: string | null; tags?: string | null; items: WorkoutItemInput[] }
 ) {
   await assertCanEditWorkout(ctx, id);
   await db.$transaction([
@@ -111,6 +121,7 @@ export async function saveWorkout(
       data: {
         name: input.name.trim() || "Untitled workout",
         description: input.description?.trim() || null,
+        type: input.type?.trim() || null,
         tags: input.tags?.trim() || null,
       },
     }),
@@ -163,6 +174,7 @@ export async function adjustClassWorkout(
     await saveWorkout(_ctx, workoutId, {
       name: orig.name,
       description: orig.description,
+      type: orig.type,
       tags: orig.tags,
       items,
     });
@@ -173,6 +185,7 @@ export async function adjustClassWorkout(
     data: {
       name: orig.name.includes("(adjusted)") ? orig.name : `${orig.name} (adjusted)`,
       description: orig.description,
+      type: orig.type,
       tags: orig.tags,
       items: {
         create: items.map((it, i) => ({
@@ -211,6 +224,7 @@ export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: 
     data: {
       name: `${orig.name} (copy)`,
       description: orig.description,
+      type: orig.type,
       tags: orig.tags,
       ownerCustomerId: orig.ownerCustomerId,
       items: {
@@ -236,9 +250,9 @@ export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: 
   return copy;
 }
 
-export async function createWorkout(_ctx: Ctx, input: { name: string; description?: string | null }) {
+export async function createWorkout(_ctx: Ctx, input: { name: string; description?: string | null; type?: string | null }) {
   const w = await db.workout.create({
-    data: { name: input.name.trim(), description: input.description?.trim() || null },
+    data: { name: input.name.trim(), description: input.description?.trim() || null, type: input.type?.trim() || null },
   });
   bust();
   return w;

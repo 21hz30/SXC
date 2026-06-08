@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getWorkout } from "@/domain/workouts";
+import { getWorkout, listWorkoutTags } from "@/domain/workouts";
 import BackButton from "@/components/BackButton";
 import WorkoutEditor, { type Item } from "@/components/WorkoutEditor";
 import ExerciseList from "@/components/ExerciseList";
@@ -27,6 +27,7 @@ export default async function WorkoutDetail({ params }: { params: Promise<{ id: 
   if (!canView) notFound();
 
   if (canEdit) {
+    const allTags = await listWorkoutTags();
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <BackButton fallback="/workouts" label="Back" />
@@ -38,8 +39,10 @@ export default async function WorkoutDetail({ params }: { params: Promise<{ id: 
           workoutId={w.id}
           initialName={w.name}
           initialDescription={w.description}
+          initialType={w.type}
           initialTags={w.tags}
           initialItems={w.items as Item[]}
+          allTags={allTags}
         />
       </div>
     );

@@ -10,12 +10,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = (await req.json()) as {
     name: string;
     description?: string | null;
+    type?: string | null;
     tags?: string | null;
     items: WorkoutItemInput[];
   };
   await saveWorkout({ user }, id, {
     name: body.name,
     description: body.description ?? null,
+    type: body.type ?? null,
     tags: body.tags ?? null,
     items: body.items ?? [],
   });

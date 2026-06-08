@@ -312,6 +312,9 @@ model Workout {
   id          String   @id @default(cuid())
   name        String
   description String?
+  /// Library category, drives filtering on the workouts page:
+  /// relax | weekly | class | mock. Null = uncategorized.
+  type        String?
   tags        String?  // comma-separated, e.g. "pro team,strength"
   /// When set, this is a private workout a customer built for themselves —
   /// visible only to them, not in the shared coach library. Null = shared.

@@ -10,6 +10,7 @@ import { customerDetail } from "@/domain/customers";
 import { createAccount, AccountError } from "@/domain/accounts";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import AccountForm from "@/components/AccountForm";
+import TagCombobox from "@/components/TagCombobox";
 import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     include: { rosterEntries: true },
   });
   const editingCustomer = edit ? customers.find((c) => c.id === edit) ?? null : null;
+  // Distinct tags already in use, for the tag picker.
+  const allCustomerTags = [...new Set(customers.flatMap((c) => (c.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b));
 
   async function createCustomer(formData: FormData) {
     "use server";
@@ -212,7 +215,10 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
               <div><label className="block text-sm font-medium mb-1.5">Age</label><input name="age" type="number" defaultValue={editingCustomer.age ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
               <div><label className="block text-sm font-medium mb-1.5">Weight (kg)</label><input name="weightKg" type="number" step="0.1" defaultValue={editingCustomer.weightKg ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
               <div><label className="block text-sm font-medium mb-1.5">Height (cm)</label><input name="heightCm" type="number" step="0.1" defaultValue={editingCustomer.heightCm ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-              <div><label className="block text-sm font-medium mb-1.5">Tags (comma-separated)</label><input name="tags" defaultValue={editingCustomer.tags ?? ""} placeholder="competing,Oct" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Tags</label>
+                <TagCombobox name="tags" defaultValue={(editingCustomer.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean)} suggestions={allCustomerTags} placeholder="Choose or create a tag…" />
+              </div>
               <div className="col-span-2 flex gap-2 justify-end">
                 <Link href="/customers" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
                 <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Save changes</button>

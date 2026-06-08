@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2, Check, GripVertical } from "lucide-react";
 import { toast } from "@/components/Toaster";
 import { CATEGORIES, FIELD_META, EXERCISE_TAGS, formatItem, type Category, type FieldKey } from "@/domain/exercises";
+import { WORKOUT_TYPES } from "@/lib/workoutTypes";
+import TagCombobox from "@/components/TagCombobox";
 
 export type Item = {
   id: string; // local id (may be temp for new items)
@@ -28,22 +30,26 @@ export default function WorkoutEditor({
   workoutId,
   initialName,
   initialDescription,
+  initialType,
   initialTags,
   initialItems,
+  allTags,
 }: {
   workoutId: string;
   initialName: string;
   initialDescription: string | null;
+  initialType: string | null;
   initialTags: string | null;
   initialItems: Item[];
+  allTags: string[];
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription ?? "");
+  const [type, setType] = useState<string>(initialType ?? "");
   const [tags, setTags] = useState<string[]>(
     (initialTags ?? "").split(",").map((t) => t.trim()).filter(Boolean)
   );
-  const [tagInput, setTagInput] = useState("");
   const [items, setItems] = useState<Item[]>(initialItems);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(items.length === 0);
@@ -80,18 +86,12 @@ export default function WorkoutEditor({
     markDirty();
   }
 
-  function addTag() {
-    const t = tagInput.trim().replace(/,/g, "");
-    if (t && !tags.includes(t)) { setTags((cur) => [...cur, t]); markDirty(); }
-    setTagInput("");
-  }
-  function removeTag(t: string) { setTags((cur) => cur.filter((x) => x !== t)); markDirty(); }
-
   async function save() {
     setSaving(true);
     const payload = {
       name,
       description: description || null,
+      type: type || null,
       tags: tags.join(",") || null,
       items: items.map(({ id: _id, ...rest }) => rest),
     };
@@ -145,31 +145,16 @@ export default function WorkoutEditor({
           <textarea value={description} onChange={(e) => { setDescription(e.target.value); markDirty(); }} rows={2} className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent" />
         </div>
         <div>
+          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Type</label>
+          <select value={type} onChange={(e) => { setType(e.target.value); markDirty(); }} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm outline-none focus:border-accent">
+            <option value="">Uncategorized</option>
+            {WORKOUT_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Tags</label>
-          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-white px-2 py-2 focus-within:border-accent">
-            {tags.map((t) => (
-              <span key={t} className="inline-flex items-center gap-1 text-xs bg-accent/10 text-accent rounded-full pl-2.5 pr-1 py-1">
-                {t}
-                <button type="button" onClick={() => removeTag(t)} className="hover:bg-accent/20 rounded-full p-0.5"><X size={10} /></button>
-              </span>
-            ))}
-            <input
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(); } }}
-              placeholder={tags.length === 0 ? "Type a tag, e.g. pro team, then press Enter" : "Add tag…"}
-              className="text-sm px-1 py-0.5 outline-none min-w-[10rem] flex-1 bg-transparent"
-            />
-            <button
-              type="button"
-              onClick={addTag}
-              disabled={!tagInput.trim()}
-              className="text-xs rounded-md border border-border px-2 py-1 text-muted hover:bg-background disabled:opacity-40"
-            >
-              Add
-            </button>
-          </div>
-          <div className="text-[11px] text-muted mt-1">Press Enter or comma to add. Examples: pro team, beginners, strength.</div>
+          <TagCombobox value={tags} onChange={(t) => { setTags(t); markDirty(); }} suggestions={allTags} placeholder="Choose an existing tag or create one…" />
+          <div className="text-[11px] text-muted mt-1">Pick from existing tags, or type a new one — it&apos;s reusable next time.</div>
         </div>
       </section>
 
