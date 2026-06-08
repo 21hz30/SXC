@@ -42,7 +42,7 @@ export default async function Dashboard() {
           // Keep the dashboard clean: only today + upcoming (and undated), never
           // past-dated workouts — those stay on the calendar but drop off here.
           where: { customerId: myCustomerId, OR: [{ scheduledDate: { gte: startOfDay() } }, { scheduledDate: null }] },
-          include: { workout: { select: { id: true, name: true, items: { orderBy: { order: "asc" } } } }, camp: { select: { name: true } } },
+          include: { workout: { select: { id: true, name: true, type: true, items: { orderBy: { order: "asc" } } } }, camp: { select: { name: true } } },
           orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
@@ -313,7 +313,15 @@ export default async function Dashboard() {
                                 <div className="mt-2 text-xs text-muted">{a.rpe != null ? `RPE ${a.rpe}` : ""}{a.feeling ? `${a.rpe != null ? " · " : ""}${a.feeling}` : ""}</div>
                               )}
 
-                              {!done && (
+                              {!done && (a.workout.type === "relax" ? (
+                                /* Relax sessions are just-tick-off — no RPE/feeling/notes. */
+                                <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
+                                  <input type="hidden" name="assignmentId" value={a.id} />
+                                  <input type="hidden" name="status" value="completed" />
+                                  <span className="text-[11px] text-muted">Relax session — no feedback needed.</span>
+                                  <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
+                                </form>
+                              ) : (
                                 <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
                                   <input type="hidden" name="assignmentId" value={a.id} />
                                   <input type="hidden" name="status" value="completed" />
@@ -333,7 +341,7 @@ export default async function Dashboard() {
                                     <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
                                   </div>
                                 </form>
-                              )}
+                              ))}
                             </li>
                           );
                         })}
