@@ -2,31 +2,92 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { formatSec } from "@/lib/utils";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { formatSec, formatDate } from "@/lib/utils";
+import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, Timer } from "lucide-react";
+import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 import { requireCoach } from "@/lib/auth";
 import { customerScope, nonStaffCustomerWhere } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
 import { createAccount, AccountError } from "@/domain/accounts";
-import ConfirmSubmit from "@/components/ConfirmSubmit";
 import AccountForm from "@/components/AccountForm";
 import TagCombobox from "@/components/TagCombobox";
+import CustomerList, { type CustItem } from "@/components/CustomerList";
 import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; error?: string }> }) {
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-muted">{label}</div>
+      <div className="text-sm font-medium text-foreground truncate">{value}</div>
+    </div>
+  );
+}
+
+const ATT_META: Record<string, { label: string; cls: string }> = {
+  attended: { label: "Attended", cls: "bg-emerald-100 text-emerald-700" },
+  no_show: { label: "No show", cls: "bg-red-100 text-red-700" },
+  late_cancel: { label: "Late", cls: "bg-amber-100 text-amber-700" },
+  pending: { label: "Upcoming", cls: "bg-zinc-100 text-zinc-600" },
+};
+
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; sel?: string; error?: string }> }) {
   const user = await requireCoach();
-  const { new: isNew, edit, error } = await searchParams;
+  const { new: isNew, edit, sel, error } = await searchParams;
   // Exclude staff (admin/coach) profiles — they live on the Team page.
-  const customers = await db.customer.findMany({
-    where: { ...customerScope(user), ...nonStaffCustomerWhere() },
-    orderBy: { name: "asc" },
-    include: { rosterEntries: true },
-  });
+  const [customers, camps] = await Promise.all([
+    db.customer.findMany({
+      where: { ...customerScope(user), ...nonStaffCustomerWhere() },
+      orderBy: { name: "asc" },
+      include: { rosterEntries: true, campMembers: { select: { campId: true } } },
+    }),
+    db.camp.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+  ]);
   const editingCustomer = edit ? customers.find((c) => c.id === edit) ?? null : null;
+  const selectedCustomer = sel ? customers.find((c) => c.id === sel) ?? null : null;
   // Distinct tags already in use, for the tag picker.
   const allCustomerTags = [...new Set(customers.flatMap((c) => (c.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b));
+
+  // Serializable rows for the client-side search/filter list.
+  const listItems: CustItem[] = customers.map((c) => ({
+    id: c.id,
+    name: c.name,
+    detail: customerDetail(c) || c.email || "—",
+    pbSec: c.hyroxPbSec ?? null,
+    attended: c.rosterEntries.filter((r) => r.attendance === "attended").length,
+    total: c.rosterEntries.filter((r) => r.attendance !== "pending").length,
+    campIds: c.campMembers.map((m) => m.campId),
+  }));
+
+  // Rich at-a-glance data for the selected customer's summary panel: their plan
+  // adherence + recent plan items, recent classes, and any mock-test results.
+  const selData = selectedCustomer
+    ? await (async () => {
+        const [planRows, classRows, mockRows] = await Promise.all([
+          db.workoutAssignment.findMany({
+            where: { customerId: selectedCustomer.id },
+            orderBy: { scheduledDate: "desc" },
+            take: 60,
+            include: { workout: { select: { id: true, name: true } } },
+          }),
+          db.rosterEntry.findMany({
+            where: { customerId: selectedCustomer.id },
+            orderBy: { class: { startsAt: "desc" } },
+            take: 5,
+            include: { class: { select: { id: true, title: true, startsAt: true } } },
+          }),
+          db.mockResult.findMany({
+            where: { customerId: selectedCustomer.id },
+            orderBy: { recordedAt: "desc" },
+            take: 4,
+            include: { class: { select: { id: true, title: true, startsAt: true } } },
+          }),
+        ]);
+        return { plan: planAdherence(planRows), planItems: planRows.slice(0, 5), classes: classRows, mocks: mockRows };
+      })()
+    : null;
+  const selItem = selectedCustomer ? listItems.find((i) => i.id === selectedCustomer.id) ?? null : null;
 
   async function createCustomer(formData: FormData) {
     "use server";
@@ -150,41 +211,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Customers list — a sidebar (left on desktop; below the form on mobile) */}
         <aside className="lg:col-span-1 order-2 lg:order-1">
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted border-b border-border">All customers</div>
-            <ul className="divide-y divide-border max-h-[72vh] overflow-y-auto">
-              {customers.length === 0 && <li className="px-4 py-8 text-center text-sm text-muted">No customers yet.</li>}
-              {customers.map((c) => {
-                const attended = c.rosterEntries.filter((r) => r.attendance === "attended").length;
-                const total = c.rosterEntries.filter((r) => r.attendance !== "pending").length;
-                const active = editingCustomer?.id === c.id;
-                return (
-                  <li key={c.id} className={`group flex items-center gap-2 px-4 py-3 hover:bg-background ${active ? "bg-accent/5" : ""}`}>
-                    <Link href={`/customers/${c.id}`} className="min-w-0 flex-1">
-                      <div className="font-medium truncate hover:text-accent">{c.name}</div>
-                      <div className="text-xs text-muted truncate">
-                        {customerDetail(c) || c.email || "—"}
-                        {c.hyroxPbSec != null && <> · PB {formatSec(c.hyroxPbSec)}</>}
-                        {total > 0 && <> · {attended}/{total} att.</>}
-                      </div>
-                    </Link>
-                    <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100">
-                      <Link href={`/customers?edit=${c.id}`} className="text-muted hover:text-foreground" aria-label={`Edit ${c.name}`}><Pencil size={14} /></Link>
-                      <form action={deleteCustomer}>
-                        <input type="hidden" name="customerId" value={c.id} />
-                        <ConfirmSubmit
-                          message={`Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`}
-                          className="text-muted hover:text-red-600"
-                        >
-                          <Trash2 size={14} />
-                        </ConfirmSubmit>
-                      </form>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+          <CustomerList items={listItems} camps={camps} deleteAction={deleteCustomer} />
         </aside>
 
         {/* Main content — the add/edit form, or a hint on desktop */}
@@ -224,9 +251,116 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Save changes</button>
               </div>
             </form>
+          ) : selectedCustomer ? (
+            <div className="bg-card border border-border rounded-xl p-6">
+              <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-semibold tracking-tight truncate">{selectedCustomer.name}</h2>
+                  <div className="text-sm text-muted mt-0.5 truncate">{customerDetail(selectedCustomer) || "—"}</div>
+                  {selectedCustomer.tags && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {selectedCustomer.tags.split(",").map((t) => t.trim()).filter(Boolean).map((t) => (
+                        <span key={t} className="text-[11px] bg-accent/10 text-accent rounded-full px-2 py-0.5">{t}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link href={`/customers?edit=${selectedCustomer.id}`} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border hover:bg-background"><Pencil size={14} /> Edit</Link>
+                  <Link href={`/customers/${selectedCustomer.id}`} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-foreground text-white hover:opacity-90"><ExternalLink size={14} /> Full profile</Link>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                <Fact label="Email" value={selectedCustomer.email || "—"} />
+                <Fact label="Phone" value={selectedCustomer.phone || "—"} />
+                <Fact label="Hyrox PB" value={selectedCustomer.hyroxPbSec != null ? formatSec(selectedCustomer.hyroxPbSec) : "—"} />
+                <Fact label="Attendance" value={selItem && selItem.total > 0 ? `${selItem.attended}/${selItem.total}` : "—"} />
+              </div>
+
+              {selData && (
+                <div className="space-y-4">
+                  {/* Training plan: adherence + recent items with feedback */}
+                  <div className="rounded-xl border border-border p-4">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-muted uppercase tracking-wide mb-2"><Dumbbell size={12} /> Training plan</div>
+                    {selData.plan.pct == null ? (
+                      <div className="text-sm text-muted">No training plan assigned yet.</div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap text-xs mb-2">
+                          <span className="text-xl font-semibold text-foreground">{selData.plan.pct}%</span>
+                          <span className="text-muted">of due done</span>
+                          <span className="rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">{selData.plan.done} done</span>
+                          {selData.plan.missed > 0 && <span className="rounded-full px-2 py-0.5 bg-red-100 text-red-700">{selData.plan.missed} missed</span>}
+                          {selData.plan.upcoming > 0 && <span className="rounded-full px-2 py-0.5 bg-background border border-border text-muted">{selData.plan.upcoming} upcoming</span>}
+                        </div>
+                        <div className="divide-y divide-border">
+                          {selData.planItems.map((a) => {
+                            const st = planState(a);
+                            const meta = PLAN_STATE_META[st];
+                            const fb = st === "done" && (a.rpe != null || a.feeling) ? [a.rpe != null ? `RPE ${a.rpe}` : null, a.feeling].filter(Boolean).join(" · ") : null;
+                            return (
+                              <div key={a.id} className="flex items-center gap-2 py-1.5">
+                                <span className="w-12 shrink-0 text-[11px] text-muted tabular-nums">{a.scheduledDate ? new Date(a.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</span>
+                                <Link href={`/workouts/${a.workout.id}`} className="min-w-0 flex-1 text-sm truncate hover:text-accent">{a.workout.name}{fb && <span className="text-[11px] text-muted"> · {fb}</span>}</Link>
+                                <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${meta.cls}`}>{meta.label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                    <Link href={`/customers/${selectedCustomer.id}`} className="inline-block mt-2 text-xs text-accent hover:underline">Full training log →</Link>
+                  </div>
+
+                  {/* Recent classes attended */}
+                  {selData.classes.length > 0 && (
+                    <div className="rounded-xl border border-border p-4">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-muted uppercase tracking-wide mb-2"><CalendarDays size={12} /> Recent classes</div>
+                      <div className="divide-y divide-border">
+                        {selData.classes.map((r) => {
+                          const att = ATT_META[r.attendance] ?? ATT_META.pending;
+                          return (
+                            <Link key={r.id} href={`/classes/${r.classId}`} className="flex items-center gap-2 py-1.5 -mx-1 px-1 rounded hover:bg-background">
+                              <span className="min-w-0 flex-1">
+                                <span className="text-sm font-medium truncate block">{r.class.title}</span>
+                                <span className="text-[11px] text-muted">{formatDate(r.class.startsAt)}</span>
+                              </span>
+                              <span className={`shrink-0 text-[10px] font-semibold rounded-full px-2 py-0.5 ${att.cls}`}>{att.label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mock-test results */}
+                  {selData.mocks.length > 0 && (
+                    <div className="rounded-xl border border-border p-4">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-muted uppercase tracking-wide mb-2"><Timer size={12} /> Mock tests</div>
+                      <div className="divide-y divide-border">
+                        {selData.mocks.map((m) => {
+                          let splits = 0;
+                          try { splits = m.timesJson ? Object.keys(JSON.parse(m.timesJson) as Record<string, number>).length : 0; } catch {}
+                          return (
+                            <Link key={m.id} href={`/classes/${m.classId}`} className="flex items-center gap-2 py-1.5 -mx-1 px-1 rounded hover:bg-background">
+                              <span className="min-w-0 flex-1">
+                                <span className="text-sm font-medium truncate block">{m.class.title}</span>
+                                <span className="text-[11px] text-muted">{formatDate(m.class.startsAt)}{splits > 0 ? ` · ${splits} splits` : ""}</span>
+                              </span>
+                              {m.totalSec != null && <span className="shrink-0 text-sm font-semibold tabular-nums">{formatSec(m.totalSec)}</span>}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="hidden lg:flex items-center justify-center text-center bg-card border border-border border-dashed rounded-xl p-10 text-sm text-muted min-h-[16rem]">
-              <span>Pick a customer to edit, open one for full details, or <Link href="/customers?new=1" className="text-accent hover:underline">add a new customer</Link>.</span>
+              <span>Pick a customer to see their summary, or <Link href="/customers?new=1" className="text-accent hover:underline">add a new customer</Link>.</span>
             </div>
           )}
         </div>
