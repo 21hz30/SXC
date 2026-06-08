@@ -170,7 +170,11 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     "use server";
     await requireStaff();
     const memberId = String(formData.get("memberId"));
+    const m = await db.campMember.findUnique({ where: { id: memberId }, select: { customerId: true } });
     await db.campMember.delete({ where: { id: memberId } });
+    // Removing a member also drops this camp's training plan from them, so they
+    // no longer see it. Workouts they already completed stay as history.
+    if (m) await db.workoutAssignment.deleteMany({ where: { campId: id, customerId: m.customerId, status: { not: "completed" } } });
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Member removed"));
   }
@@ -222,6 +226,9 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     const acct = await db.user.findUnique({ where: { id: u.id }, select: { customerId: true } });
     if (!acct?.customerId) redirect("/profile");
     await db.campMember.deleteMany({ where: { campId: id, customerId: acct.customerId } });
+    // Leaving also drops this camp's training plan they should no longer see
+    // (workouts they already completed stay as history).
+    await db.workoutAssignment.deleteMany({ where: { campId: id, customerId: acct.customerId, status: { not: "completed" } } });
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Left the camp"));
   }
