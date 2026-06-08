@@ -405,13 +405,14 @@ function TodoCard({ t }: { t: TodoRow }) {
   );
 }
 
-function AssignmentChip({ a, draggable = false }: { a: AssignmentRow; draggable?: boolean }) {
+function AssignmentChip({ a, draggable = false, athlete = false }: { a: AssignmentRow; draggable?: boolean; athlete?: boolean }) {
   const done = a.status === "completed";
-  // A draggable <Link> still fires the delegated dragstart (reschedule) for staff,
-  // while a plain click opens the workout's exercises — so it does both.
+  // Athletes jump to their dashboard (where they mark the plan done); staff open
+  // the workout's exercises. For staff a draggable <Link> also reschedules.
+  const href = athlete ? `/#plan-${a.id}` : `/workouts/${a.workout.id}`;
   return (
     <Link
-      href={`/workouts/${a.workout.id}`}
+      href={href}
       draggable={draggable}
       data-drag-type="assignment"
       data-drag-id={a.id}
@@ -423,11 +424,11 @@ function AssignmentChip({ a, draggable = false }: { a: AssignmentRow; draggable?
   );
 }
 
-function AssignmentCard({ a }: { a: AssignmentRow }) {
+function AssignmentCard({ a, athlete = false }: { a: AssignmentRow; athlete?: boolean }) {
   const done = a.status === "completed";
   return (
     <Link
-      href={`/workouts/${a.workout.id}`}
+      href={athlete ? `/#plan-${a.id}` : `/workouts/${a.workout.id}`}
       className={`flex items-start gap-2 p-2.5 rounded-lg border transition ${done ? "bg-background border-border opacity-60 hover:opacity-90" : "bg-violet-50 border-violet-200 hover:border-violet-300"}`}
     >
       <Dumbbell size={14} className={`mt-0.5 shrink-0 ${done ? "text-emerald-500" : "text-violet-600"}`} />
@@ -454,7 +455,7 @@ function DayView({ classes, todos, assignments, cursor, canAdd, canSignUp, signe
           <div>
             <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Training</h3>
             <div className="space-y-2">
-              {dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} />)}
+              {dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} athlete={!canAdd} />)}
             </div>
           </div>
         )}
@@ -519,7 +520,7 @@ function WeekView({ classes, todos, assignments, weekStart, canAdd, canSignUp, s
           <div className="border-r border-border pr-2 pt-1.5 text-right text-[9px] font-medium uppercase tracking-wide text-muted">All-day</div>
           {days.map((d, i) => (
             <div key={d.toISOString()} data-drop-day={isoDay(d)} className="border-r border-border last:border-r-0 p-1 space-y-1 min-h-[1.75rem]">
-              {dayAssignments[i].map((a) => <AssignmentChip key={a.id} a={a} draggable />)}
+              {dayAssignments[i].map((a) => <AssignmentChip key={a.id} a={a} draggable={canAdd} athlete={!canAdd} />)}
               {dayTodos[i].map((t) => <TodoChip key={t.id} t={t} />)}
             </div>
           ))}
@@ -565,7 +566,7 @@ function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classe
               </div>
               <div className="space-y-1">
                 {dayAssignments.slice(0, 2).map((a) => (
-                  <Link key={a.id} href={`/workouts/${a.workout.id}`} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${a.status === "completed" ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800 hover:bg-violet-200"}`}>
+                  <Link key={a.id} href={canAdd ? `/workouts/${a.workout.id}` : `/#plan-${a.id}`} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${a.status === "completed" ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800 hover:bg-violet-200"}`}>
                     <Dumbbell size={10} /> {a.workout.name}
                   </Link>
                 ))}
@@ -691,7 +692,7 @@ function MobileCalendar({ classes, todos, assignments, cursor, canAdd, canSignUp
         {dayAssignments.length > 0 && (
           <section>
             <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5"><Dumbbell size={12} /> Training plan</h3>
-            <div className="space-y-2">{dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} />)}</div>
+            <div className="space-y-2">{dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} athlete={!canAdd} />)}</div>
           </section>
         )}
 

@@ -294,7 +294,7 @@ export default async function Dashboard() {
                         {g.items.map((a) => {
                           const done = a.status === "completed";
                           return (
-                            <li key={a.id} className={`bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
+                            <li key={a.id} id={`plan-${a.id}`} className={`scroll-mt-20 bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-semibold">{a.workout.name}</span>
                                 {a.camp && <span className="text-[11px] text-accent">· {a.camp.name}</span>}
