@@ -2,12 +2,13 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, Dumbbell } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { categoryLabel } from "@/domain/exercises";
 import { cloneWorkout } from "@/domain/workouts";
 import { WORKOUT_TYPES, workoutTypeMeta } from "@/lib/workoutTypes";
 import { getMyCustomerId, requireUser } from "@/lib/auth";
+import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,21 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
   // Filter tabs (with counts) + the filtered view.
   const typeCounts = WORKOUT_TYPES.map((t) => ({ ...t, count: workouts.filter((w) => w.type === t.key).length }));
   const shown = typeFilter ? workouts.filter((w) => w.type === typeFilter) : workouts;
+
+  // Customers also see the workouts their coach assigned them (distinct, recent
+  // first) so they can review or copy one into their own library to practice.
+  const assigned = !isStaff && myCustomerId
+    ? await db.workoutAssignment.findMany({
+        where: { customerId: myCustomerId },
+        orderBy: { scheduledDate: "desc" },
+        distinct: ["workoutId"],
+        take: 24,
+        include: { workout: { include: { _count: { select: { items: true } } } }, camp: { select: { name: true } } },
+      })
+    : [];
+  // Which assigned workouts the customer has already copied (match by name) — so
+  // we can show "Added" instead of letting them pile up duplicates.
+  const myWorkoutNames = new Set(workouts.map((w) => w.name));
 
   async function createWorkout(formData: FormData) {
     "use server";
@@ -69,13 +85,46 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
     redirect(`/workouts/${copy.id}`);
   }
 
+  // A customer copies a coach-assigned workout into their own library so they
+  // can practice it on their own. Restricted to workouts actually assigned to them.
+  async function addToMyWorkouts(formData: FormData) {
+    "use server";
+    const u = await requireUser();
+    if (u.role === "admin" || u.role === "coach") redirect("/workouts");
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    const workoutId = String(formData.get("workoutId") ?? "");
+    const assignedToMe = await db.workoutAssignment.count({ where: { customerId: mine, workoutId } });
+    if (!assignedToMe) redirect("/workouts");
+    const orig = await db.workout.findUnique({ where: { id: workoutId }, include: { items: { orderBy: { order: "asc" } } } });
+    if (!orig) redirect("/workouts");
+    await db.workout.create({
+      data: {
+        name: orig.name,
+        description: orig.description,
+        type: orig.type,
+        tags: orig.tags,
+        ownerCustomerId: mine,
+        items: {
+          create: orig.items.map((it, i) => ({
+            order: i, category: it.category, label: it.label, distanceM: it.distanceM, timeSec: it.timeSec,
+            weightKg: it.weightKg, reps: it.reps, sets: it.sets, paceSecPerKm: it.paceSecPerKm, heightM: it.heightM,
+            notes: it.notes, tag: it.tag,
+          })),
+        },
+      },
+    });
+    revalidatePath("/workouts");
+    redirect(flashUrl("/workouts", `“${orig.name}” added to your workouts`));
+  }
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{isStaff ? "Workouts" : "My workouts"}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Workouts</h1>
           <div className="text-sm text-muted mt-1">
-            {isStaff ? `${workouts.length} templates` : `${workouts.length} of your own workouts`}
+            {isStaff ? `${workouts.length} templates` : "Your coach's plan, plus workouts you save to practice"}
           </div>
         </div>
         <Link href="/workouts?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
@@ -101,6 +150,49 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
           </div>
         </form>
       )}
+
+      {/* Customer: the workouts a coach assigned — review, or save a copy to practice */}
+      {!isStaff && assigned.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3 flex items-center gap-1.5"><Dumbbell size={13} /> Assigned by your coach</h2>
+          <div className="space-y-3">
+            {assigned.map((a) => {
+              const meta = workoutTypeMeta(a.workout.type);
+              const added = myWorkoutNames.has(a.workout.name);
+              return (
+                <div key={a.id} className="bg-card border border-border rounded-xl p-4 sm:p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link href={`/workouts/${a.workout.id}`} className="font-semibold hover:text-accent truncate">{a.workout.name}</Link>
+                        {meta && <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${meta.badge}`}>{meta.label}</span>}
+                      </div>
+                      <div className="text-xs text-muted mt-0.5">
+                        {a.workout._count.items} exercise{a.workout._count.items === 1 ? "" : "s"}
+                        {a.camp?.name ? ` · ${a.camp.name}` : ""}
+                        {a.scheduledDate ? ` · ${formatDate(a.scheduledDate)}` : ""}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link href={`/workouts/${a.workout.id}`} className="text-xs rounded-lg border border-border px-2.5 py-1.5 text-muted hover:text-accent hover:border-accent">View</Link>
+                      {added ? (
+                        <span className="text-xs rounded-lg px-2.5 py-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200">Saved</span>
+                      ) : (
+                        <form action={addToMyWorkouts}>
+                          <input type="hidden" name="workoutId" value={a.workout.id} />
+                          <button type="submit" className="text-xs rounded-lg bg-foreground text-white px-2.5 py-1.5 hover:opacity-90 inline-flex items-center gap-1"><Plus size={13} /> Practice</button>
+                        </form>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {!isStaff && <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">My workouts</h2>}
 
       <div className="flex flex-wrap gap-2 mb-4">
         <Link href="/workouts" className={`text-xs rounded-full px-3 py-1.5 border transition ${!typeFilter ? "bg-foreground text-white border-foreground" : "border-border text-muted hover:border-accent"}`}>All <span className="tabular-nums">{workouts.length}</span></Link>
