@@ -15,6 +15,8 @@ type Klass = {
   startsAtLabel: string;
   location?: string | null;
   workouts: AssignedWorkout[];
+  /** A member can't see the workouts yet (revealed 30 min before the class). */
+  locked?: boolean;
   rosterCount: number;
   capacity: number;
   dropInAllowed?: boolean;
@@ -144,8 +146,10 @@ export default function CampSchedule({
                       )}
                     </div>
                   </div>
-                  {c.workouts.length === 0 ? (
-                    <div className="text-xs text-muted italic mb-2">No workouts yet — add one below.</div>
+                  {c.locked ? (
+                    <div className="text-xs text-muted mb-2">🔒 Workout shows 30 min before the class.</div>
+                  ) : c.workouts.length === 0 ? (
+                    canEdit ? <div className="text-xs text-muted italic mb-2">No workouts yet — add one below.</div> : null
                   ) : (
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {c.workouts.map((w) => (

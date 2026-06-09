@@ -644,18 +644,25 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
               description: w.description,
               itemCount: w.items.length,
             }))}
-            classes={camp.classes.map((c) => ({
-              id: c.id,
-              title: c.title,
-              startsAtLabel: `${formatDate(c.startsAt)} · ${formatTime(c.startsAt)}`,
-              location: c.location,
-              workouts: c.workouts.map((cw) => ({ id: cw.workout.id, name: cw.workout.name })),
-              rosterCount: c.roster.length,
-              capacity: c.capacity,
-              dropInAllowed: c.dropInAllowed,
-              createdByName: c.createdBy?.name ?? null,
-              signedUp: myCustomerId ? c.roster.some((r) => r.customerId === myCustomerId) : false,
-            }))}
+            classes={camp.classes.map((c) => {
+              // Members only see a class's workouts from 30 min before it starts
+              // (mirrors the class page); staff always see them. We don't even
+              // send the names to members early — nothing to leak.
+              const revealed = isStaff || Date.now() >= c.startsAt.getTime() - 30 * 60_000;
+              return {
+                id: c.id,
+                title: c.title,
+                startsAtLabel: `${formatDate(c.startsAt)} · ${formatTime(c.startsAt)}`,
+                location: c.location,
+                workouts: revealed ? c.workouts.map((cw) => ({ id: cw.workout.id, name: cw.workout.name })) : [],
+                locked: !revealed && c.workouts.length > 0,
+                rosterCount: c.roster.length,
+                capacity: c.capacity,
+                dropInAllowed: c.dropInAllowed,
+                createdByName: c.createdBy?.name ?? null,
+                signedUp: myCustomerId ? c.roster.some((r) => r.customerId === myCustomerId) : false,
+              };
+            })}
             onDeleteClass={isStaff ? deleteClass : undefined}
             canEdit={isStaff}
             showDetail={canSeeInside}
