@@ -62,8 +62,10 @@ export default function MobileNav({
   const TabLink = ({ href, label, icon }: SidebarNavItem) => {
     const Icon = icons[icon];
     const active = isActive(href);
+    // Close the AI chat panel when navigating, otherwise it stays open over the
+    // page you just went to (so the tap looks like it did nothing).
     return (
-      <Link href={href} aria-current={active ? "page" : undefined} className={tabCls(active)}>
+      <Link href={href} onClick={() => setAiOpen(false)} aria-current={active ? "page" : undefined} className={tabCls(active)}>
         <Icon size={20} strokeWidth={active ? 2.4 : 2} />
         <span className="truncate max-w-full px-0.5">{href === "/" ? "Home" : label}</span>
       </Link>
@@ -117,7 +119,7 @@ export default function MobileNav({
             <span>AI</span>
           </button>
           {isStaff ? (
-            <button onClick={() => setOpen(true)} aria-label="More" className={tabCls(false)}>
+            <button onClick={() => { setAiOpen(false); setOpen(true); }} aria-label="More" className={tabCls(false)}>
               <Menu size={20} />
               <span>More</span>
             </button>
