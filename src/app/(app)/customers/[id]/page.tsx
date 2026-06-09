@@ -524,7 +524,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       <>
       <section className="mb-6">
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Activity trends ({c.activities.length} sessions)</h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <ChartCard title="Avg HR (bpm)" points={hrPoints} unit="bpm" />
           <ChartCard title="Avg pace (min/km)" points={pacePoints} unit="/km" format={(v) => formatSec(v)} />
           <ChartCard title="Distance (km)" points={distPoints} unit="km" format={(v) => v.toFixed(1)} />
@@ -550,7 +550,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           </div>
         ) : (
           <div className="bg-card border border-border rounded-xl divide-y divide-border overflow-hidden">
-            {planItems.slice(0, 15).map((a) => {
+            {planItems.length > 15 && <div className="px-4 py-2 text-[11px] text-muted">+{planItems.length - 15} earlier</div>}
+            {planItems.slice(0, 15).reverse().map((a) => {
               const st = planState(a);
               const meta = PLAN_STATE_META[st];
               const done = st === "done";
@@ -572,7 +573,6 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                 </div>
               );
             })}
-            {planItems.length > 15 && <div className="px-4 py-2 text-[11px] text-muted">+{planItems.length - 15} earlier</div>}
           </div>
         )}
       </section>
@@ -695,7 +695,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
               <ChartCard title="Fatigue (%)" points={perfFatiguePoints} unit="%" />
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[560px]">
                 <thead className="bg-background text-muted text-xs uppercase tracking-wide">
                   <tr className="text-left">
                     <th className="px-4 py-2.5 font-medium">Session</th>
@@ -729,6 +730,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           </>
         )}
@@ -743,7 +745,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                 <div className="font-medium text-sm">{r.class.title}</div>
                 <div className="text-xs text-muted">{formatDate(r.class.startsAt)} · {formatTime(r.class.startsAt)}</div>
               </div>
-              <AttendancePill status={r.attendance} />
+              <AttendancePill status={r.attendance} finished={new Date(r.class.startsAt) < new Date()} />
             </Link>
           ))}
         </div>
@@ -768,7 +770,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
             </div>
           </div>
           {editingGoalDivision ? (
-            <form action={upsertRaceGoal} className="bg-card border border-border rounded-xl p-5 grid grid-cols-3 gap-3">
+            <form action={upsertRaceGoal} className="bg-card border border-border rounded-xl p-5 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <input type="hidden" name="division" value={editingGoalDivision} />
               <div className="col-span-3 text-xs text-muted">Setting goals for <strong>{divisionLabel(editingGoalDivision)}</strong>. Time format: <code>mm:ss</code> or plain seconds. Leave blank to skip.</div>
               <div><label className="block text-xs text-muted mb-1">Target total</label><input name="targetTotalSec" defaultValue={goalToEdit?.targetTotalSec ? formatSec(goalToEdit.targetTotalSec) : ""} placeholder="e.g. 65:00" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
@@ -801,7 +803,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
             <Link href={logRace ? `/customers/${id}?view=race` : `/customers/${id}?view=race&logRace=1`} className="text-xs text-accent hover:underline">{logRace ? "Cancel" : "+ Log race"}</Link>
           </div>
           {logRace && (
-            <form action={addRaceResult} className="bg-card border border-border rounded-xl p-5 grid grid-cols-3 gap-3">
+            <form action={addRaceResult} className="bg-card border border-border rounded-xl p-5 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="col-span-3 text-xs text-muted">Times accept <code>mm:ss</code> or plain seconds. Required: event name, date, division, total.</div>
               <div className="col-span-2"><label className="block text-xs text-muted mb-1">Event *</label><input name="eventName" required placeholder="Hyrox London 2026" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
               <div><label className="block text-xs text-muted mb-1">Date *</label><input name="eventDate" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
@@ -912,13 +914,14 @@ function ChartCard({ title, points, unit, format }: { title: string; points: { x
   );
 }
 
-function AttendancePill({ status }: { status: string }) {
+function AttendancePill({ status, finished = false }: { status: string; finished?: boolean }) {
   const map: Record<string, { label: string; cls: string }> = {
     attended: { label: "Attended", cls: "bg-emerald-100 text-emerald-700" },
     no_show: { label: "No show", cls: "bg-red-100 text-red-700" },
     late_cancel: { label: "Late cancel", cls: "bg-amber-100 text-amber-700" },
     pending: { label: "Upcoming", cls: "bg-zinc-100 text-zinc-600" },
   };
-  const s = map[status] ?? map.pending;
+  // A class that already happened but was never marked is "Finished", not "Upcoming".
+  const s = status === "pending" && finished ? { label: "Finished", cls: "bg-zinc-100 text-zinc-600" } : map[status] ?? map.pending;
   return <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.cls}`}>{s.label}</span>;
 }

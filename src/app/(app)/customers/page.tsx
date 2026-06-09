@@ -6,7 +6,7 @@ import { formatSec, formatDate } from "@/lib/utils";
 import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, Timer } from "lucide-react";
 import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 import { requireCoach } from "@/lib/auth";
-import { customerScope, nonStaffCustomerWhere } from "@/lib/access";
+import { customerScope } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
 import { createAccount, AccountError } from "@/domain/accounts";
 import AccountForm from "@/components/AccountForm";
@@ -38,9 +38,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   // Exclude staff (admin/coach) profiles — they live on the Team page.
   const [customers, camps] = await Promise.all([
     db.customer.findMany({
-      where: { ...customerScope(user), ...nonStaffCustomerWhere() },
+      // Non-staff customers, PLUS any staff who joined a camp as a participant
+      // (an admin can coach one camp yet be a member of another) — badged below.
+      where: {
+        ...customerScope(user),
+        OR: [{ userAccount: null }, { userAccount: { role: "customer" } }, { campMembers: { some: {} } }],
+      },
       orderBy: { name: "asc" },
-      include: { rosterEntries: true, campMembers: { select: { campId: true } } },
+      include: { rosterEntries: true, campMembers: { select: { campId: true } }, userAccount: { select: { role: true } } },
     }),
     db.camp.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
@@ -58,6 +63,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     attended: c.rosterEntries.filter((r) => r.attendance === "attended").length,
     total: c.rosterEntries.filter((r) => r.attendance !== "pending").length,
     campIds: c.campMembers.map((m) => m.campId),
+    accountRole: c.userAccount?.role === "admin" || c.userAccount?.role === "coach" ? c.userAccount.role : null,
   }));
 
   // Rich at-a-glance data for the selected customer's summary panel: their plan
@@ -84,7 +90,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
             include: { class: { select: { id: true, title: true, startsAt: true } } },
           }),
         ]);
-        return { plan: planAdherence(planRows), planItems: planRows.slice(0, 5), classes: classRows, mocks: mockRows };
+        // Show the recent window oldest→newest (ascending) so it reads as a timeline.
+        return { plan: planAdherence(planRows), planItems: planRows.slice(0, 5).reverse(), classes: classRows, mocks: mockRows };
       })()
     : null;
   const selItem = selectedCustomer ? listItems.find((i) => i.id === selectedCustomer.id) ?? null : null;
@@ -255,7 +262,12 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
             <div className="bg-card border border-border rounded-xl p-6">
               <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
                 <div className="min-w-0">
-                  <h2 className="text-2xl font-semibold tracking-tight truncate">{selectedCustomer.name}</h2>
+                  <h2 className="text-2xl font-semibold tracking-tight truncate flex items-center gap-2">
+                    <span className="truncate">{selectedCustomer.name}</span>
+                    {(selectedCustomer.userAccount?.role === "admin" || selectedCustomer.userAccount?.role === "coach") && (
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-violet-100 text-violet-700 capitalize">{selectedCustomer.userAccount.role}</span>
+                    )}
+                  </h2>
                   <div className="text-sm text-muted mt-0.5 truncate">{customerDetail(selectedCustomer) || "—"}</div>
                   {selectedCustomer.tags && (
                     <div className="flex flex-wrap gap-1 mt-2">
@@ -319,7 +331,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       <div className="flex items-center gap-1.5 text-xs font-medium text-muted uppercase tracking-wide mb-2"><CalendarDays size={12} /> Recent classes</div>
                       <div className="divide-y divide-border">
                         {selData.classes.map((r) => {
-                          const att = ATT_META[r.attendance] ?? ATT_META.pending;
+                          // A past class never marked is "Finished", not "Upcoming".
+                          const past = new Date(r.class.startsAt) < new Date();
+                          const att = r.attendance === "pending" && past
+                            ? { label: "Finished", cls: "bg-zinc-100 text-zinc-600" }
+                            : ATT_META[r.attendance] ?? ATT_META.pending;
                           return (
                             <Link key={r.id} href={`/classes/${r.classId}`} className="flex items-center gap-2 py-1.5 -mx-1 px-1 rounded hover:bg-background">
                               <span className="min-w-0 flex-1">

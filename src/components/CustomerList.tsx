@@ -15,6 +15,7 @@ export type CustItem = {
   attended: number;
   total: number;
   campIds: string[];
+  accountRole: string | null; // "admin" | "coach" when this is a staff member in a camp
 };
 
 /**
@@ -75,7 +76,10 @@ export default function CustomerList({
           return (
             <li key={c.id} className={`group flex items-center gap-2 px-4 py-3 hover:bg-background ${active ? "bg-accent/5" : ""}`}>
               <Link href={`/customers?sel=${c.id}`} className="min-w-0 flex-1">
-                <div className={`font-medium truncate ${active ? "text-accent" : "hover:text-accent"}`}>{c.name}</div>
+                <div className={`font-medium truncate flex items-center gap-1.5 ${active ? "text-accent" : "hover:text-accent"}`}>
+                  <span className="truncate">{c.name}</span>
+                  {c.accountRole && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide rounded px-1 py-0.5 bg-violet-100 text-violet-700 capitalize">{c.accountRole}</span>}
+                </div>
                 <div className="text-xs text-muted truncate">
                   {c.detail}
                   {c.pbSec != null && <> · PB {formatSec(c.pbSec)}</>}
