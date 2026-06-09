@@ -409,7 +409,10 @@ function AssignmentChip({ a, draggable = false, athlete = false }: { a: Assignme
   const done = a.status === "completed";
   // Athletes jump to their dashboard (where they mark the plan done); staff open
   // the workout's exercises. For staff a draggable <Link> also reschedules.
-  const href = athlete ? `/#plan-${a.id}` : `/workouts/${a.workout.id}`;
+  // Athletes: a current/upcoming item opens the dashboard (to act on it); a past
+  // item isn't on the dashboard, so open the workout's details instead.
+  const isPast = !!a.scheduledDate && new Date(a.scheduledDate) < startOfDay();
+  const href = athlete && !isPast ? `/#plan-${a.id}` : `/workouts/${a.workout.id}`;
   return (
     <Link
       href={href}
@@ -426,9 +429,12 @@ function AssignmentChip({ a, draggable = false, athlete = false }: { a: Assignme
 
 function AssignmentCard({ a, athlete = false }: { a: AssignmentRow; athlete?: boolean }) {
   const done = a.status === "completed";
+  // Current/upcoming → dashboard (to act on it); past → workout details, since a
+  // past item is no longer on the dashboard.
+  const isPast = !!a.scheduledDate && new Date(a.scheduledDate) < startOfDay();
   return (
     <Link
-      href={athlete ? `/#plan-${a.id}` : `/workouts/${a.workout.id}`}
+      href={athlete && !isPast ? `/#plan-${a.id}` : `/workouts/${a.workout.id}`}
       className={`flex items-start gap-2 p-2.5 rounded-lg border transition ${done ? "bg-background border-border opacity-60 hover:opacity-90" : "bg-violet-50 border-violet-200 hover:border-violet-300"}`}
     >
       <Dumbbell size={14} className={`mt-0.5 shrink-0 ${done ? "text-emerald-500" : "text-violet-600"}`} />
@@ -566,7 +572,7 @@ function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classe
               </div>
               <div className="space-y-1">
                 {dayAssignments.slice(0, 2).map((a) => (
-                  <Link key={a.id} href={canAdd ? `/workouts/${a.workout.id}` : `/#plan-${a.id}`} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${a.status === "completed" ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800 hover:bg-violet-200"}`}>
+                  <Link key={a.id} href={canAdd || (a.scheduledDate && new Date(a.scheduledDate) < startOfDay()) ? `/workouts/${a.workout.id}` : `/#plan-${a.id}`} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${a.status === "completed" ? "bg-background text-muted line-through" : "bg-violet-100 text-violet-800 hover:bg-violet-200"}`}>
                     <Dumbbell size={10} /> {a.workout.name}
                   </Link>
                 ))}
