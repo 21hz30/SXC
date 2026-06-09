@@ -14,7 +14,7 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { db } from "@/lib/db";
 
-export type PromptKey = "chat.system" | "report.postClass";
+export type PromptKey = "chat.system" | "report.postClass" | "insights.customer";
 
 type RegistryEntry = {
   name: string;
@@ -34,6 +34,12 @@ export const PROMPT_REGISTRY: Record<PromptKey, RegistryEntry> = {
     description:
       "Generates the athlete-facing report after each class. Used by the 'Generate' button on the class detail page.",
     file: "post-class-report.md",
+  },
+  "insights.customer": {
+    name: "Customer AI insights",
+    description:
+      "Produces the coach-facing insight cards (strengths, watch-outs, focus, nutrition) on a customer's profile. Must return JSON.",
+    file: "customer-insights.md",
   },
 };
 

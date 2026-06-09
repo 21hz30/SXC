@@ -13,6 +13,7 @@ import { flashUrl } from "@/lib/flash";
 import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS, divisionsForGender } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
+import CustomerInsights from "@/components/CustomerInsights";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
 import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 
@@ -522,6 +523,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
       {view === "training" && (
       <>
+      {isStaff && <CustomerInsights customerId={c.id} customerName={c.name} />}
       <section className="mb-6">
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Activity trends ({c.activities.length} sessions)</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
