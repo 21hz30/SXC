@@ -101,6 +101,20 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     planByDay.set(key, entry);
   }
   const planDays = [...planByDay.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
+  // Stack the live plan by week so a long-running camp collapses into expandable
+  // weeks instead of one ever-growing list. The current week opens by default.
+  type PlanDay = (typeof planDays)[number];
+  const planWeekMap = new Map<string, { weekKey: string; weekStart: Date; days: PlanDay[]; total: number; done: number }>();
+  for (const p of planDays) {
+    const wk = mondayOf(p.date.toISOString().slice(0, 10)); // UTC Monday, matches scheduledDate
+    const e = planWeekMap.get(wk) ?? { weekKey: wk, weekStart: new Date(`${wk}T00:00:00Z`), days: [], total: 0, done: 0 };
+    e.days.push(p);
+    e.total += p.total;
+    e.done += p.done;
+    planWeekMap.set(wk, e);
+  }
+  const planWeeks = [...planWeekMap.values()].sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
+  const thisMonday = mondayOf(new Date().toISOString().slice(0, 10));
 
   // Pre-load the builder with the workouts already scheduled for `planWeek`,
   // grouped per weekday, so it shows the saved plan instead of starting blank.
@@ -466,14 +480,31 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
                   </ConfirmSubmit>
                 </form>
               </div>
-              <ul className="divide-y divide-border">
-                {planDays.map((p, i) => (
-                  <li key={i} className="flex items-center justify-between py-1.5 text-sm">
-                    <span><span className="text-muted tabular-nums mr-2">{formatDate(p.date)}</span>{p.workoutName}</span>
-                    <span className="text-xs text-muted tabular-nums">{p.done}/{p.total} done</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-1.5">
+                {planWeeks.map((wk) => {
+                  const isCurrent = wk.weekKey === thisMonday;
+                  return (
+                    <details key={wk.weekKey} open={isCurrent} className="rounded-lg border border-border bg-background/40 overflow-hidden">
+                      <summary className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer text-sm hover:bg-background select-none">
+                        <span className="font-medium">
+                          Week of {formatDate(wk.weekStart)}
+                          <span className="text-muted font-normal"> · {wk.days.length} session{wk.days.length === 1 ? "" : "s"}</span>
+                          {isCurrent && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-accent">this week</span>}
+                        </span>
+                        <span className="text-xs text-muted tabular-nums shrink-0">{wk.done}/{wk.total} done</span>
+                      </summary>
+                      <ul className="divide-y divide-border border-t border-border bg-card px-3">
+                        {wk.days.map((p, i) => (
+                          <li key={i} className="flex items-center justify-between py-1.5 text-sm">
+                            <span><span className="text-muted tabular-nums mr-2">{formatDate(p.date)}</span>{p.workoutName}</span>
+                            <span className="text-xs text-muted tabular-nums">{p.done}/{p.total} done</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  );
+                })}
+              </div>
             </div>
           )}
         </section>
