@@ -120,15 +120,22 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
-      <header className="mb-6 flex items-end justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Workouts</h1>
+      <header className="mb-6 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Workouts</h1>
           <div className="text-sm text-muted mt-1">
             {isStaff ? `${workouts.length} templates` : "Your coach's plan, plus workouts you save to practice"}
           </div>
         </div>
-        <Link href="/workouts?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
-          <Plus size={16} /> New workout
+        {/* Compact icon button on phones; full label from sm up. */}
+        <Link
+          href="/workouts?new=1"
+          aria-label="New workout"
+          title="New workout"
+          className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg bg-foreground text-white text-sm font-medium hover:opacity-90 h-9 w-9 sm:w-auto sm:px-4"
+        >
+          <Plus size={16} />
+          <span className="hidden sm:inline">New workout</span>
         </Link>
       </header>
 
