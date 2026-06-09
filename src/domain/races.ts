@@ -127,8 +127,11 @@ export const DIVISION_STANDARDS: Record<string, StandardSet> = {
 };
 
 export function getStandardSet(division: string | null | undefined, gender: string | null | undefined): StandardSet {
-  const div = division === "pro" ? "pro" : "open"; // doubles/relay → open baseline
-  const g = gender === "female" ? "female" : "male";
+  // Pro divisions use the pro baseline; everything else (doubles/relay/open) the
+  // open baseline. Gender comes from the division name when it carries one,
+  // else the athlete's gender.
+  const div = division?.includes("pro") ? "pro" : "open";
+  const g = division?.includes("women") || gender === "female" ? "female" : "male";
   return DIVISION_STANDARDS[`${div}_${g}`] ?? DIVISION_STANDARDS.open_male;
 }
 

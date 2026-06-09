@@ -14,14 +14,37 @@ export const GENDERS: { value: Gender; label: string }[] = [
   { value: "female", label: "Female" },
 ];
 
-// Hyrox competition divisions. Weights & standards differ across these.
-export type Division = "open" | "pro" | "doubles" | "relay";
-export const DIVISIONS: { value: Division; label: string }[] = [
-  { value: "open", label: "Open" },
-  { value: "pro", label: "Pro" },
-  { value: "doubles", label: "Doubles" },
-  { value: "relay", label: "Relay" },
+// Hyrox competition divisions, grouped singles → doubles → relay. Each carries
+// the gender it belongs to (or "mixed") so the list can be filtered by an
+// athlete's gender. Weights & standards differ across these.
+export type Division =
+  | "men" | "men_pro" | "women" | "women_pro"
+  | "doubles_men" | "doubles_men_pro" | "doubles_women" | "doubles_women_pro" | "doubles_mixed"
+  | "mens_relay" | "womens_relay" | "mixed_relay";
+export type DivisionGender = "male" | "female" | "mixed";
+export const DIVISIONS: { value: Division; label: string; gender: DivisionGender }[] = [
+  { value: "men", label: "Men", gender: "male" },
+  { value: "men_pro", label: "Men Pro", gender: "male" },
+  { value: "women", label: "Women", gender: "female" },
+  { value: "women_pro", label: "Women Pro", gender: "female" },
+  { value: "doubles_men", label: "Doubles Men", gender: "male" },
+  { value: "doubles_men_pro", label: "Doubles Men Pro", gender: "male" },
+  { value: "doubles_women", label: "Doubles Women", gender: "female" },
+  { value: "doubles_women_pro", label: "Doubles Women Pro", gender: "female" },
+  { value: "doubles_mixed", label: "Doubles Mixed", gender: "mixed" },
+  { value: "mens_relay", label: "Men's Relay", gender: "male" },
+  { value: "womens_relay", label: "Women's Relay", gender: "female" },
+  { value: "mixed_relay", label: "Mixed Relay", gender: "mixed" },
 ];
+
+/** The divisions an athlete of this gender can enter — their own gender's plus
+ *  the mixed ones. Unknown/blank gender → the full list (no filter). */
+export function divisionsForGender(
+  gender: string | null | undefined,
+): { value: Division; label: string; gender: DivisionGender }[] {
+  if (gender !== "male" && gender !== "female") return DIVISIONS;
+  return DIVISIONS.filter((d) => d.gender === gender || d.gender === "mixed");
+}
 
 export type BenchmarkUnit = "sec" | "reps" | "kg" | "m";
 
@@ -93,5 +116,9 @@ export function genderLabel(g: string | null | undefined): string {
 }
 
 export function divisionLabel(d: string | null | undefined): string {
-  return DIVISIONS.find((x) => x.value === d)?.label ?? "—";
+  if (!d) return "—";
+  const found = DIVISIONS.find((x) => x.value === d);
+  if (found) return found.label;
+  // Legacy / unknown value (e.g. an old "open"/"pro") → humanize it gracefully.
+  return d.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

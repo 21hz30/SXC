@@ -10,7 +10,7 @@ import { Sparkles, Pencil } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
-import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS } from "@/domain/benchmarks";
+import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS, divisionsForGender } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
@@ -448,7 +448,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
               <div>
                 <label className="block text-xs text-muted mb-1">Divisions <span className="text-muted">(pick all you race)</span></label>
                 <div className="flex flex-wrap gap-1.5">
-                  {DIVISIONS.map((d) => {
+                  {divisionsForGender(c!.gender).map((d) => {
                     const checked = (c!.division ?? "").split(",").map((s) => s.trim()).includes(d.value);
                     return (
                       <label key={d.value} className="inline-flex items-center gap-1.5 text-sm border border-border rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-background">
@@ -761,8 +761,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
         <section className="mt-6">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Edit goal</h2>
-            <div className="flex gap-1">
-              {DIVISIONS.map((d) => (
+            <div className="flex gap-1 flex-wrap">
+              {divisionsForGender(c.gender).map((d) => (
                 <Link key={d.value} href={`/customers/${id}?view=race&editGoal=${d.value}`} className={`text-xs rounded-md border px-2 py-1 ${editingGoalDivision === d.value ? "border-accent bg-accent/5" : "border-border hover:bg-card"}`}>
                   {d.label}
                 </Link>
@@ -807,7 +807,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
               <div className="col-span-3 text-xs text-muted">Times accept <code>mm:ss</code> or plain seconds. Required: event name, date, division, total.</div>
               <div className="col-span-2"><label className="block text-xs text-muted mb-1">Event *</label><input name="eventName" required placeholder="Hyrox London 2026" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
               <div><label className="block text-xs text-muted mb-1">Date *</label><input name="eventDate" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
-              <div><label className="block text-xs text-muted mb-1">Division *</label><select name="division" defaultValue={c.division ?? "open"} className="w-full rounded-lg border border-border px-3 py-2 text-sm">{DIVISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</select></div>
+              <div><label className="block text-xs text-muted mb-1">Division *</label><select name="division" defaultValue={(c.division ?? "").split(",")[0]?.trim() || divisionsForGender(c.gender)[0]?.value || ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm">{divisionsForGender(c.gender).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</select></div>
               <div><label className="block text-xs text-muted mb-1">Total *</label><input name="totalSec" required placeholder="e.g. 70:12" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
               <div><label className="block text-xs text-muted mb-1">Roxzone</label><input name="roxzoneSec" placeholder="mm:ss" className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
               <div className="col-span-3 text-xs font-medium text-muted uppercase mt-1">Run splits (1 km each)</div>

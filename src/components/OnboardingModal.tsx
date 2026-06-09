@@ -3,15 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { UPCOMING_RACES } from "@/domain/races";
+import { DIVISIONS, divisionsForGender } from "@/domain/benchmarks";
 
 type Props = { firstName: string };
-
-const DIVISIONS = [
-  { value: "open", label: "Open" },
-  { value: "pro", label: "Pro" },
-  { value: "doubles", label: "Doubles" },
-  { value: "relay", label: "Relay" },
-];
 
 type DivEntry = { on: boolean; min: string; sec: string };
 const emptyDivs = (): Record<string, DivEntry> =>
@@ -76,7 +70,7 @@ export default function OnboardingModal({ firstName }: Props) {
       phone: basics.phone || null,
       finished: noRaces
         ? []
-        : DIVISIONS.filter((d) => finished[d.value].on).map((d) => ({
+        : divisionsForGender(basics.gender).filter((d) => finished[d.value]?.on).map((d) => ({
             division: d.value,
             pbSec: toSec(finished[d.value]),
           })),
@@ -168,6 +162,7 @@ export default function OnboardingModal({ firstName }: Props) {
               {!noRaces && (
                 <DivisionPicker
                   map={finished}
+                  divisions={divisionsForGender(basics.gender)}
                   onToggle={(d) => { setNoRaces(false); toggle(finished, setFinished, d); }}
                   onTime={(d, k, v) => setTime(finished, setFinished, d, k, v)}
                   timeLabel="Personal best"
@@ -194,7 +189,7 @@ export default function OnboardingModal({ firstName }: Props) {
                     {on && (
                       <div className="mt-2.5 pl-6 flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] text-muted mr-0.5">Divisions:</span>
-                        {DIVISIONS.map((d) => {
+                        {divisionsForGender(basics.gender).map((d) => {
                           const sel = divs.includes(d.value);
                           return (
                             <button
@@ -249,19 +244,21 @@ export default function OnboardingModal({ firstName }: Props) {
 
 function DivisionPicker({
   map,
+  divisions,
   onToggle,
   onTime,
   timeLabel,
 }: {
   map: Record<string, DivEntry>;
+  divisions: { value: string; label: string }[];
   onToggle: (d: string) => void;
   onTime: (d: string, k: "min" | "sec", v: string) => void;
   timeLabel: string;
 }) {
   return (
-    <div className="space-y-2">
-      {DIVISIONS.map((d) => {
-        const e = map[d.value];
+    <div className="space-y-2 max-h-[20rem] overflow-y-auto -mx-1 px-1">
+      {divisions.map((d) => {
+        const e = map[d.value] ?? { on: false, min: "", sec: "" };
         return (
           <div key={d.value} className={`rounded-xl border px-3 py-2.5 transition ${e.on ? "border-foreground/40 bg-background" : "border-border"}`}>
             <div className="flex items-center justify-between">
