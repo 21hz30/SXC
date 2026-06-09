@@ -233,10 +233,9 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     redirect(flashUrl(`/camps/${id}`, "Left the camp"));
   }
   // Coach builds a Mon–Sun week grid and fans it out to every active member:
-  // one WorkoutAssignment per (member, day-with-a-workout). Re-assigning fully
-  // replaces the camp's active plan (every not-yet-completed workout is wiped
-  // first), so a new week always *covers* the old one; completed sessions are
-  // kept as the member's history.
+  // one WorkoutAssignment per (member, day-with-a-workout). Re-assigning a week
+  // covers only THAT week (not the whole camp), so earlier weeks stay as history
+  // and other weeks keep their plan; completed sessions are always kept.
   async function assignCampPlan(formData: FormData) {
     "use server";
     const actor = await requireStaff();
@@ -253,10 +252,15 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     const memberIds = members.map((m) => m.customerId);
     const base = new Date(weekStart); // YYYY-MM-DD → UTC midnight
 
-    // Re-assigning fully *covers* the old plan: wipe every not-yet-completed
-    // workout across the camp first, then fan out the new week. Completed
-    // sessions stay as the member's history (skipDuplicates leaves them intact).
-    await db.workoutAssignment.deleteMany({ where: { campId: id, status: { not: "completed" } } });
+    // Re-assigning replaces ONLY the week being assigned: wipe that week's
+    // not-yet-completed workouts, then fan out the new version. Other weeks are
+    // left intact — past weeks stay as the member's history (visible on the
+    // calendar, hidden from the dashboard once past-due) and future weeks keep
+    // their plan. Completed sessions are always preserved.
+    const weekEnd = new Date(base.getTime() + 7 * 86_400_000);
+    await db.workoutAssignment.deleteMany({
+      where: { campId: id, status: { not: "completed" }, scheduledDate: { gte: base, lt: weekEnd } },
+    });
 
     for (let d = 0; d < 7 && d < plan.days.length; d++) {
       const day = plan.days[d] ?? {};
