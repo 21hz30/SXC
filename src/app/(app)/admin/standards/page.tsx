@@ -53,7 +53,8 @@ export default async function StandardsAdminPage() {
                   <div className="text-xs text-muted">key: <code>{g.key}</code></div>
                 </div>
               </div>
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[480px]">
                 <tbody className="divide-y divide-border">
                   {STATION_KEYS.map((k) => (
                     <tr key={k}>
@@ -71,6 +72,7 @@ export default async function StandardsAdminPage() {
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
           );
         })}

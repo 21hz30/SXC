@@ -183,7 +183,8 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
       )}
 
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
           <thead className="bg-background text-muted">
             <tr className="text-left">
               <th className="px-5 py-3 font-medium">Name</th>
@@ -215,6 +216,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

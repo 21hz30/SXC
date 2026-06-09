@@ -10,9 +10,11 @@ import srcLogo from "@/assets/brand/src-logo.png";
 import { cn } from "@/lib/utils";
 import { useAiPanel } from "@/lib/stores/aiPanel";
 
-// The pages that get a bottom-bar tab (in order). The rest live behind "More".
-// Profile moved to the top-right avatar; the 4th slot is the AI co-coach.
-const TAB_HREFS = ["/", "/calendar", "/workouts"];
+// Pages that get a bottom-bar tab (the rest live behind "More"). Customers lean
+// on Camps more than the workout library, so they get Camp in the 3rd slot;
+// staff keep Workouts. Profile moved to the top-right avatar; 4th slot is AI.
+const STAFF_TABS = ["/", "/calendar", "/workouts"];
+const CUSTOMER_TABS = ["/", "/calendar", "/camps"];
 
 /**
  * Mobile-only chrome (phones; the desktop sidebar is `hidden md:flex`):
@@ -44,7 +46,8 @@ export default function MobileNav({
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 
-  const tabs = TAB_HREFS
+  const isStaff = user.role === "admin" || user.role === "coach";
+  const tabs = (isStaff ? STAFF_TABS : CUSTOMER_TABS)
     .map((h) => items.find((i) => i.href === h))
     .filter((x): x is SidebarNavItem => !!x);
 

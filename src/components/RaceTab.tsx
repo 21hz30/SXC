@@ -142,7 +142,8 @@ export default function RaceTab({
           Race history {filterDivision !== "all" && <span className="text-muted normal-case">· filtered by {divisionLabel(filterDivision)}</span>}
         </h2>
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[520px]">
             <thead className="bg-background text-muted text-xs uppercase tracking-wide">
               <tr className="text-left">
                 <th className="px-4 py-2.5 font-medium">Event</th>
@@ -175,6 +176,7 @@ export default function RaceTab({
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 

@@ -232,8 +232,8 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
       <button
         onClick={() => setOpen(true)}
         className={cn(
-          // Sits above the mobile bottom tab bar on phones; back to the corner from md up.
-          "fixed right-4 bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))] md:bottom-4 w-12 h-12 rounded-full bg-foreground text-white shadow-lg flex items-center justify-center hover:opacity-90 z-50 transition-opacity duration-200",
+          // Desktop only — on phones the AI lives in the bottom tab bar instead.
+          "fixed right-4 bottom-4 w-12 h-12 rounded-full bg-foreground text-white shadow-lg hidden md:flex items-center justify-center hover:opacity-90 z-50 transition-opacity duration-200",
           open ? "opacity-0 pointer-events-none" : "opacity-100",
         )}
         aria-label="Open AI Co-Coach"
@@ -245,7 +245,8 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
       <div
         onClick={() => setOpen(false)}
         className={cn(
-          "xl:hidden fixed inset-0 bg-black/30 z-40 transition-opacity duration-300",
+          // End above the mobile bottom nav so it stays visible/tappable.
+          "xl:hidden fixed top-0 inset-x-0 bottom-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:bottom-0 bg-black/30 z-40 transition-opacity duration-300",
           open ? "opacity-100" : "opacity-0 pointer-events-none",
         )}
         aria-hidden
@@ -254,7 +255,9 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
       {/* The panel — always mounted, slides in/out from the right */}
       <aside
         className={cn(
-          "fixed inset-y-0 right-0 w-full sm:w-96 bg-white border-l border-border flex flex-col z-40 transition-transform duration-300 ease-in-out will-change-transform",
+          // Full height on desktop; on phones it stops above the bottom nav bar
+          // so the nav stays visible and tappable while chatting.
+          "fixed top-0 right-0 bottom-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:bottom-0 w-full sm:w-96 bg-white border-l border-border flex flex-col z-40 transition-transform duration-300 ease-in-out will-change-transform",
           open ? "translate-x-0" : "translate-x-full",
         )}
         aria-hidden={!open}
