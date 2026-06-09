@@ -10,17 +10,16 @@ import srcLogo from "@/assets/brand/src-logo.png";
 import { cn } from "@/lib/utils";
 import { useAiPanel } from "@/lib/stores/aiPanel";
 
-// Pages that get a bottom-bar tab (the rest live behind "More"). Customers lean
-// on Camps more than the workout library, so they get Camp in the 3rd slot;
-// staff keep Workouts. Profile moved to the top-right avatar; 4th slot is AI.
+// The first three bottom-bar tabs (then AI, then a role-specific last slot).
+// Customers lean on Camps over the workout library, so they get Camps here.
 const STAFF_TABS = ["/", "/calendar", "/workouts"];
 const CUSTOMER_TABS = ["/", "/calendar", "/camps"];
 
 /**
  * Mobile-only chrome (phones; the desktop sidebar is `hidden md:flex`):
- *  - a slim top bar: logo (tap → dashboard) + avatar (tap → profile)
- *  - an app-style bottom tab bar: main pages + AI chat + a "More" tab
- *  - the full nav in a slide-in drawer (opened from "More")
+ *  - a slim top bar: logo (→ dashboard) + an avatar menu (info, profile, logout)
+ *  - an app-style bottom tab bar: main pages + AI chat + a role-specific slot
+ *    (staff: "More" drawer; customers: a Workouts tab)
  */
 export default function MobileNav({
   items,
@@ -32,15 +31,17 @@ export default function MobileNav({
   logout: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
   const aiOpen = useAiPanel((s) => s.open);
   const setAiOpen = useAiPanel((s) => s.setOpen);
-  // The (app) layout persists across navigations, so close the drawer on route
+  // The (app) layout persists across navigations, so close any popovers on route
   // change. React's "adjust state during render" pattern — no effect needed.
   const [lastPath, setLastPath] = useState(pathname);
   if (pathname !== lastPath) {
     setLastPath(pathname);
     if (open) setOpen(false);
+    if (profileOpen) setProfileOpen(false);
   }
 
   const isActive = (href: string) =>
@@ -50,6 +51,7 @@ export default function MobileNav({
   const tabs = (isStaff ? STAFF_TABS : CUSTOMER_TABS)
     .map((h) => items.find((i) => i.href === h))
     .filter((x): x is SidebarNavItem => !!x);
+  const workoutTab = items.find((i) => i.href === "/workouts");
 
   const tabCls = (active: boolean) =>
     cn(
@@ -57,43 +59,71 @@ export default function MobileNav({
       active ? "text-accent" : "text-muted hover:text-foreground",
     );
 
+  const TabLink = ({ href, label, icon }: SidebarNavItem) => {
+    const Icon = icons[icon];
+    const active = isActive(href);
+    return (
+      <Link href={href} aria-current={active ? "page" : undefined} className={tabCls(active)}>
+        <Icon size={20} strokeWidth={active ? 2.4 : 2} />
+        <span className="truncate max-w-full px-0.5">{href === "/" ? "Home" : label}</span>
+      </Link>
+    );
+  };
+
   return (
     <>
-      <header className="md:hidden sticky top-0 z-30 flex items-center justify-between h-14 px-4 bg-white border-b border-border">
+      <header className="md:hidden sticky top-0 z-40 flex items-center justify-between h-14 px-4 bg-white border-b border-border">
         <Link href="/" aria-label="Go to dashboard" className="flex items-center rounded-lg hover:opacity-80 transition-opacity">
           <Image src={srcLogo} alt="SRC by Peoplearth" width={32} height={32} className="h-8 w-8" priority />
         </Link>
-        {/* Avatar → profile (where you can edit your details). */}
-        <a
-          href="/profile"
-          aria-label="Your profile"
-          className="flex items-center justify-center h-9 w-9 rounded-full bg-background border border-border text-foreground hover:border-accent transition-colors"
-        >
-          <User size={18} />
-        </a>
+        {/* Avatar → a small menu with your info, profile link, and log out. */}
+        <div className="relative">
+          <button
+            onClick={() => setProfileOpen((v) => !v)}
+            aria-label="Your account"
+            aria-expanded={profileOpen}
+            className="flex items-center justify-center h-9 w-9 rounded-full bg-background border border-border text-foreground hover:border-accent transition-colors"
+          >
+            <User size={18} />
+          </button>
+          {profileOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} aria-hidden />
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-border rounded-xl shadow-lg z-50 overflow-hidden">
+                <div className="px-4 py-3 border-b border-border">
+                  <div className="text-sm font-medium truncate">{user.name}</div>
+                  <div className="text-xs text-muted capitalize">{user.role}</div>
+                </div>
+                <a href="/profile" className="flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-background">
+                  <User size={16} className="text-muted" /> View profile
+                </a>
+                <form action={logout} className="border-t border-border">
+                  <button type="submit" className="flex items-center gap-2.5 px-4 py-2.5 w-full text-sm text-red-600 hover:bg-red-50">
+                    <LogOut size={16} /> Log out
+                  </button>
+                </form>
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       {/* App-style bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-stretch justify-around h-14">
-          {tabs.map(({ href, label, icon }) => {
-            const Icon = icons[icon];
-            const active = isActive(href);
-            return (
-              <Link key={href} href={href} aria-current={active ? "page" : undefined} className={tabCls(active)}>
-                <Icon size={20} strokeWidth={active ? 2.4 : 2} />
-                <span className="truncate max-w-full px-0.5">{href === "/" ? "Home" : label}</span>
-              </Link>
-            );
-          })}
+          {tabs.map((t) => <TabLink key={t.href} {...t} />)}
           <button onClick={() => setAiOpen(true)} aria-label="AI co-coach" className={tabCls(aiOpen)}>
             <Sparkles size={20} strokeWidth={aiOpen ? 2.4 : 2} />
             <span>AI</span>
           </button>
-          <button onClick={() => setOpen(true)} aria-label="More" className={tabCls(false)}>
-            <Menu size={20} />
-            <span>More</span>
-          </button>
+          {isStaff ? (
+            <button onClick={() => setOpen(true)} aria-label="More" className={tabCls(false)}>
+              <Menu size={20} />
+              <span>More</span>
+            </button>
+          ) : (
+            workoutTab && <TabLink {...workoutTab} />
+          )}
         </div>
       </nav>
 
