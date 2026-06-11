@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import I18nRuntime from "@/components/I18nRuntime";
 
 export const metadata: Metadata = {
   title: "SXC — Hyrox Coach",
@@ -18,7 +19,10 @@ export const viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="antialiased">
-      <body className="min-h-screen bg-background text-foreground">{children}</body>
+      <body className="min-h-screen bg-background text-foreground">
+        {children}
+        <I18nRuntime />
+      </body>
     </html>
   );
 }

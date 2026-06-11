@@ -4,6 +4,7 @@ import Image from "next/image";
 import { login, getSessionUser } from "@/lib/auth";
 import PasswordInput from "@/components/PasswordInput";
 import srcLogo from "@/assets/brand/src-logo.png";
+import { LangToggle } from "@/components/I18nRuntime";
 
 export default async function LoginPage({
   searchParams,
@@ -23,7 +24,8 @@ export default async function LoginPage({
   }
 
   return (
-    <main className="flex-1 flex items-center justify-center p-8">
+    <main className="flex-1 flex items-center justify-center p-8 relative">
+      <div className="absolute top-4 right-4"><LangToggle /></div>
       <form action={doLogin} className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center text-center">
           <Image src={srcLogo} alt="SRC by Peoplearth" width={112} height={112} priority />
