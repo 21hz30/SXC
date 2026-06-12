@@ -93,7 +93,43 @@ export type WorkoutItemInput = {
   notes?: string | null;
   tag?: string | null;
   order?: number;
+  /** Items sharing this key are part of one combined block (null = solo). */
+  groupKey?: string | null;
+  /** The group's shared total time; only set on the FIRST item of a group. */
+  groupTimeSec?: number | null;
 };
+
+/**
+ * Collapse a flat ordered items list into a mixed list of solo items and
+ * groups (consecutive items sharing a groupKey). The group's `totalSec` is
+ * read from the first member's `groupTimeSec`.
+ */
+export type GroupedRow<T extends { groupKey?: string | null; groupTimeSec?: number | null }> =
+  | { kind: "solo"; item: T }
+  | { kind: "group"; key: string; totalSec: number | null; items: T[] };
+
+export function groupItems<T extends { groupKey?: string | null; groupTimeSec?: number | null }>(items: T[]): GroupedRow<T>[] {
+  const out: GroupedRow<T>[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    const key = it.groupKey || null;
+    if (!key) {
+      out.push({ kind: "solo", item: it });
+      i++;
+      continue;
+    }
+    const members: T[] = [];
+    let totalSec: number | null = null;
+    while (i < items.length && items[i].groupKey === key) {
+      if (members.length === 0) totalSec = items[i].groupTimeSec ?? null;
+      members.push(items[i]);
+      i++;
+    }
+    out.push({ kind: "group", key, totalSec, items: members });
+  }
+  return out;
+}
 
 // Pace etc. — always mm:ss.
 function fmtSec(s: number) {

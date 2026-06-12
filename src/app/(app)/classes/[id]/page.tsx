@@ -714,6 +714,8 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                         heightM: it.heightM,
                         notes: it.notes,
                         tag: it.tag,
+                        groupKey: it.groupKey,
+                        groupTimeSec: it.groupTimeSec,
                       }))}
                     />
                   </div>

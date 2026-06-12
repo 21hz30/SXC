@@ -35,6 +35,8 @@ export type WorkoutItemDTO = {
   heightM: number | null;
   notes: string | null;
   tag: string | null;
+  groupKey: string | null;
+  groupTimeSec: number | null;
 };
 
 export type WorkoutDTO = {
@@ -67,6 +69,8 @@ function toItemDTO(r: Awaited<ReturnType<typeof db.workoutItem.findFirst>>): Wor
     heightM: r!.heightM,
     notes: r!.notes,
     tag: r!.tag,
+    groupKey: r!.groupKey,
+    groupTimeSec: r!.groupTimeSec,
   };
 }
 
@@ -141,6 +145,8 @@ export async function saveWorkout(
         heightM: it.heightM ?? null,
         notes: it.notes ?? null,
         tag: it.tag ?? null,
+        groupKey: it.groupKey ?? null,
+        groupTimeSec: it.groupTimeSec ?? null,
       })),
     }),
   ]);
@@ -201,6 +207,8 @@ export async function adjustClassWorkout(
           heightM: it.heightM ?? null,
           notes: it.notes ?? null,
           tag: it.tag ?? null,
+          groupKey: it.groupKey ?? null,
+          groupTimeSec: it.groupTimeSec ?? null,
         })),
       },
     },
@@ -241,6 +249,8 @@ export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: 
           heightM: it.heightM,
           notes: it.notes,
           tag: it.tag,
+          groupKey: it.groupKey,
+          groupTimeSec: it.groupTimeSec,
         })),
       },
     },

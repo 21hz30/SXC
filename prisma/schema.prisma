@@ -348,6 +348,12 @@ model WorkoutItem {
   /// Optional training tag for grouping/coloring an exercise: warmup | strength
   /// | cardio | core | mobility | cooldown. Null = untagged.
   tag          String?
+  /// Exercise group: items sharing the same groupKey are part of one combined
+  /// block (e.g. burpees + wall balls done back-to-back as one set). Null = solo.
+  groupKey     String?
+  /// The group's shared total time, set only on the FIRST item of a group
+  /// (by `order`); replaces per-item timeSec for grouped items at display time.
+  groupTimeSec Int?
 
   @@index([workoutId, order])
 }
