@@ -63,7 +63,10 @@ export default function WorkoutEditor({
   const [items, setItems] = useState<Item[]>(initialItems);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
-  const [addMode, setAddMode] = useState<"none" | "exercise" | "group">(items.length === 0 ? "exercise" : "none");
+  // Always start with both buttons visible so a brand-new workout can pick
+  // either an exercise or a group — auto-opening the exercise form hid the
+  // group option on empty workouts.
+  const [addMode, setAddMode] = useState<"none" | "exercise" | "group">("none");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -469,7 +472,7 @@ export function ItemForm({
 }
 
 // ─── Group form ──────────────────────────────────────────────────────────────
-type GroupMember = Omit<Item, "id" | "groupKey" | "groupTimeSec">;
+export type GroupMember = Omit<Item, "id" | "groupKey" | "groupTimeSec">;
 
 function emptyMember(): GroupMember {
   return {
@@ -493,7 +496,7 @@ function emptyMember(): GroupMember {
  * (category + label + reps/sets/distance/weight/notes); the total time lives
  * once at the bottom, not per member.
  */
-function GroupForm({
+export function GroupForm({
   initial,
   onSubmit,
   onCancel,
