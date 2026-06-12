@@ -7,6 +7,7 @@ import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
 import { formatItem } from "@/domain/exercises";
+import ExerciseList from "@/components/ExerciseList";
 import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
 import { listWatchData, upsertWatchData } from "@/domain/watch";
@@ -379,18 +380,11 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                 <div key={cw.id} className="bg-card border border-border rounded-xl p-5">
                   <div className="font-semibold">{cw.workout.name}{cw.rounds > 1 && <span className="ml-2 text-xs font-medium text-accent">× {cw.rounds} rounds</span>}</div>
                   {cw.workout.description && <div className="text-sm text-muted mt-0.5">{cw.workout.description}</div>}
-                  <ul className="mt-3 divide-y divide-border">
-                    {cw.workout.items.map((it) => {
-                      const { title, details } = formatItem(it as never);
-                      return (
-                        <li key={it.id} className="py-2 flex items-baseline justify-between gap-3 text-sm">
-                          <span className="font-medium">{title}</span>
-                          {details && <span className="text-muted text-right">{details}</span>}
-                        </li>
-                      );
-                    })}
-                    {cw.workout.items.length === 0 && <li className="py-2 text-sm text-muted">No exercises listed.</li>}
-                  </ul>
+                  {cw.workout.items.length === 0 ? (
+                    <div className="mt-3 text-sm text-muted">No exercises listed.</div>
+                  ) : (
+                    <ExerciseList items={cw.workout.items} />
+                  )}
                 </div>
               ))}
             </div>
