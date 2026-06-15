@@ -16,6 +16,10 @@ export type CustItem = {
   total: number;
   campIds: string[];
   accountRole: string | null; // "admin" | "coach" when this is a staff member in a camp
+  /** % of due training-plan items they've completed (null = nothing due yet) */
+  adherencePct: number | null;
+  /** Total assignments that were due (scheduled today or earlier) — for context */
+  adherenceDue: number;
 };
 
 /**
@@ -79,6 +83,16 @@ export default function CustomerList({
                 <div className={`font-medium truncate flex items-center gap-1.5 ${active ? "text-accent" : "hover:text-accent"}`}>
                   <span className="truncate">{c.name}</span>
                   {c.accountRole && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide rounded px-1 py-0.5 bg-violet-100 text-violet-700 capitalize">{c.accountRole}</span>}
+                  {c.adherencePct != null && (
+                    <span
+                      title={`${c.adherencePct}% of ${c.adherenceDue} due training items completed`}
+                      className={`shrink-0 text-[10px] font-semibold tabular-nums rounded-full px-1.5 py-0.5 ${
+                        c.adherencePct >= 80 ? "bg-emerald-100 text-emerald-700"
+                          : c.adherencePct >= 50 ? "bg-amber-100 text-amber-700"
+                          : "bg-red-100 text-red-700"
+                      }`}
+                    >{c.adherencePct}%</span>
+                  )}
                 </div>
                 <div className="text-xs text-muted truncate">
                   {c.detail}

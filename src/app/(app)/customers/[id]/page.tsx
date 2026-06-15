@@ -76,6 +76,10 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       },
       raceResults: { orderBy: { eventDate: "desc" } },
       raceGoals: true,
+      mockResults: {
+        orderBy: { recordedAt: "desc" },
+        include: { class: { select: { id: true, title: true, startsAt: true, workouts: { include: { workout: { include: { items: { orderBy: { order: "asc" }, select: { id: true, label: true, category: true } } } } } } } } },
+      },
     },
   });
   if (!c) notFound();
@@ -737,6 +741,45 @@ export default async function CustomerDetail({ params, searchParams }: { params:
           </>
         )}
       </section>
+
+      {c.mockResults.length > 0 && (
+      <section className="mb-6">
+        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Mock tests ({c.mockResults.length})</h2>
+        <div className="bg-card border border-border rounded-xl divide-y divide-border overflow-hidden">
+          {c.mockResults.map((mr) => {
+            let times: Record<string, number> = {};
+            try { times = mr.timesJson ? (JSON.parse(mr.timesJson) as Record<string, number>) : {}; } catch {}
+            const exercises = mr.class.workouts.flatMap((cw) => cw.workout.items.map((it) => ({ id: it.id, title: it.label?.trim() || it.category })));
+            const splits = exercises.filter((ex) => times[ex.id] != null);
+            return (
+              <div key={mr.id} className="px-5 py-4">
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <div className="min-w-0">
+                    <Link href={`/classes/${mr.class.id}`} className="text-sm font-semibold hover:text-accent truncate block">{mr.class.title}</Link>
+                    <div className="text-xs text-muted">{formatDate(mr.class.startsAt)} · {formatTime(mr.class.startsAt)}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {mr.totalSec != null ? <div className="text-base font-bold tabular-nums">{formatSec(mr.totalSec)}</div> : <div className="text-xs text-muted">no total</div>}
+                    <div className="text-[11px] text-muted">{splits.length > 0 ? `${splits.length} split${splits.length === 1 ? "" : "s"}` : "total only"}</div>
+                  </div>
+                </div>
+                {splits.length > 0 && (
+                  <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-1">
+                    {splits.map((s) => (
+                      <div key={s.id} className="flex items-baseline gap-2 text-xs">
+                        <span className="text-muted truncate flex-1" title={s.title}>{s.title}</span>
+                        <span className="font-medium tabular-nums shrink-0">{formatSec(times[s.id])}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {mr.notes && <div className="mt-2 text-[11px] text-muted">{mr.notes}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+      )}
 
       <section>
         <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Class history</h2>

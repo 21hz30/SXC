@@ -49,22 +49,44 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     }),
     db.camp.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
+  // Roster-wide plan adherence: pull every customer's assignment status+date in
+  // one shot, then compute the % per customer in JS so the list can show it.
+  const adherenceRows = customers.length
+    ? await db.workoutAssignment.findMany({
+        where: { customerId: { in: customers.map((c) => c.id) } },
+        select: { customerId: true, status: true, scheduledDate: true },
+      })
+    : [];
+  const planTodayEnd = new Date(); planTodayEnd.setHours(23, 59, 59, 999);
+  const adherenceByCust = new Map<string, { due: number; done: number }>();
+  for (const r of adherenceRows) {
+    if (!r.scheduledDate || r.scheduledDate > planTodayEnd) continue;
+    const a = adherenceByCust.get(r.customerId) ?? { due: 0, done: 0 };
+    a.due += 1;
+    if (r.status === "completed") a.done += 1;
+    adherenceByCust.set(r.customerId, a);
+  }
   const editingCustomer = edit ? customers.find((c) => c.id === edit) ?? null : null;
   const selectedCustomer = sel ? customers.find((c) => c.id === sel) ?? null : null;
   // Distinct tags already in use, for the tag picker.
   const allCustomerTags = [...new Set(customers.flatMap((c) => (c.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b));
 
   // Serializable rows for the client-side search/filter list.
-  const listItems: CustItem[] = customers.map((c) => ({
-    id: c.id,
-    name: c.name,
-    detail: customerDetail(c) || c.email || "—",
-    pbSec: c.hyroxPbSec ?? null,
-    attended: c.rosterEntries.filter((r) => r.attendance === "attended").length,
-    total: c.rosterEntries.filter((r) => r.attendance !== "pending").length,
-    campIds: c.campMembers.map((m) => m.campId),
-    accountRole: c.userAccount?.role === "admin" || c.userAccount?.role === "coach" ? c.userAccount.role : null,
-  }));
+  const listItems: CustItem[] = customers.map((c) => {
+    const a = adherenceByCust.get(c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      detail: customerDetail(c) || c.email || "—",
+      pbSec: c.hyroxPbSec ?? null,
+      attended: c.rosterEntries.filter((r) => r.attendance === "attended").length,
+      total: c.rosterEntries.filter((r) => r.attendance !== "pending").length,
+      campIds: c.campMembers.map((m) => m.campId),
+      accountRole: c.userAccount?.role === "admin" || c.userAccount?.role === "coach" ? c.userAccount.role : null,
+      adherencePct: a && a.due > 0 ? Math.round((a.done / a.due) * 100) : null,
+      adherenceDue: a?.due ?? 0,
+    };
+  });
 
   // Rich at-a-glance data for the selected customer's summary panel: their plan
   // adherence + recent plan items, recent classes, and any mock-test results.
