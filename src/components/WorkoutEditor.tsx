@@ -23,6 +23,7 @@ export type Item = {
   tag: string | null;
   groupKey: string | null;
   groupTimeSec: number | null;
+  groupRounds: number | null;
 };
 
 let tmpCounter = 0;
@@ -90,21 +91,20 @@ export default function WorkoutEditor({
     markDirty();
   }
 
-  function addGroupLocal(members: Omit<Item, "id" | "groupKey" | "groupTimeSec">[], totalSec: number | null) {
+  function addGroupLocal(members: Omit<Item, "id" | "groupKey" | "groupTimeSec" | "groupRounds">[], totalSec: number | null, rounds: number | null) {
     const key = newGroupKey();
     const stamped: Item[] = members.map((m, i) => ({
       ...m,
       id: tmpId(),
       groupKey: key,
       groupTimeSec: i === 0 ? totalSec : null,
-      // Individual timeSec doesn't apply inside a group — total time is shared.
-      timeSec: null,
+      groupRounds: i === 0 ? rounds : null,
     }));
     setItems((cur) => [...cur, ...stamped]);
     setAddMode("none");
     markDirty();
   }
-  function updateGroupLocal(key: string, members: Omit<Item, "id" | "groupKey" | "groupTimeSec">[], totalSec: number | null) {
+  function updateGroupLocal(key: string, members: Omit<Item, "id" | "groupKey" | "groupTimeSec" | "groupRounds">[], totalSec: number | null, rounds: number | null) {
     setItems((cur) => {
       const idx = cur.findIndex((i) => i.groupKey === key);
       if (idx < 0) return cur;
@@ -116,7 +116,7 @@ export default function WorkoutEditor({
         id: tmpId(),
         groupKey: key,
         groupTimeSec: i === 0 ? totalSec : null,
-        timeSec: null,
+        groupRounds: i === 0 ? rounds : null,
       }));
       return [...before, ...stamped, ...after];
     });
@@ -295,12 +295,13 @@ export default function WorkoutEditor({
             // Group row
             if (editingGroupKey === row.key) {
               const initial = {
-                members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, ...rest }) => rest),
+                members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, groupRounds: _r, ...rest }) => rest),
                 totalSec: row.totalSec,
+                rounds: row.rounds,
               };
               return (
                 <li key={row.key}>
-                  <GroupForm initial={initial} onSubmit={(members, totalSec) => updateGroupLocal(row.key, members, totalSec)} onCancel={() => setEditingGroupKey(null)} />
+                  <GroupForm initial={initial} onSubmit={(members, totalSec, rounds) => updateGroupLocal(row.key, members, totalSec, rounds)} onCancel={() => setEditingGroupKey(null)} />
                 </li>
               );
             }
@@ -322,6 +323,7 @@ export default function WorkoutEditor({
                   </span>
                   <span className="text-sm font-semibold tabular-nums ml-1">
                     Group total: {fmtTotal(row.totalSec)}
+                    {row.rounds && row.rounds > 1 && <span className="text-accent ml-1">× {row.rounds}</span>}
                   </span>
                   <span className="text-xs text-muted ml-auto">{row.items.length} exercises</span>
                   <div className="flex items-center gap-0.5 shrink-0">
@@ -410,6 +412,7 @@ export function ItemForm({
       tag: tag || null,
       groupKey: initial?.groupKey ?? null,
       groupTimeSec: initial?.groupTimeSec ?? null,
+      groupRounds: initial?.groupRounds ?? null,
     });
   }
 
@@ -452,7 +455,7 @@ export function ItemForm({
               <label className={labelCls}>
                 {FIELD_META[f].label}{FIELD_META[f].suffix ? ` (${FIELD_META[f].suffix})` : ""}
               </label>
-              <input type="number" step={f === "heightM" || f === "weightKg" ? "0.1" : "1"} value={values[f] ?? ""} onChange={(e) => setField(f, e.target.value)} className={inputCls} />
+              <input type="number" step={f === "heightM" || f === "weightKg" || f === "distanceM" ? "0.1" : "1"} value={values[f] ?? ""} onChange={(e) => setField(f, e.target.value)} className={inputCls} />
             </div>
           )
         )}
@@ -472,7 +475,7 @@ export function ItemForm({
 }
 
 // ─── Group form ──────────────────────────────────────────────────────────────
-export type GroupMember = Omit<Item, "id" | "groupKey" | "groupTimeSec">;
+export type GroupMember = Omit<Item, "id" | "groupKey" | "groupTimeSec" | "groupRounds">;
 
 function emptyMember(): GroupMember {
   return {
@@ -492,43 +495,64 @@ function emptyMember(): GroupMember {
 
 /**
  * Form for a "group" — 2+ exercises that share one total time (e.g. burpees +
- * wall balls + row, timed as a single block). Each member is a compact row
- * (category + label + reps/sets/distance/weight/notes); the total time lives
- * once at the bottom, not per member.
+ * wall balls + row, timed as a single block). The group also supports an
+ * optional rounds count (run the whole block N times) and per-member time
+ * caps (a single exercise inside the block can have its own target).
  */
 export function GroupForm({
   initial,
   onSubmit,
   onCancel,
 }: {
-  initial?: { members: GroupMember[]; totalSec: number | null };
-  onSubmit: (members: GroupMember[], totalSec: number | null) => void;
+  initial?: { members: GroupMember[]; totalSec: number | null; rounds: number | null };
+  onSubmit: (members: GroupMember[], totalSec: number | null, rounds: number | null) => void;
   onCancel: () => void;
 }) {
-  const [members, setMembers] = useState<GroupMember[]>(initial?.members?.length ? initial.members : [emptyMember(), emptyMember()]);
+  const startMembers = initial?.members?.length ? initial.members : [emptyMember(), emptyMember()];
+  const [members, setMembers] = useState<GroupMember[]>(startMembers);
   const [totalMin, setTotalMin] = useState(initial?.totalSec != null ? String(Math.floor(initial.totalSec / 60)) : "");
   const [totalSecPart, setTotalSecPart] = useState(initial?.totalSec != null ? String(initial.totalSec % 60) : "");
+  const [rounds, setRounds] = useState(initial?.rounds != null ? String(initial.rounds) : "");
+  // Each member has its own min:sec for an optional per-exercise time cap.
+  const [memberTimes, setMemberTimes] = useState<{ min: string; sec: string }[]>(() =>
+    startMembers.map((m) => ({
+      min: m.timeSec != null ? String(Math.floor(m.timeSec / 60)) : "",
+      sec: m.timeSec != null ? String(m.timeSec % 60) : "",
+    }))
+  );
 
   function updateMember(i: number, patch: Partial<GroupMember>) {
     setMembers((cur) => cur.map((m, j) => (j === i ? { ...m, ...patch } : m)));
   }
+  function updateMemberTime(i: number, patch: Partial<{ min: string; sec: string }>) {
+    setMemberTimes((cur) => cur.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+  }
   function addMember() {
     setMembers((cur) => [...cur, emptyMember()]);
+    setMemberTimes((cur) => [...cur, { min: "", sec: "" }]);
   }
   function removeMember(i: number) {
     setMembers((cur) => cur.filter((_, j) => j !== i));
+    setMemberTimes((cur) => cur.filter((_, j) => j !== i));
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const totalSec = totalMin === "" && totalSecPart === "" ? null : Number(totalMin || 0) * 60 + Number(totalSecPart || 0);
+    const roundsN = rounds === "" ? null : Math.max(1, Math.floor(Number(rounds) || 1));
+    // Bake per-member timeSec into each member from its min:sec inputs.
+    const withTimes = members.map((m, i) => {
+      const t = memberTimes[i] ?? { min: "", sec: "" };
+      const ms = t.min === "" && t.sec === "" ? null : Number(t.min || 0) * 60 + Number(t.sec || 0);
+      return { ...m, timeSec: ms };
+    });
     // Filter out completely-empty member rows.
-    const nonEmpty = members.filter((m) => m.label?.trim() || m.reps != null || m.sets != null || m.distanceM != null || m.weightKg != null || m.notes?.trim() || m.category !== "other");
+    const nonEmpty = withTimes.filter((m) => m.label?.trim() || m.reps != null || m.sets != null || m.distanceM != null || m.weightKg != null || m.timeSec != null || m.notes?.trim() || m.category !== "other");
     if (nonEmpty.length < 2) {
       alert("A group needs at least 2 exercises.");
       return;
     }
-    onSubmit(nonEmpty, totalSec);
+    onSubmit(nonEmpty, totalSec, roundsN);
   }
 
   const inputCls = "w-full rounded-lg border border-border bg-white px-3 py-2 text-sm";
@@ -537,72 +561,92 @@ export function GroupForm({
   return (
     <form onSubmit={submit} className="bg-background border border-accent/40 rounded-xl p-4 space-y-4">
       <div className="text-xs text-muted">
-        Combine 2+ exercises with one shared <span className="font-semibold text-foreground">total time</span>. Use this for compromised sets (e.g. burpees + wall balls + row, timed as one block).
+        Combine 2+ exercises with one shared <span className="font-semibold text-foreground">total time</span>. Use this for compromised sets (e.g. burpees + wall balls + row, timed as one block). Optional <span className="font-semibold text-foreground">rounds</span> repeats the whole group back-to-back.
       </div>
 
       <ul className="space-y-3">
-        {members.map((m, i) => (
-          <li key={i} className="bg-card border border-border rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Exercise {i + 1}</div>
-              {members.length > 2 && (
-                <button type="button" onClick={() => removeMember(i)} className="p-1 text-muted hover:text-red-600" title="Remove this exercise"><X size={13} /></button>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className={labelCls}>Exercise</label>
-                <select
-                  value={m.category}
-                  onChange={(e) => updateMember(i, { category: e.target.value as Category })}
-                  className={inputCls}
-                >
-                  {(Object.keys(CATEGORIES) as Category[]).map((c) => <option key={c} value={c}>{CATEGORIES[c].label}</option>)}
-                </select>
+        {members.map((m, i) => {
+          const mt = memberTimes[i] ?? { min: "", sec: "" };
+          return (
+            <li key={i} className="bg-card border border-border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Exercise {i + 1}</div>
+                {members.length > 2 && (
+                  <button type="button" onClick={() => removeMember(i)} className="p-1 text-muted hover:text-red-600" title="Remove this exercise"><X size={13} /></button>
+                )}
               </div>
-              <div>
-                <label className={labelCls}>{m.category === "other" ? "Exercise name" : "Label (optional)"}</label>
-                <input value={m.label ?? ""} onChange={(e) => updateMember(i, { label: e.target.value || null })} placeholder={m.category === "other" ? "e.g. Burpees" : "e.g. Round 1"} className={inputCls} />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelCls}>Exercise</label>
+                  <select
+                    value={m.category}
+                    onChange={(e) => updateMember(i, { category: e.target.value as Category })}
+                    className={inputCls}
+                  >
+                    {(Object.keys(CATEGORIES) as Category[]).map((c) => <option key={c} value={c}>{CATEGORIES[c].label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>{m.category === "other" ? "Exercise name" : "Label (optional)"}</label>
+                  <input value={m.label ?? ""} onChange={(e) => updateMember(i, { label: e.target.value || null })} placeholder={m.category === "other" ? "e.g. Burpees" : "e.g. Round 1"} className={inputCls} />
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div>
-                <label className={labelCls}>Reps</label>
-                <input type="number" min={0} value={m.reps ?? ""} onChange={(e) => updateMember(i, { reps: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div>
+                  <label className={labelCls}>Reps</label>
+                  <input type="number" min={0} value={m.reps ?? ""} onChange={(e) => updateMember(i, { reps: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Sets</label>
+                  <input type="number" min={0} value={m.sets ?? ""} onChange={(e) => updateMember(i, { sets: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Distance (m)</label>
+                  <input type="number" min={0} step="0.1" value={m.distanceM ?? ""} onChange={(e) => updateMember(i, { distanceM: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Weight (kg)</label>
+                  <input type="number" min={0} step="0.1" value={m.weightKg ?? ""} onChange={(e) => updateMember(i, { weightKg: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                </div>
               </div>
-              <div>
-                <label className={labelCls}>Sets</label>
-                <input type="number" min={0} value={m.sets ?? ""} onChange={(e) => updateMember(i, { sets: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className={labelCls}>Time (min : sec, optional)</label>
+                  <div className="flex items-center gap-1 max-w-[12rem]">
+                    <input type="number" min={0} step={1} value={mt.min} onChange={(e) => updateMemberTime(i, { min: e.target.value })} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+                    <span className="text-muted shrink-0">:</span>
+                    <input type="number" min={0} max={59} step={1} value={mt.sec} onChange={(e) => updateMemberTime(i, { sec: e.target.value })} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Notes (optional)</label>
+                  <input value={m.notes ?? ""} onChange={(e) => updateMember(i, { notes: e.target.value || null })} className={inputCls} />
+                </div>
               </div>
-              <div>
-                <label className={labelCls}>Distance (m)</label>
-                <input type="number" min={0} value={m.distanceM ?? ""} onChange={(e) => updateMember(i, { distanceM: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Weight (kg)</label>
-                <input type="number" min={0} step="0.1" value={m.weightKg ?? ""} onChange={(e) => updateMember(i, { weightKg: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
-              </div>
-            </div>
-            <div>
-              <label className={labelCls}>Notes (optional)</label>
-              <input value={m.notes ?? ""} onChange={(e) => updateMember(i, { notes: e.target.value || null })} className={inputCls} />
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
 
       <button type="button" onClick={addMember} className="text-xs rounded-lg border border-dashed border-border px-3 py-1.5 hover:border-accent inline-flex items-center gap-1.5">
         <Plus size={12} /> Add another exercise
       </button>
 
-      <div className="border-t border-border pt-3">
-        <label className={`${labelCls} text-foreground/80`}>Group total time</label>
-        <div className="flex items-center gap-1 max-w-[12rem]">
-          <input type="number" min={0} step={1} value={totalMin} onChange={(e) => setTotalMin(e.target.value)} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
-          <span className="text-muted shrink-0">:</span>
-          <input type="number" min={0} max={59} step={1} value={totalSecPart} onChange={(e) => setTotalSecPart(e.target.value)} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+      <div className="border-t border-border pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className={`${labelCls} text-foreground/80`}>Group total time</label>
+          <div className="flex items-center gap-1 max-w-[12rem]">
+            <input type="number" min={0} step={1} value={totalMin} onChange={(e) => setTotalMin(e.target.value)} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+            <span className="text-muted shrink-0">:</span>
+            <input type="number" min={0} max={59} step={1} value={totalSecPart} onChange={(e) => setTotalSecPart(e.target.value)} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+          </div>
+          <div className="text-[11px] text-muted mt-1">Shared by all exercises in this group.</div>
         </div>
-        <div className="text-[11px] text-muted mt-1">Shared by all exercises in this group.</div>
+        <div>
+          <label className={`${labelCls} text-foreground/80`}>Rounds (optional)</label>
+          <input type="number" min={1} step={1} value={rounds} onChange={(e) => setRounds(e.target.value)} placeholder="1" className="w-full max-w-[8rem] rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+          <div className="text-[11px] text-muted mt-1">Run the group N times back-to-back. Blank or 1 = once.</div>
+        </div>
       </div>
 
       <div className="flex justify-end gap-2">

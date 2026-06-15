@@ -63,19 +63,19 @@ export default function ClassWorkoutEditor({
     setAddMode("none");
   }
 
-  function addGroupLocal(members: GroupMember[], totalSec: number | null) {
+  function addGroupLocal(members: GroupMember[], totalSec: number | null, rounds: number | null) {
     const key = newGroupKey();
     const stamped: Item[] = members.map((m, i) => ({
       ...m,
       id: tmpId(),
       groupKey: key,
       groupTimeSec: i === 0 ? totalSec : null,
-      timeSec: null,
+      groupRounds: i === 0 ? rounds : null,
     }));
     setItems((cur) => [...cur, ...stamped]);
     setAddMode("none");
   }
-  function updateGroupLocal(key: string, members: GroupMember[], totalSec: number | null) {
+  function updateGroupLocal(key: string, members: GroupMember[], totalSec: number | null, rounds: number | null) {
     setItems((cur) => {
       const idx = cur.findIndex((i) => i.groupKey === key);
       if (idx < 0) return cur;
@@ -86,7 +86,7 @@ export default function ClassWorkoutEditor({
         id: tmpId(),
         groupKey: key,
         groupTimeSec: i === 0 ? totalSec : null,
-        timeSec: null,
+        groupRounds: i === 0 ? rounds : null,
       }));
       return [...before, ...stamped, ...after];
     });
@@ -165,7 +165,10 @@ export default function ClassWorkoutEditor({
                     <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-accent/10 text-accent px-2 py-0.5">
                       <LinkIcon size={10} /> Group
                     </span>
-                    <span className="text-xs font-semibold tabular-nums">Group total: {fmtTotal(row.totalSec)}</span>
+                    <span className="text-xs font-semibold tabular-nums">
+                      Group total: {fmtTotal(row.totalSec)}
+                      {row.rounds && row.rounds > 1 && <span className="text-accent ml-1">× {row.rounds}</span>}
+                    </span>
                     <span className="text-[11px] text-muted ml-auto">{row.items.length} exercises</span>
                   </div>
                   <ol className="divide-y divide-border">
@@ -286,14 +289,15 @@ export default function ClassWorkoutEditor({
           // Group row
           if (editingGroupKey === row.key) {
             const initial = {
-              members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, ...rest }) => rest),
+              members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, groupRounds: _r, ...rest }) => rest),
               totalSec: row.totalSec,
+              rounds: row.rounds,
             };
             return (
               <li key={row.key}>
                 <GroupForm
                   initial={initial}
-                  onSubmit={(members, totalSec) => updateGroupLocal(row.key, members, totalSec)}
+                  onSubmit={(members, totalSec, rounds) => updateGroupLocal(row.key, members, totalSec, rounds)}
                   onCancel={() => setEditingGroupKey(null)}
                 />
               </li>
@@ -311,7 +315,10 @@ export default function ClassWorkoutEditor({
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-accent/10 text-accent px-2 py-0.5">
                   <LinkIcon size={10} /> Group
                 </span>
-                <span className="text-xs font-semibold tabular-nums">Group total: {fmtTotal(row.totalSec)}</span>
+                <span className="text-xs font-semibold tabular-nums">
+                  Group total: {fmtTotal(row.totalSec)}
+                  {row.rounds && row.rounds > 1 && <span className="text-accent ml-1">× {row.rounds}</span>}
+                </span>
                 <span className="text-[11px] text-muted ml-auto">{row.items.length} exercises</span>
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button onClick={() => setEditingGroupKey(row.key)} className="p-1.5 text-muted hover:text-foreground" title="Edit group"><Pencil size={12} /></button>

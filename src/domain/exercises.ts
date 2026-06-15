@@ -97,6 +97,9 @@ export type WorkoutItemInput = {
   groupKey?: string | null;
   /** The group's shared total time; only set on the FIRST item of a group. */
   groupTimeSec?: number | null;
+  /** Repeat the group N times back-to-back. Only on the FIRST item of a group;
+   *  null or 1 = run the group once. */
+  groupRounds?: number | null;
 };
 
 /**
@@ -104,11 +107,11 @@ export type WorkoutItemInput = {
  * groups (consecutive items sharing a groupKey). The group's `totalSec` is
  * read from the first member's `groupTimeSec`.
  */
-export type GroupedRow<T extends { groupKey?: string | null; groupTimeSec?: number | null }> =
+export type GroupedRow<T extends { groupKey?: string | null; groupTimeSec?: number | null; groupRounds?: number | null }> =
   | { kind: "solo"; item: T }
-  | { kind: "group"; key: string; totalSec: number | null; items: T[] };
+  | { kind: "group"; key: string; totalSec: number | null; rounds: number | null; items: T[] };
 
-export function groupItems<T extends { groupKey?: string | null; groupTimeSec?: number | null }>(items: T[]): GroupedRow<T>[] {
+export function groupItems<T extends { groupKey?: string | null; groupTimeSec?: number | null; groupRounds?: number | null }>(items: T[]): GroupedRow<T>[] {
   const out: GroupedRow<T>[] = [];
   let i = 0;
   while (i < items.length) {
@@ -121,12 +124,13 @@ export function groupItems<T extends { groupKey?: string | null; groupTimeSec?: 
     }
     const members: T[] = [];
     let totalSec: number | null = null;
+    let rounds: number | null = null;
     while (i < items.length && items[i].groupKey === key) {
-      if (members.length === 0) totalSec = items[i].groupTimeSec ?? null;
+      if (members.length === 0) { totalSec = items[i].groupTimeSec ?? null; rounds = items[i].groupRounds ?? null; }
       members.push(items[i]);
       i++;
     }
-    out.push({ kind: "group", key, totalSec, items: members });
+    out.push({ kind: "group", key, totalSec, rounds, items: members });
   }
   return out;
 }

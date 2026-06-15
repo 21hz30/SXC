@@ -37,6 +37,7 @@ export type WorkoutItemDTO = {
   tag: string | null;
   groupKey: string | null;
   groupTimeSec: number | null;
+  groupRounds: number | null;
 };
 
 export type WorkoutDTO = {
@@ -71,6 +72,7 @@ function toItemDTO(r: Awaited<ReturnType<typeof db.workoutItem.findFirst>>): Wor
     tag: r!.tag,
     groupKey: r!.groupKey,
     groupTimeSec: r!.groupTimeSec,
+    groupRounds: r!.groupRounds,
   };
 }
 
@@ -147,6 +149,7 @@ export async function saveWorkout(
         tag: it.tag ?? null,
         groupKey: it.groupKey ?? null,
         groupTimeSec: it.groupTimeSec ?? null,
+        groupRounds: it.groupRounds ?? null,
       })),
     }),
   ]);
@@ -209,6 +212,7 @@ export async function adjustClassWorkout(
           tag: it.tag ?? null,
           groupKey: it.groupKey ?? null,
           groupTimeSec: it.groupTimeSec ?? null,
+          groupRounds: it.groupRounds ?? null,
         })),
       },
     },
@@ -251,6 +255,7 @@ export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: 
           tag: it.tag,
           groupKey: it.groupKey,
           groupTimeSec: it.groupTimeSec,
+          groupRounds: it.groupRounds,
         })),
       },
     },

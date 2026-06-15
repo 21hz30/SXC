@@ -337,7 +337,9 @@ model WorkoutItem {
   order        Int      @default(0)
   category     String   // ski | sled_push | sled_pull | burpee | row | farmers | lunges | wallball | run | rest | strength | other
   label        String?  // optional override; otherwise label comes from category
-  distanceM    Int?
+  /// Distance is a Float so coaches can prescribe fractional metres (e.g. 37.5
+  /// for a half-Hyrox sled push). Stored as DOUBLE PRECISION in Postgres.
+  distanceM    Float?
   timeSec      Int?
   weightKg     Float?
   reps         Int?
@@ -352,8 +354,11 @@ model WorkoutItem {
   /// block (e.g. burpees + wall balls done back-to-back as one set). Null = solo.
   groupKey     String?
   /// The group's shared total time, set only on the FIRST item of a group
-  /// (by `order`); replaces per-item timeSec for grouped items at display time.
+  /// (by `order`); shown alongside any per-member timeSec.
   groupTimeSec Int?
+  /// Repeat the group N times back-to-back. Set only on the FIRST item of a
+  /// group. Null/1 = run the group once.
+  groupRounds  Int?
 
   @@index([workoutId, order])
 }

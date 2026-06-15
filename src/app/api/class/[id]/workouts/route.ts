@@ -54,6 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             tag: it.tag ?? null,
             groupKey: it.groupKey ?? null,
             groupTimeSec: it.groupTimeSec ?? null,
+            groupRounds: it.groupRounds ?? null,
           })),
         },
       },

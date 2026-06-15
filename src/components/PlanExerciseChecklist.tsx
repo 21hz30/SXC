@@ -108,7 +108,10 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
                   <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-accent/10 text-accent px-2 py-0.5">
                     <LinkIcon size={10} /> Group
                   </span>
-                  <span className="text-xs font-semibold tabular-nums">Group total: {fmtTotal(row.totalSec)}</span>
+                  <span className="text-xs font-semibold tabular-nums">
+                    Group total: {fmtTotal(row.totalSec)}
+                    {row.rounds && row.rounds > 1 && <span className="text-accent ml-1">× {row.rounds}</span>}
+                  </span>
                   <span className="text-[11px] text-muted ml-auto">{row.items.length} exercises</span>
                 </div>
                 <ol className="divide-y divide-border">

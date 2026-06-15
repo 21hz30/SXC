@@ -743,6 +743,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
                         tag: it.tag,
                         groupKey: it.groupKey,
                         groupTimeSec: it.groupTimeSec,
+                        groupRounds: it.groupRounds,
                       }))}
                     />
                   </div>
