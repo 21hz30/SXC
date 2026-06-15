@@ -390,6 +390,9 @@ model Class {
   /// A "mock test" class: athletes record a time per exercise (or one total
   /// time) and can review the result on their dashboard/profile.
   isMockTest  Boolean  @default(false)
+  /// Staff manually released the workout to members before the auto 30-min
+  /// window (null = wait for the auto reveal).
+  workoutsRevealedAt DateTime?
   campId      String?
   camp        Camp?    @relation(fields: [campId], references: [id])
   createdById String?
