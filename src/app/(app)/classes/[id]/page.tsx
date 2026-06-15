@@ -145,8 +145,9 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
     const myEntry = myCustomerId ? cls.roster.find((r) => r.customerId === myCustomerId) ?? null : null;
     const status = classStatus({ canceledAt: cls.canceledAt, startsAt: cls.startsAt, durationMin: cls.durationMin, capacity: cls.capacity, rosterCount: cls.roster.length });
-    // The coach reveals the session plan 30 minutes before it starts.
-    const planRevealed = Date.now() >= cls.startsAt.getTime() - 30 * 60_000;
+    // Members see the workout 30 minutes before start — or sooner if the
+    // coach pre-released it manually.
+    const planRevealed = !!cls.workoutsRevealedAt || Date.now() >= cls.startsAt.getTime() - 30 * 60_000;
     // Feedback opens once the class has started (or the coach explicitly asks).
     const classStarted = cls.startsAt.getTime() <= Date.now();
     const showFeedback = !!myCustomerId && (classStarted || !!cls.feedbackRequestedAt);
@@ -551,6 +552,24 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
     redirect(flashUrl(`/classes/${id}`, c?.canceledAt ? "Class reopened" : "Class canceled"));
   }
 
+  // Coach pre-releases the workout to members early (before the auto 30-min
+  // window). Once set, it stays set — there's no "un-release" since athletes
+  // have already seen it.
+  async function releaseWorkout() {
+    "use server";
+    await requireCoach();
+    const fresh = await db.class.update({ where: { id }, data: { workoutsRevealedAt: new Date() }, select: { campId: true } });
+    if (fresh.campId) revalidatePath(`/camps/${fresh.campId}`);
+    revalidatePath(`/classes/${id}`);
+    redirect(flashUrl(`/classes/${id}`, "Workout released to members"));
+  }
+
+  // Show the pre-release button only when there's something to release and it
+  // isn't already visible to members. Coach reveals = within 30 min of start
+  // OR they manually released.
+  const staffPlanRevealed = !!cls.workoutsRevealedAt || Date.now() >= cls.startsAt.getTime() - 30 * 60_000;
+  const canPreRelease = !staffPlanRevealed && cls.workouts.length > 0;
+
   const status = classStatus({ canceledAt: cls.canceledAt, startsAt: cls.startsAt, durationMin: cls.durationMin, capacity: cls.capacity, rosterCount: cls.roster.length });
 
   return (
@@ -594,6 +613,20 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
               {cls.canceledAt ? "Reopen class" : "Cancel class"}
             </ConfirmSubmit>
           </form>
+          {/* Pre-release the workout to members before the auto 30-min window */}
+          {canPreRelease && (
+            <form action={releaseWorkout}>
+              <ConfirmSubmit
+                message={`Release the workout for "${cls.title}" to members now? They'll see it immediately instead of waiting for the auto 30-min window. This can't be undone.`}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-accent hover:text-accent"
+              >
+                Release workout now
+              </ConfirmSubmit>
+            </form>
+          )}
+          {cls.workoutsRevealedAt && !cls.canceledAt && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">Workout released</span>
+          )}
           {/* Ask the class for post-class feedback */}
           <form action={requestFeedback} className="text-right">
             <button type="submit" className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-accent hover:text-accent">

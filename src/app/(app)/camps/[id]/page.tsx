@@ -646,9 +646,10 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             }))}
             classes={camp.classes.map((c) => {
               // Members only see a class's workouts from 30 min before it starts
-              // (mirrors the class page); staff always see them. We don't even
-              // send the names to members early — nothing to leak.
-              const revealed = isStaff || Date.now() >= c.startsAt.getTime() - 30 * 60_000;
+              // (mirrors the class page) OR once a coach pre-released them;
+              // staff always see them. We don't even send the names to members
+              // early — nothing to leak.
+              const revealed = isStaff || !!c.workoutsRevealedAt || Date.now() >= c.startsAt.getTime() - 30 * 60_000;
               return {
                 id: c.id,
                 title: c.title,
