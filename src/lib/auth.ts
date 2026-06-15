@@ -107,7 +107,10 @@ export async function requireCoach(): Promise<SessionUser> {
 }
 
 export async function login(username: string, password: string): Promise<SessionUser | null> {
-  const u = await db.user.findUnique({ where: { username } });
+  // Usernames are stored lowercase (the create-account form enforces it), so
+  // accept any case + whitespace from the user (e.g. "Peter" matches "peter").
+  // Passwords stay case-sensitive — security best practice.
+  const u = await db.user.findUnique({ where: { username: username.trim().toLowerCase() } });
   if (!u) return null;
   const ok = await bcrypt.compare(password, u.passwordHash);
   if (!ok) return null;
