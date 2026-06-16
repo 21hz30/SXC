@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, requireStaff, getMyCustomerId } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
-import { Calendar, Dumbbell, Tent } from "lucide-react";
+import { Calendar, ChevronDown, Dumbbell, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
@@ -21,7 +21,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults] = await Promise.all([
+  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myActiveCampIds] = await Promise.all([
     db.class.findMany({
       where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
@@ -71,11 +71,25 @@ export default async function Dashboard() {
         })
       : Promise.resolve([]),
     // The single next class on the schedule (in the viewer's scope) for the
-    // header summary — uncapped, so "next class" is always accurate.
+    // header summary + quick sign-up button. Also pulls capacity + roster size
+    // (for full check) and the caller's own roster row (to detect signed-up).
     db.class.findFirst({
       where: { startsAt: { gte: now }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
-      select: { id: true, title: true, startsAt: true, location: true, camp: { select: { division: true } } },
+      select: {
+        id: true,
+        title: true,
+        startsAt: true,
+        location: true,
+        capacity: true,
+        dropInAllowed: true,
+        campId: true,
+        camp: { select: { division: true } },
+        _count: { select: { roster: true } },
+        ...(myCustomerId
+          ? { roster: { where: { customerId: myCustomerId }, select: { id: true } } }
+          : {}),
+      },
     }),
     // The athlete's recent mock-test results, to review on the dashboard.
     myCustomerId
@@ -84,6 +98,14 @@ export default async function Dashboard() {
           orderBy: { recordedAt: "desc" },
           take: 5,
           include: { class: { select: { id: true, title: true, startsAt: true } } },
+        })
+      : Promise.resolve([]),
+    // Camps the athlete is an active member of — used to gate the dashboard
+    // "Sign up" button on a camp class (drop-in classes are open to anyone).
+    myCustomerId
+      ? db.campMember.findMany({
+          where: { customerId: myCustomerId, status: "active" },
+          select: { campId: true },
         })
       : Promise.resolve([]),
   ]);
@@ -127,10 +149,21 @@ export default async function Dashboard() {
     return k === todayK ? "Today" : k === tomorrowK ? "Tomorrow" : formatDate(d);
   };
   const nextClass = nextClassRow;
+  // Sign-up state for the dashboard next-class card:
+  //   signedUp — already on the roster (show "You're in" + Drop)
+  //   isFull   — capacity hit; hide the button
+  //   eligible — camp class requires active membership (drop-ins are open)
+  const myCampIds = new Set(myActiveCampIds.map((m) => m.campId));
+  const nextClassSignedUp = !!nextClass && (nextClass as { roster?: { id: string }[] }).roster?.length === 1;
+  const nextClassFull = !!nextClass && nextClass._count.roster >= nextClass.capacity;
+  const nextClassEligible = !!nextClass && !!myCustomerId && (
+    !nextClass.campId || nextClass.dropInAllowed || myCampIds.has(nextClass.campId)
+  );
 
   // Show the plan card to every athlete (customers always; staff only once they
   // have something assigned — they manage plans elsewhere).
   const showPlan = !!myCustomerId && (myAssignments.length > 0 || !isStaff);
+
 
   // Athlete logs a plan workout done — scoped to their own assignment only.
   async function logMyAssignment(formData: FormData) {
@@ -169,6 +202,60 @@ export default async function Dashboard() {
     });
     revalidatePath("/");
     redirect(flashUrl("/", "Added to your plan"));
+  }
+
+  // Athlete signs up for a class from the dashboard's "Next class" card. Same
+  // access checks as /api/class/[id]/signup — keeps the camp/drop-in gate
+  // honest, and 409s when the class is already full.
+  async function signUpForClass(formData: FormData) {
+    "use server";
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    const classId = String(formData.get("classId") ?? "");
+    if (!classId) return;
+    const cls = await db.class.findUnique({
+      where: { id: classId },
+      select: { campId: true, dropInAllowed: true, capacity: true, _count: { select: { roster: true } } },
+    });
+    if (!cls) return;
+    let allowed = !cls.campId || cls.dropInAllowed;
+    if (!allowed && cls.campId) {
+      const mem = await db.campMember.findFirst({
+        where: { campId: cls.campId, customerId: mine, status: "active" },
+        select: { id: true },
+      });
+      allowed = !!mem;
+    }
+    if (!allowed) {
+      redirect(flashUrl("/", "Not eligible to sign up"));
+    }
+    const existing = await db.rosterEntry.findUnique({
+      where: { classId_customerId: { classId, customerId: mine } },
+      select: { id: true },
+    });
+    if (existing) {
+      revalidatePath("/");
+      return;
+    }
+    if (cls._count.roster >= cls.capacity) {
+      redirect(flashUrl("/", "Class is full"));
+    }
+    await db.rosterEntry.create({ data: { classId, customerId: mine } });
+    revalidatePath("/");
+    revalidatePath(`/classes/${classId}`);
+    redirect(flashUrl("/", "Signed up"));
+  }
+  // Athlete drops the class they just signed up to.
+  async function dropFromClass(formData: FormData) {
+    "use server";
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    const classId = String(formData.get("classId") ?? "");
+    if (!classId) return;
+    await db.rosterEntry.deleteMany({ where: { classId, customerId: mine } });
+    revalidatePath("/");
+    revalidatePath(`/classes/${classId}`);
+    redirect(flashUrl("/", "Dropped from class"));
   }
 
   // Staff approve a pending camp application straight from the dashboard.
@@ -222,17 +309,61 @@ export default async function Dashboard() {
           href={todayItems.length === 1 ? `/workouts/${todayItems[0].workout.id}` : "/calendar?view=day"}
           muted={todayItems.length === 0}
         />
-        <SummaryCard
-          icon={Calendar}
-          label="Next class"
-          title={nextClass ? nextClass.title : "No upcoming classes"}
-          sub={nextClass ? `${classDayLabel(nextClass.startsAt)} · ${formatTime(nextClass.startsAt)}` : "Nothing on the schedule"}
-          sub2={nextClass?.location ? `at ${nextClass.location}` : undefined}
-          badge={divisionMeta(nextClass?.camp?.division)}
-          href={nextClass ? `/classes/${nextClass.id}` : "/calendar"}
-          muted={!nextClass}
-        />
+        {nextClass ? (
+          <div className="bg-card border border-border rounded-xl p-5 hover:border-accent transition">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted uppercase tracking-wide">Next class</div>
+              <Calendar size={16} className="text-muted shrink-0" />
+            </div>
+            <div className="mt-2 flex items-start gap-3">
+              <Link href={`/classes/${nextClass.id}`} className="min-w-0 flex-1 group">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-lg font-semibold leading-tight truncate group-hover:text-accent">{nextClass.title}</span>
+                  {divisionMeta(nextClass.camp?.division) && (
+                    <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${divisionMeta(nextClass.camp?.division)!.cls}`}>
+                      {divisionMeta(nextClass.camp?.division)!.label}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted mt-1 truncate">{classDayLabel(nextClass.startsAt)} · {formatTime(nextClass.startsAt)}</div>
+                {nextClass.location && <div className="text-xs text-muted mt-0.5 truncate">at {nextClass.location}</div>}
+                <div className="text-[11px] text-muted mt-1 tabular-nums">{nextClass._count.roster} / {nextClass.capacity} signed up</div>
+              </Link>
+              {/* Quick sign-up: only shown for athletes (myCustomerId set);
+                  staff/admins who aren't a customer see the card without the
+                  button. */}
+              {myCustomerId && (
+                nextClassSignedUp ? (
+                  <form action={dropFromClass} className="shrink-0 text-right">
+                    <input type="hidden" name="classId" value={nextClass.id} />
+                    <div className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5">✓ You&apos;re in</div>
+                    <button type="submit" className="block ml-auto mt-1.5 text-[11px] text-muted hover:text-red-600 underline">Drop</button>
+                  </form>
+                ) : nextClassFull ? (
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 rounded-full bg-zinc-100 px-2 py-1">Full</span>
+                ) : !nextClassEligible ? (
+                  <span className="shrink-0 text-[11px] text-muted text-right max-w-[8rem]">Camp members only</span>
+                ) : (
+                  <form action={signUpForClass} className="shrink-0">
+                    <input type="hidden" name="classId" value={nextClass.id} />
+                    <button type="submit" className="rounded-lg bg-foreground text-white px-3 py-1.5 text-xs font-medium hover:opacity-90 whitespace-nowrap">Sign up</button>
+                  </form>
+                )
+              )}
+            </div>
+          </div>
+        ) : (
+          <SummaryCard
+            icon={Calendar}
+            label="Next class"
+            title="No upcoming classes"
+            sub="Nothing on the schedule"
+            href="/calendar"
+            muted
+          />
+        )}
       </div>
+
 
       {/* Camp applications awaiting a coach's decision — staff only. */}
       {isStaff && pendingApplications.length > 0 && (
@@ -283,72 +414,109 @@ export default async function Dashboard() {
                   Nothing assigned right now. Add one of your own workouts below, or your coach will post the week&apos;s plan.
                 </div>
               ) : (
-                <div className="space-y-5">
-                  {planGroups.map((g) => (
-                    <section key={g.key}>
-                      <div className="flex items-baseline gap-2 mb-2 px-0.5">
-                        <h3 className="text-sm font-semibold tracking-tight">{g.label}</h3>
-                        {g.dateText && <span className="text-xs text-muted">{g.dateText}</span>}
-                      </div>
-                      <ul className="space-y-3">
-                        {g.items.map((a) => {
-                          const done = a.status === "completed";
-                          return (
-                            <li key={a.id} id={`plan-${a.id}`} className={`scroll-mt-20 bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-semibold">{a.workout.name}</span>
-                                {a.camp && <span className="text-[11px] text-accent">· {a.camp.name}</span>}
-                                {done && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">done</span>}
-                              </div>
-
-                              {done ? <ExerciseList items={a.workout.items} /> : <PlanExerciseChecklist items={a.workout.items} storageKey={a.id} />}
-
-                              {(a.coachSuggestion || a.foodAdvice) && (
-                                <div className="mt-3 space-y-1">
-                                  {a.coachSuggestion && <div className="text-xs rounded-lg bg-accent/5 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-accent">Coach</span> · {a.coachSuggestion}</div>}
-                                  {a.foodAdvice && <div className="text-xs rounded-lg bg-emerald-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-emerald-700">Food</span> · {a.foodAdvice}</div>}
+                (() => {
+                  // Split the plan into TODAY (expanded) and UPCOMING (collapsed
+                  // into a <details> disclosure). "Anytime" items count as today
+                  // so they're not buried in the disclosure. Counters power the
+                  // disclosure summary so the athlete sees scope at a glance.
+                  const todayGroups = planGroups.filter((g) => g.key === todayK || g.key === "anytime");
+                  const futureGroups = planGroups.filter((g) => g.key !== todayK && g.key !== "anytime");
+                  const futureItems = futureGroups.reduce((n, g) => n + g.items.length, 0);
+                  const futureTodo = futureGroups.reduce((n, g) => n + g.todo, 0);
+                  function renderGroup(g: typeof planGroups[number]) {
+                    return (
+                      <section key={g.key}>
+                        <div className="flex items-baseline gap-2 mb-2 px-0.5">
+                          <h3 className="text-sm font-semibold tracking-tight">{g.label}</h3>
+                          {g.dateText && <span className="text-xs text-muted">{g.dateText}</span>}
+                        </div>
+                        <ul className="space-y-3">
+                          {g.items.map((a) => {
+                            const done = a.status === "completed";
+                            return (
+                              <li key={a.id} id={`plan-${a.id}`} className={`scroll-mt-20 bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold">{a.workout.name}</span>
+                                  {a.camp && <span className="text-[11px] text-accent">· {a.camp.name}</span>}
+                                  {done && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">done</span>}
                                 </div>
-                              )}
-                              {done && (a.rpe != null || a.feeling) && (
-                                <div className="mt-2 text-xs text-muted">{a.rpe != null ? `RPE ${a.rpe}` : ""}{a.feeling ? `${a.rpe != null ? " · " : ""}${a.feeling}` : ""}</div>
-                              )}
 
-                              {!done && (a.workout.type === "relax" ? (
-                                /* Relax sessions are just-tick-off — no RPE/feeling/notes. */
-                                <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
-                                  <input type="hidden" name="assignmentId" value={a.id} />
-                                  <input type="hidden" name="status" value="completed" />
-                                  <span className="text-[11px] text-muted">Relax session — no feedback needed.</span>
-                                  <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
-                                </form>
-                              ) : (
-                                <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-                                  <input type="hidden" name="assignmentId" value={a.id} />
-                                  <input type="hidden" name="status" value="completed" />
-                                  <div>
-                                    <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
-                                    <input name="rpe" type="number" min={1} max={10} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                {done ? <ExerciseList items={a.workout.items} /> : <PlanExerciseChecklist items={a.workout.items} storageKey={a.id} />}
+
+                                {(a.coachSuggestion || a.foodAdvice) && (
+                                  <div className="mt-3 space-y-1">
+                                    {a.coachSuggestion && <div className="text-xs rounded-lg bg-accent/5 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-accent">Coach</span> · {a.coachSuggestion}</div>}
+                                    {a.foodAdvice && <div className="text-xs rounded-lg bg-emerald-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-emerald-700">Food</span> · {a.foodAdvice}</div>}
                                   </div>
-                                  <div>
-                                    <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
-                                    <input name="feeling" placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                                  </div>
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-muted mb-0.5">Notes</label>
-                                    <input name="notes" placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                                  </div>
-                                  <div className="col-span-2 sm:col-span-4 flex justify-end">
+                                )}
+                                {done && (a.rpe != null || a.feeling) && (
+                                  <div className="mt-2 text-xs text-muted">{a.rpe != null ? `RPE ${a.rpe}` : ""}{a.feeling ? `${a.rpe != null ? " · " : ""}${a.feeling}` : ""}</div>
+                                )}
+
+                                {!done && (a.workout.type === "relax" ? (
+                                  /* Relax sessions are just-tick-off — no RPE/feeling/notes. */
+                                  <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
+                                    <input type="hidden" name="assignmentId" value={a.id} />
+                                    <input type="hidden" name="status" value="completed" />
+                                    <span className="text-[11px] text-muted">Relax session — no feedback needed.</span>
                                     <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
-                                  </div>
-                                </form>
-                              ))}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
+                                  </form>
+                                ) : (
+                                  <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+                                    <input type="hidden" name="assignmentId" value={a.id} />
+                                    <input type="hidden" name="status" value="completed" />
+                                    <div>
+                                      <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
+                                      <input name="rpe" type="number" min={1} max={10} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
+                                      <input name="feeling" placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                    </div>
+                                    <div className="col-span-2">
+                                      <label className="block text-[10px] text-muted mb-0.5">Notes</label>
+                                      <input name="notes" placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
+                                    </div>
+                                    <div className="col-span-2 sm:col-span-4 flex justify-end">
+                                      <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
+                                    </div>
+                                  </form>
+                                ))}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </section>
+                    );
+                  }
+                  return (
+                    <div className="space-y-5">
+                      {todayGroups.length === 0 ? (
+                        <div className="bg-card border border-border border-dashed rounded-xl p-4 text-center text-sm text-muted">
+                          Nothing scheduled today — rest up, or expand <span className="font-medium">Coming up</span> to preview the rest of the week.
+                        </div>
+                      ) : (
+                        todayGroups.map(renderGroup)
+                      )}
+
+                      {futureGroups.length > 0 && (
+                        <details className="bg-card border border-border rounded-xl group">
+                          <summary className="cursor-pointer flex items-center justify-between gap-2 px-4 py-3 list-none select-none">
+                            <div className="flex items-baseline gap-2 flex-wrap min-w-0">
+                              <span className="text-sm font-medium">Coming up</span>
+                              <span className="text-xs text-muted">{futureItems} workout{futureItems === 1 ? "" : "s"} · {futureGroups.length} day{futureGroups.length === 1 ? "" : "s"}</span>
+                              {futureTodo > 0 && <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-accent/10 text-accent">{futureTodo} to do</span>}
+                            </div>
+                            <ChevronDown size={14} className="text-muted shrink-0 transition group-open:rotate-180" />
+                          </summary>
+                          <div className="border-t border-border p-4 space-y-5">
+                            {futureGroups.map(renderGroup)}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })()
               )}
 
               {/* Self-add one of your own workouts */}
