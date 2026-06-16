@@ -22,18 +22,27 @@ export default async function Dashboard() {
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
   const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myActiveCampIds] = await Promise.all([
-    db.class.findMany({
-      where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
-      orderBy: { startsAt: "asc" },
-      include: { roster: true, workouts: { include: { workout: { select: { name: true } } } }, camp: true },
-    }),
-    db.class.findMany({
-      where: { startsAt: { gt: endOfDay(), lte: endOfDay(addDays(now, 7)) }, ...classScope(user) },
-      orderBy: { startsAt: "asc" },
-      take: 5,
-      include: { camp: true, roster: true },
-    }),
-    db.activityData.findMany({ where: { customer: customerScope(user) }, orderBy: { date: "desc" }, take: 5, include: { customer: true } }),
+    // Coach-only views: today's roster, next 7 days, recent customer activity.
+    // Athletes don't render any of these, so we skip the queries entirely
+    // (saves ~3 round-trips per athlete dashboard load).
+    isStaff
+      ? db.class.findMany({
+          where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
+          orderBy: { startsAt: "asc" },
+          include: { roster: true, workouts: { include: { workout: { select: { name: true } } } }, camp: true },
+        })
+      : Promise.resolve([]),
+    isStaff
+      ? db.class.findMany({
+          where: { startsAt: { gt: endOfDay(), lte: endOfDay(addDays(now, 7)) }, ...classScope(user) },
+          orderBy: { startsAt: "asc" },
+          take: 5,
+          include: { camp: true, roster: true },
+        })
+      : Promise.resolve([]),
+    isStaff
+      ? db.activityData.findMany({ where: { customer: customerScope(user) }, orderBy: { date: "desc" }, take: 5, include: { customer: true } })
+      : Promise.resolve([]),
     listTodos({ user }),
     // The signed-in athlete's own training plan: everything not yet done, plus
     // anything dated today or later (so completed-today sessions still show).
