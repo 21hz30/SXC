@@ -400,8 +400,12 @@ export default async function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <section className="lg:col-span-3 space-y-6">
+      {/* Athletes get a single column (just their plan, feedback, mocks,
+          todos) — no right-hand sidebar duplicating what's already above.
+          Staff still get the 3+2 split because they need the class-management
+          views (today's roster, next 7 days, recent customer activity). */}
+      <div className={isStaff ? "grid grid-cols-1 lg:grid-cols-5 gap-6" : ""}>
+        <section className={`space-y-6${isStaff ? " lg:col-span-3" : ""}`}>
           {showPlan && (
             <div>
               <div className="flex items-baseline justify-between mb-3">
@@ -595,73 +599,83 @@ export default async function Dashboard() {
 
           <TodoList todos={todoItems} />
 
-          <div>
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Today&apos;s classes</h2>
-            {todayClasses.length === 0 ? (
-              <div className="bg-card border border-border rounded-xl p-6 text-center text-muted text-sm">No classes scheduled today.</div>
-            ) : (
-              <ul className="space-y-3">
-                {todayClasses.map((c) => {
-                  const attended = c.roster.filter((r) => r.attendance === "attended").length;
-                  return (
+          {/* Coach-management view of today's classes: roster size + attendance.
+              Athletes already see their next class up top and their training plan
+              above — they don't need this. */}
+          {isStaff && (
+            <div>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Today&apos;s classes</h2>
+              {todayClasses.length === 0 ? (
+                <div className="bg-card border border-border rounded-xl p-6 text-center text-muted text-sm">No classes scheduled today.</div>
+              ) : (
+                <ul className="space-y-3">
+                  {todayClasses.map((c) => {
+                    const attended = c.roster.filter((r) => r.attendance === "attended").length;
+                    return (
+                      <li key={c.id}>
+                        <Link href={`/classes/${c.id}`} className="block bg-card border border-border rounded-xl p-5 hover:border-accent transition">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-lg font-semibold">{c.title}</div>
+                              <div className="text-sm text-muted mt-0.5">{formatTime(c.startsAt)} · {c.camp?.name ?? "—"} · {c.workouts.length === 0 ? "No workout" : c.workouts.map((cw) => cw.workout.name).join(" + ")}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-2xl font-semibold tabular-nums">{c.roster.length}<span className="text-base text-muted font-normal"> / {c.capacity}</span></div>
+                              <div className="text-xs text-muted mt-0.5">{attended} attended</div>
+                            </div>
+                          </div>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Staff-only right rail: next-7-day class schedule + recent customer
+            activity. Athletes don't need either — their plan + next class +
+            calendar nav cover this. */}
+        {isStaff && (
+          <section className="lg:col-span-2 space-y-6">
+            <div>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Upcoming this week</h2>
+              {upcomingClasses.length === 0 ? (
+                <div className="text-sm text-muted">Nothing else this week.</div>
+              ) : (
+                <ul className="bg-card border border-border rounded-xl divide-y divide-border">
+                  {upcomingClasses.map((c) => (
                     <li key={c.id}>
-                      <Link href={`/classes/${c.id}`} className="block bg-card border border-border rounded-xl p-5 hover:border-accent transition">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-lg font-semibold">{c.title}</div>
-                            <div className="text-sm text-muted mt-0.5">{formatTime(c.startsAt)} · {c.camp?.name ?? "—"} · {c.workouts.length === 0 ? "No workout" : c.workouts.map((cw) => cw.workout.name).join(" + ")}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-2xl font-semibold tabular-nums">{c.roster.length}<span className="text-base text-muted font-normal"> / {c.capacity}</span></div>
-                            <div className="text-xs text-muted mt-0.5">{attended} attended</div>
-                          </div>
+                      <Link href={`/classes/${c.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-background">
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm truncate">{c.title}</div>
+                          <div className="text-xs text-muted">{formatDate(c.startsAt)} · {formatTime(c.startsAt)}</div>
                         </div>
+                        <div className="text-xs text-muted tabular-nums shrink-0 ml-2">{c.roster.length}/{c.capacity}</div>
                       </Link>
                     </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </section>
-
-        <section className="lg:col-span-2 space-y-6">
-          <div>
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Upcoming this week</h2>
-            {upcomingClasses.length === 0 ? (
-              <div className="text-sm text-muted">Nothing else this week.</div>
-            ) : (
-              <ul className="bg-card border border-border rounded-xl divide-y divide-border">
-                {upcomingClasses.map((c) => (
-                  <li key={c.id}>
-                    <Link href={`/classes/${c.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-background">
-                      <div className="min-w-0">
-                        <div className="font-medium text-sm truncate">{c.title}</div>
-                        <div className="text-xs text-muted">{formatDate(c.startsAt)} · {formatTime(c.startsAt)}</div>
-                      </div>
-                      <div className="text-xs text-muted tabular-nums shrink-0 ml-2">{c.roster.length}/{c.capacity}</div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div>
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Recent activity</h2>
-            <div className="bg-card border border-border rounded-xl divide-y divide-border">
-              {recentActivity.map((a) => (
-                <Link key={a.id} href={`/customers/${a.customerId}`} className="flex items-center justify-between px-4 py-3 hover:bg-background">
-                  <div>
-                    <div className="font-medium text-sm">{a.customer.name}</div>
-                    <div className="text-xs text-muted capitalize">{a.activityType} · {formatDate(a.date)}</div>
-                  </div>
-                  <div className="text-xs text-muted tabular-nums">{a.avgHr ?? "—"} bpm</div>
-                </Link>
-              ))}
+                  ))}
+                </ul>
+              )}
             </div>
-          </div>
-        </section>
+
+            <div>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Recent activity</h2>
+              <div className="bg-card border border-border rounded-xl divide-y divide-border">
+                {recentActivity.map((a) => (
+                  <Link key={a.id} href={`/customers/${a.customerId}`} className="flex items-center justify-between px-4 py-3 hover:bg-background">
+                    <div>
+                      <div className="font-medium text-sm">{a.customer.name}</div>
+                      <div className="text-xs text-muted capitalize">{a.activityType} · {formatDate(a.date)}</div>
+                    </div>
+                    <div className="text-xs text-muted tabular-nums">{a.avgHr ?? "—"} bpm</div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
