@@ -44,6 +44,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ...(user.role === "admin"
       ? [
           { href: "/coaches", label: "Team", icon: "team" },
+          { href: "/admin/tenants", label: "Tenants", icon: "tenants" },
           { href: "/admin/standards", label: "Standards", icon: "standards" },
           { href: "/admin/prompts", label: "AI prompts", icon: "prompts" },
         ] satisfies SidebarNavItem[]

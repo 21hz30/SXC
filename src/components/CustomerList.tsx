@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Pencil, Trash2, Search } from "lucide-react";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
+import RoleBadge from "@/components/RoleBadge";
 import { formatSec } from "@/lib/utils";
 
 export type CustItem = {
@@ -82,7 +83,7 @@ export default function CustomerList({
               <Link href={`/customers?sel=${c.id}`} className="min-w-0 flex-1">
                 <div className={`font-medium truncate flex items-center gap-1.5 ${active ? "text-accent" : "hover:text-accent"}`}>
                   <span className="truncate">{c.name}</span>
-                  {c.accountRole && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide rounded px-1 py-0.5 bg-violet-100 text-violet-700 capitalize">{c.accountRole}</span>}
+                  {c.accountRole && <RoleBadge role={c.accountRole} size="xs" className="shrink-0" />}
                   {c.adherencePct != null && (
                     <span
                       title={`${c.adherencePct}% of ${c.adherenceDue} due training items completed`}

@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { createSession } from "@/domain/chat";
-import { requireUser, requireStaff, clearSession, type SessionUser } from "@/lib/auth";
+import { requireUser, requireStaff, requireAdmin, clearSession, type SessionUser } from "@/lib/auth";
+import { mintInvitationCode } from "@/lib/invitationCode";
 import { Sparkles, Pencil } from "lucide-react";
 import BackButton from "@/components/BackButton";
+import RoleBadge from "@/components/RoleBadge";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
 import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS, divisionsForGender } from "@/domain/benchmarks";
@@ -57,6 +59,12 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   const { editSection: editSectionParam, view: viewParam, logRace, editGoal, logBenchmark, editBenchmark } = await searchParams;
   const editSection: EditSection | null = (["identity", "hyrox", "body", "notes"] as const).find((s) => s === editSectionParam) ?? null;
   const isStaff = user.role === "admin" || user.role === "coach";
+  const isAdmin = user.role === "admin";
+  // Tenants are loaded once for the admin Permissions panel below — used to
+  // populate the "Promote to coach" tenant picker. Cheap query (<10 tenants).
+  const tenants = isAdmin
+    ? await db.tenant.findMany({ orderBy: { createdAt: "asc" }, select: { id: true, name: true, slug: true } })
+    : [];
   // The profile is data-only: identity, body, benchmarks, performances and race
   // history. The training plan + coach advice live on the athlete's dashboard.
   const c = await db.customer.findUnique({
@@ -65,7 +73,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       benchmarks: { orderBy: { testedAt: "desc" } },
       activities: { orderBy: { date: "asc" } },
       campMembers: { include: { camp: true } },
-      userAccount: { select: { id: true } },
+      userAccount: { select: { id: true, username: true, role: true, tenantId: true, invitationCode: true, tenant: { select: { name: true, slug: true } } } },
       rosterEntries: { include: { class: true }, orderBy: { class: { startsAt: "desc" } } },
       performances: {
         include: {
@@ -173,6 +181,91 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     }
     revalidatePath("/customers");
     redirect(flashUrl("/customers", `${c!.name} deleted`));
+  }
+
+  // ─── Role management ─────────────────────────────────────────────────
+  async function promoteToCoach(formData: FormData) {
+    "use server";
+    await requireAdmin();
+    const tenantId = String(formData.get("tenantId") ?? "").trim();
+    if (!tenantId) redirect(flashUrl(`/customers/${id}`, "Pick a tenant first"));
+    const target = await db.customer.findUnique({
+      where: { id },
+      select: { userAccount: { select: { id: true, username: true } } },
+    });
+    if (!target?.userAccount) {
+      redirect(flashUrl(`/customers/${id}`, "Customer has no linked account — can't promote"));
+    }
+    const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { slug: true, name: true } });
+    if (!tenant) redirect(flashUrl(`/customers/${id}`, "Tenant not found"));
+    // Retry on the (extremely unlikely) collision with another coach's code.
+    // IMPORTANT: keep `redirect()` OUTSIDE the try — Next.js implements it
+    // by throwing a NEXT_REDIRECT signal, so a bare `catch (e)` would swallow
+    // the successful redirect and loop again, double-writing the row.
+    let mintedCode: string | null = null;
+    let attempt = 0;
+    while (attempt < 5 && !mintedCode) {
+      const code = mintInvitationCode(tenant!.slug, target!.userAccount!.username);
+      try {
+        await db.user.update({
+          where: { id: target!.userAccount!.id },
+          data: { role: "coach", tenantId, invitationCode: code },
+        });
+        mintedCode = code;
+      } catch (e) {
+        attempt++;
+        if (attempt === 5) throw e;
+      }
+    }
+    revalidatePath(`/customers/${id}`);
+    revalidatePath("/admin/tenants");
+    redirect(flashUrl(`/customers/${id}`, `Promoted to coach in ${tenant!.name} — code ${mintedCode}`));
+  }
+
+  async function promoteToAdmin() {
+    "use server";
+    await requireAdmin();
+    const target = await db.customer.findUnique({
+      where: { id },
+      select: { userAccount: { select: { id: true } } },
+    });
+    if (!target?.userAccount) {
+      redirect(flashUrl(`/customers/${id}`, "Customer has no linked account — can't promote"));
+    }
+    await db.user.update({
+      where: { id: target!.userAccount!.id },
+      data: { role: "admin", tenantId: null, invitationCode: null },
+    });
+    revalidatePath(`/customers/${id}`);
+    revalidatePath("/admin/tenants");
+    redirect(flashUrl(`/customers/${id}`, "Promoted to admin"));
+  }
+
+  async function demoteToCustomer() {
+    "use server";
+    const actor = await requireAdmin();
+    const target = await db.customer.findUnique({
+      where: { id },
+      select: { userAccount: { select: { id: true, role: true } } },
+    });
+    if (!target?.userAccount) return;
+    if (target.userAccount.id === actor.id) {
+      redirect(flashUrl(`/customers/${id}`, "Can't demote your own account"));
+    }
+    // Guard: never strip the last admin — would lock everyone out of the app.
+    if (target.userAccount.role === "admin") {
+      const adminCount = await db.user.count({ where: { role: "admin" } });
+      if (adminCount <= 1) {
+        redirect(flashUrl(`/customers/${id}`, "Can't demote the last admin"));
+      }
+    }
+    await db.user.update({
+      where: { id: target.userAccount.id },
+      data: { role: "customer", tenantId: null, invitationCode: null },
+    });
+    revalidatePath(`/customers/${id}`);
+    revalidatePath("/admin/tenants");
+    redirect(flashUrl(`/customers/${id}`, "Demoted to customer"));
   }
 
   // Benchmark add / delete actions
@@ -363,7 +456,10 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       <BackButton fallback={isStaff ? "/customers" : "/"} label="Back" />
       <header className="mt-3 mb-6 flex items-end justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{c.name}</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-3xl font-semibold tracking-tight">{c.name}</h1>
+            {c.userAccount?.role && <RoleBadge role={c.userAccount.role} />}
+          </div>
           <div className="text-sm text-muted mt-1">{c.tags}</div>
           <div className="text-sm text-muted mt-1">
             {c.campMembers.length > 0 && (
@@ -523,6 +619,65 @@ export default async function CustomerDetail({ params, searchParams }: { params:
             <div className="text-sm whitespace-pre-wrap min-h-[3rem]">{c.notes || <span className="text-muted">No notes yet.</span>}</div>
           )}
         </SectionCard>
+
+        {/* ROLE & PERMISSIONS — admin-only. Promote/demote the customer's
+            linked User account between admin/coach/customer. */}
+        {isAdmin && c.userAccount && (
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-sm font-medium text-muted uppercase tracking-wide">Role &amp; permissions</h3>
+              <RoleBadge role={c.userAccount.role} size="xs" />
+            </div>
+            <div className="text-xs text-muted mb-3">
+              Signed in as <span className="font-mono text-foreground">@{c.userAccount.username}</span>
+              {c.userAccount.tenant && <> · in tenant <span className="font-mono text-foreground">{c.userAccount.tenant.name}</span></>}
+            </div>
+            {c.userAccount.role === "coach" && c.userAccount.invitationCode && (
+              <div className="text-[11px] text-muted mb-3 flex items-center gap-2 flex-wrap">
+                Invitation code:
+                <code className="font-mono px-2 py-0.5 bg-background border border-border rounded-md">{c.userAccount.invitationCode}</code>
+              </div>
+            )}
+
+            {/* Three actions, hidden when not applicable. Each is a small form
+                so the server action runs without JS. */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {c.userAccount.role !== "coach" && tenants.length > 0 && (
+                <form action={promoteToCoach} className="flex items-center gap-1.5">
+                  <select name="tenantId" defaultValue={tenants[0]?.id ?? ""} className="rounded-lg border border-border bg-white px-2 py-1.5 text-xs">
+                    {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  <ConfirmSubmit
+                    message={`Promote ${c.name} to a coach in the selected tenant? They'll get an invitation code so athletes can sign up under them.`}
+                    className="rounded-lg bg-sky-600 text-white px-3 py-1.5 text-xs font-medium hover:opacity-90"
+                  >
+                    Promote to coach
+                  </ConfirmSubmit>
+                </form>
+              )}
+              {c.userAccount.role !== "admin" && (
+                <form action={promoteToAdmin}>
+                  <ConfirmSubmit
+                    message={`Promote ${c.name} to admin? Admins can manage every tenant + every athlete in the app.`}
+                    className="rounded-lg bg-violet-600 text-white px-3 py-1.5 text-xs font-medium hover:opacity-90"
+                  >
+                    Promote to admin
+                  </ConfirmSubmit>
+                </form>
+              )}
+              {c.userAccount.role !== "customer" && (
+                <form action={demoteToCustomer}>
+                  <ConfirmSubmit
+                    message={`Demote ${c.name} back to a customer? Their tenant assignment + invitation code will be cleared.`}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-red-600 hover:border-red-300"
+                  >
+                    Demote to customer
+                  </ConfirmSubmit>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {view === "training" && (

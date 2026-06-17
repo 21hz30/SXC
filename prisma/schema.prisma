@@ -7,6 +7,19 @@ datasource db {
   provider = "postgresql"
 }
 
+/// A tenant = "team" = a single gym/company that owns its own coaches,
+/// workouts, camps, classes. Customers are app-wide and can connect to
+/// coaches across multiple tenants (via the CustomerCoach join table).
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  coaches   User[]      @relation("TenantCoaches")
+  workouts  Workout[]
+}
+
 model User {
   id           String   @id @default(cuid())
   username     String   @unique
@@ -19,11 +32,55 @@ model User {
   customer     Customer? @relation("CustomerAccount", fields: [customerId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
 
+  /// Tenant a coach belongs to. NULL for admin (cross-tenant) and customer
+  /// roles. Required for role = "coach" once backfilled.
+  tenantId     String?
+  tenant       Tenant?  @relation("TenantCoaches", fields: [tenantId], references: [id], onDelete: SetNull)
+
+  /// Coach's shareable invitation code (e.g. "SRC-TAY-9X3K"). Customers
+  /// enter this at signup to request a connection with this coach.
+  invitationCode String? @unique
+
   camps          Camp[]   @relation("CoachCamps")
   createdCamps   Camp[]   @relation("CampCreator")
   createdClasses Class[]  @relation("ClassCreator")
   todos          Todo[]
   chatSessions   ChatSession[]
+
+  // Multi-coach connections: pending/active/rejected per (customer, coach) pair.
+  customerCoaches      CustomerCoach[] @relation("CoachCustomers")
+  approvedConnections  CustomerCoach[] @relation("CoachConnectionApprovals")
+
+  // Workouts authored by this user (coach). NULL for legacy library workouts.
+  createdWorkouts      Workout[]       @relation("WorkoutCreator")
+}
+
+/**
+ * Customer ↔ Coach connection. A customer can be connected to N coaches;
+ * each row starts pending until the coach approves. Once active, the
+ * customer sees that coach's camps + their classes + workouts assigned to
+ * them by that coach.
+ */
+model CustomerCoach {
+  id           String   @id @default(cuid())
+  customerId   String
+  customer     Customer @relation("CustomerCoaches", fields: [customerId], references: [id], onDelete: Cascade)
+  coachUserId  String
+  coach        User     @relation("CoachCustomers", fields: [coachUserId], references: [id], onDelete: Cascade)
+  /// pending | active | rejected
+  status       String   @default("pending")
+  /// "code" — customer entered the coach's invitation code at signup;
+  /// "coach_added" — coach added the customer themselves (auto-active);
+  /// "request" — customer requested via an in-app coach picker.
+  source       String
+  requestedAt  DateTime @default(now())
+  approvedAt   DateTime?
+  approvedById String?
+  approvedBy   User?    @relation("CoachConnectionApprovals", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([customerId, coachUserId])
+  @@index([coachUserId, status])
+  @@index([customerId, status])
 }
 
 model ChatSession {
@@ -104,6 +161,8 @@ model Customer {
   foodLogs      FoodLog[]
   waterLogs     WaterLog[]
   weightLogs    WeightLog[]
+  /// Many-to-many bridge to coaches the customer is connected to.
+  coachConnections CustomerCoach[] @relation("CustomerCoaches")
 }
 
 /// A workout for one athlete to do OUTSIDE of a class — either pushed by a
@@ -328,12 +387,31 @@ model Workout {
   owner       Customer? @relation("CustomerOwnedWorkouts", fields: [ownerCustomerId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
 
+  /// Coach who authored this workout. NULL for athlete-private workouts and
+  /// for legacy library workouts before the multi-tenant cut-over (those are
+  /// backfilled to the head admin once migrated).
+  createdByUserId String?
+  createdBy       User?    @relation("WorkoutCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  /// Tenant that owns this workout. NULL for athlete-private workouts (an
+  /// athlete can be connected to coaches in multiple tenants). Required for
+  /// coach-authored workouts.
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  /// "private" = only the creator + explicit shares see it; "team" = every
+  /// coach in the same tenant sees it (the new "tenant library"); "archived"
+  /// = hidden from list views, still attached to past assignments/classes.
+  visibility  String   @default("private")
+
   items       WorkoutItem[]
   classes     ClassWorkout[]
   performances Performance[]
   assignments WorkoutAssignment[]
 
   @@index([ownerCustomerId])
+  @@index([tenantId, visibility])
+  @@index([createdByUserId])
 }
 
 model WorkoutItem {

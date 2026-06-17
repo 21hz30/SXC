@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formatSec, formatDate } from "@/lib/utils";
 import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, Timer } from "lucide-react";
+import RoleBadge from "@/components/RoleBadge";
 import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 import { requireCoach } from "@/lib/auth";
 import { customerScope } from "@/lib/access";
@@ -286,8 +287,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 <div className="min-w-0">
                   <h2 className="text-2xl font-semibold tracking-tight truncate flex items-center gap-2">
                     <span className="truncate">{selectedCustomer.name}</span>
-                    {(selectedCustomer.userAccount?.role === "admin" || selectedCustomer.userAccount?.role === "coach") && (
-                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-violet-100 text-violet-700 capitalize">{selectedCustomer.userAccount.role}</span>
+                    {selectedCustomer.userAccount?.role && selectedCustomer.userAccount.role !== "customer" && (
+                      <RoleBadge role={selectedCustomer.userAccount.role} className="shrink-0" />
                     )}
                   </h2>
                   <div className="text-sm text-muted mt-0.5 truncate">{customerDetail(selectedCustomer) || "—"}</div>
