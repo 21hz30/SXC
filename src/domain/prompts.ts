@@ -14,7 +14,7 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { db } from "@/lib/db";
 
-export type PromptKey = "chat.system" | "report.postClass" | "insights.customer";
+export type PromptKey = "chat.system" | "report.postClass" | "insights.customer" | "nutrition.foodParse";
 
 type RegistryEntry = {
   name: string;
@@ -40,6 +40,12 @@ export const PROMPT_REGISTRY: Record<PromptKey, RegistryEntry> = {
     description:
       "Produces the coach-facing insight cards (strengths, watch-outs, focus, nutrition) on a customer's profile. Must return JSON.",
     file: "customer-insights.md",
+  },
+  "nutrition.foodParse": {
+    name: "Nutrition — food parse",
+    description:
+      "Tuned for athletes in China — turns a free-text meal description (Chinese or English) into a clean label + calories + macros. Used by the 'Estimate with AI' button on the meal log form. Must return strict JSON.",
+    file: "nutrition-food-parse.md",
   },
 };
 

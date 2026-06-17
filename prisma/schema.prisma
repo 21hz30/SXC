@@ -101,6 +101,9 @@ model Customer {
   racePlans     RacePlan[]
   assignments   WorkoutAssignment[]
   adviceItems   CoachAdvice[]
+  foodLogs      FoodLog[]
+  waterLogs     WaterLog[]
+  weightLogs    WeightLog[]
 }
 
 /// A workout for one athlete to do OUTSIDE of a class — either pushed by a
@@ -126,6 +129,9 @@ model WorkoutAssignment {
   feeling       String?
   notes         String?
   resultsJson   String?  // per-exercise achieved: { "<itemId>": "value" }
+  /// Calories the athlete burned doing this workout — counted in today's
+  /// nutrition exercise-burn total. Null = not logged.
+  caloriesBurned Int?
   coachSuggestion String?
   foodAdvice    String?
   createdAt     DateTime @default(now())
@@ -551,4 +557,66 @@ model ClassWatchData {
 
   @@unique([classId, customerId])
   @@index([customerId, recordedAt])
+}
+
+/**
+ * One meal entry per athlete. Description is what the athlete typed or what
+ * AI recognised from a photo; calories + macros are AI's guess that the
+ * athlete can override. aiAnalysisJson preserves the raw AI response.
+ */
+model FoodLog {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  loggedAt    DateTime @default(now())
+  /// breakfast | lunch | dinner | snack | null
+  mealType    String?
+  description String
+  /// Path/URL of the uploaded food photo (Supabase Storage). Null = text-only.
+  imageUrl    String?
+  calories    Int?
+  proteinG    Float?
+  carbsG      Float?
+  fatG        Float?
+  fiberG      Float?
+  /// Raw AI response kept for traceability / debugging.
+  aiAnalysisJson String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerId, loggedAt])
+}
+
+/**
+ * One water-intake entry per athlete (millilitres). Sum-per-day powers the
+ * dashboard water gauge.
+ */
+model WaterLog {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  loggedAt   DateTime @default(now())
+  amountMl   Int
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, loggedAt])
+}
+
+/**
+ * Body-weight log. Each entry is one weigh-in (kg). The dashboard always
+ * uses Customer.weightKg for BMR/TDEE math; this table is for tracking the
+ * trend over time and surfacing the most recent reading on the detail page.
+ */
+model WeightLog {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  loggedAt   DateTime @default(now())
+  weightKg   Float
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, loggedAt])
 }

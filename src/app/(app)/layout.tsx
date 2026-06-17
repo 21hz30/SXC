@@ -39,6 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     // Customers list is staff-only; athletes only ever see their own Profile.
     ...(isStaff ? ([{ href: "/customers", label: "Customers", icon: "customers" }] satisfies SidebarNavItem[]) : []),
     { href: "/workouts", label: "Workouts", icon: "workouts" },
+    { href: "/nutrition", label: "Nutrition", icon: "nutrition" },
     { href: "/profile", label: "Profile", icon: "profile" },
     ...(user.role === "admin"
       ? [

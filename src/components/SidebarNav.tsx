@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Calendar, Dumbbell, Gauge, Home, MessageSquare, Shield, Tent, User, Users, type LucideIcon } from "lucide-react";
+import { Apple, Calendar, Dumbbell, Gauge, Home, MessageSquare, Shield, Tent, User, Users, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const icons = {
@@ -10,6 +10,7 @@ export const icons = {
   camps: Tent,
   customers: Users,
   dashboard: Home,
+  nutrition: Apple,
   profile: User,
   prompts: MessageSquare,
   standards: Gauge,

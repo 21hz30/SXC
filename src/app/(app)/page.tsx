@@ -11,8 +11,10 @@ import { listTodos } from "@/domain/todos";
 import { backfillCampPlan } from "@/domain/camps";
 import ExerciseList from "@/components/ExerciseList";
 import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
+import TodayNutrition from "@/components/TodayNutrition";
 import { flashUrl } from "@/lib/flash";
 import { classScope, customerScope } from "@/lib/access";
+import { rollDay, bmrKcal, type Stats, type DayIntake } from "@/domain/nutrition";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myActiveCampIds] = await Promise.all([
+  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds] = await Promise.all([
     // Coach-only views: today's roster, next 7 days, recent customer activity.
     // Athletes don't render any of these, so we skip the queries entirely
     // (saves ~3 round-trips per athlete dashboard load).
@@ -109,6 +111,29 @@ export default async function Dashboard() {
           include: { class: { select: { id: true, title: true, startsAt: true } } },
         })
       : Promise.resolve([]),
+    // Nutrition MVP — body stats power the targets, food/water/burn power the
+    // intake side. All scoped to TODAY (UTC-anchored start/end of day).
+    myCustomerId
+      ? db.customer.findUnique({ where: { id: myCustomerId }, select: { gender: true, weightKg: true, heightCm: true, age: true } })
+      : Promise.resolve(null),
+    myCustomerId
+      ? db.foodLog.findMany({
+          where: { customerId: myCustomerId, loggedAt: { gte: startOfDay(), lte: endOfDay() } },
+          select: { calories: true, proteinG: true, carbsG: true, fatG: true, fiberG: true },
+        })
+      : Promise.resolve([]),
+    myCustomerId
+      ? db.waterLog.findMany({
+          where: { customerId: myCustomerId, loggedAt: { gte: startOfDay(), lte: endOfDay() } },
+          select: { amountMl: true },
+        })
+      : Promise.resolve([]),
+    myCustomerId
+      ? db.workoutAssignment.findMany({
+          where: { customerId: myCustomerId, scheduledDate: { gte: startOfDay(), lte: endOfDay() }, status: "completed" },
+          select: { caloriesBurned: true, workout: { select: { items: { select: { timeSec: true, groupTimeSec: true } } } } },
+        })
+      : Promise.resolve([]),
     // Camps the athlete is an active member of — used to gate the dashboard
     // "Sign up" button on a camp class (drop-in classes are open to anyone).
     myCustomerId
@@ -173,6 +198,29 @@ export default async function Dashboard() {
   // have something assigned — they manage plans elsewhere).
   const showPlan = !!myCustomerId && (myAssignments.length > 0 || !isStaff);
 
+  // Today's nutrition rollup — anyone with a linked customer profile, including
+  // staff who train (they have their own customer record). The coach view of
+  // someone else's nutrition is a different surface on the customer profile.
+  const showNutrition = !!myCustomerId;
+  let nutritionProgress: ReturnType<typeof rollDay> | null = null;
+  if (showNutrition) {
+    const stats: Stats = { gender: myStats?.gender ?? null, weightKg: myStats?.weightKg ?? null, heightCm: myStats?.heightCm ?? null, age: myStats?.age ?? null };
+    const exerciseMinutes = todayBurn.reduce((sum, a) => {
+      const itemMin = a.workout.items.reduce((m, it) => m + ((it.timeSec ?? 0) + (it.groupTimeSec ?? 0)) / 60, 0);
+      return sum + itemMin;
+    }, 0);
+    const intake: DayIntake = {
+      caloriesIn: todayFood.reduce((s, r) => s + (r.calories ?? 0), 0),
+      proteinG: todayFood.reduce((s, r) => s + (r.proteinG ?? 0), 0),
+      carbsG: todayFood.reduce((s, r) => s + (r.carbsG ?? 0), 0),
+      fatG: todayFood.reduce((s, r) => s + (r.fatG ?? 0), 0),
+      fiberG: todayFood.reduce((s, r) => s + (r.fiberG ?? 0), 0),
+      waterMl: todayWater.reduce((s, r) => s + r.amountMl, 0),
+      caloriesOut: todayBurn.reduce((s, r) => s + (r.caloriesBurned ?? 0), 0),
+      exerciseMinutes: Math.round(exerciseMinutes),
+    };
+    nutritionProgress = rollDay(stats, intake);
+  }
 
   // Athlete logs a plan workout done — scoped to their own assignment only.
   async function logMyAssignment(formData: FormData) {
@@ -373,6 +421,17 @@ export default async function Dashboard() {
         )}
       </div>
 
+      {/* Today's nutrition — athlete-only quick glance. Sits above the main
+          grid so it's the first thing they see after the summary cards. */}
+      {showNutrition && nutritionProgress && (
+        <div className="mb-8">
+          <TodayNutrition
+            progress={nutritionProgress}
+            hasStats={myStats?.weightKg != null && myStats?.heightCm != null && myStats?.age != null && (myStats?.gender === "male" || myStats?.gender === "female")}
+            restingKcal={bmrKcal({ gender: myStats?.gender ?? null, weightKg: myStats?.weightKg ?? null, heightCm: myStats?.heightCm ?? null, age: myStats?.age ?? null })}
+          />
+        </div>
+      )}
 
       {/* Camp applications awaiting a coach's decision — staff only. */}
       {isStaff && pendingApplications.length > 0 && (
