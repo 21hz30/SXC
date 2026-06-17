@@ -5,9 +5,9 @@ import { revalidatePath } from "next/cache";
 import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { createSession } from "@/domain/chat";
-import { requireUser, requireStaff, requireAdmin, clearSession, type SessionUser } from "@/lib/auth";
+import { requireUser, requireStaff, requireAdmin, clearSession, getMyCustomerId, type SessionUser } from "@/lib/auth";
 import { mintInvitationCode } from "@/lib/invitationCode";
-import { Sparkles, Pencil } from "lucide-react";
+import { Sparkles, Pencil, UserCheck } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import RoleBadge from "@/components/RoleBadge";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
@@ -74,6 +74,13 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       activities: { orderBy: { date: "asc" } },
       campMembers: { include: { camp: true } },
       userAccount: { select: { id: true, username: true, role: true, tenantId: true, invitationCode: true, tenant: { select: { name: true, slug: true } } } },
+      coachConnections: {
+        where: { status: { in: ["pending", "active"] } },
+        orderBy: { requestedAt: "desc" },
+        include: {
+          coach: { select: { id: true, name: true, customerId: true, tenant: { select: { name: true } } } },
+        },
+      },
       rosterEntries: { include: { class: true }, orderBy: { class: { startsAt: "desc" } } },
       performances: {
         include: {
@@ -239,6 +246,62 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     revalidatePath(`/customers/${id}`);
     revalidatePath("/admin/tenants");
     redirect(flashUrl(`/customers/${id}`, "Promoted to admin"));
+  }
+
+  // ─── Self-service: customer connects with a coach by code ────────────
+  async function connectCoachByCode(formData: FormData) {
+    "use server";
+    await requireUser();
+    // The check matches what gates the UI: the actor's linked customer must
+    // BE the customer being viewed. Role doesn't matter — admins/coaches with
+    // their own Customer record can manage their own coach connections too.
+    const myCid = await getMyCustomerId();
+    if (!myCid || myCid !== id) {
+      redirect(flashUrl(`/customers/${id}`, "You can only manage your own coaches"));
+    }
+    const raw = String(formData.get("code") ?? "").trim().toUpperCase();
+    if (!raw) redirect(flashUrl(`/customers/${id}`, "Enter a code"));
+    const coach = await db.user.findUnique({
+      where: { invitationCode: raw },
+      select: { id: true, name: true, role: true, customerId: true, tenant: { select: { name: true } } },
+    });
+    // Code must resolve to a coach (admins don't have codes; we still guard).
+    if (!coach || coach.role !== "coach") {
+      redirect(flashUrl(`/customers/${id}`, "That code didn't match any coach"));
+    }
+    // Block self-coaching: a coach can't subscribe to their own code.
+    if (coach!.customerId === id) {
+      redirect(flashUrl(`/customers/${id}`, "That's your own code"));
+    }
+    // Block duplicate connection (any status).
+    const existing = await db.customerCoach.findUnique({
+      where: { customerId_coachUserId: { customerId: id, coachUserId: coach!.id } },
+    });
+    if (existing) {
+      const what = existing.status === "active" ? "already connected" : existing.status === "pending" ? "already pending" : "previously rejected";
+      redirect(flashUrl(`/customers/${id}`, `Coach ${coach!.name}: ${what}`));
+    }
+    await db.customerCoach.create({
+      data: { customerId: id, coachUserId: coach!.id, status: "pending", source: "code" },
+    });
+    revalidatePath(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, `Request sent to ${coach!.name} — they'll approve soon`));
+  }
+
+  async function disconnectCoach(formData: FormData) {
+    "use server";
+    await requireUser();
+    const myCid = await getMyCustomerId();
+    if (!myCid || myCid !== id) {
+      redirect(flashUrl(`/customers/${id}`, "You can only manage your own coaches"));
+    }
+    const connId = String(formData.get("connId") ?? "");
+    if (!connId) return;
+    // Scoped delete: own customer's row only — prevents the rare case of a
+    // tampered form trying to disconnect somebody else.
+    await db.customerCoach.deleteMany({ where: { id: connId, customerId: id } });
+    revalidatePath(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, "Coach disconnected"));
   }
 
   async function demoteToCustomer() {
@@ -676,6 +739,60 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                 </form>
               )}
             </div>
+          </div>
+        )}
+
+        {/* MY COACHES — visible only on the customer's OWN profile. List of
+            current connections + a form to subscribe to a new coach by code. */}
+        {isSelf && (
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-5">
+            <h3 className="text-sm font-medium text-muted uppercase tracking-wide mb-3 flex items-center gap-1.5">
+              <UserCheck size={14} /> My coaches
+            </h3>
+
+            {c.coachConnections.length === 0 ? (
+              <div className="text-xs text-muted mb-3">You aren&apos;t connected to a coach yet. Paste a coach&apos;s invitation code below.</div>
+            ) : (
+              <ul className="divide-y divide-border bg-background border border-border rounded-xl overflow-hidden mb-3">
+                {c.coachConnections.map((conn) => (
+                  <li key={conn.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{conn.coach.name}</div>
+                      {conn.coach.tenant && <div className="text-[11px] text-muted truncate">{conn.coach.tenant.name}</div>}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wide rounded-full px-1.5 py-0.5 ${
+                        conn.status === "active" ? "bg-emerald-100 text-emerald-800"
+                          : conn.status === "pending" ? "bg-amber-100 text-amber-800"
+                          : "bg-zinc-100 text-zinc-700"
+                      }`}>{conn.status}</span>
+                      <form action={disconnectCoach}>
+                        <input type="hidden" name="connId" value={conn.id} />
+                        <ConfirmSubmit
+                          message={`Disconnect from ${conn.coach.name}? You won't see their camps or assigned workouts anymore. You can re-connect later with their code.`}
+                          className="text-[11px] text-muted hover:text-red-600 underline"
+                        >
+                          Disconnect
+                        </ConfirmSubmit>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <form action={connectCoachByCode} className="flex items-center gap-2">
+              <input
+                name="code"
+                required
+                placeholder="e.g. SRC-TAY-6C90"
+                className="flex-1 rounded-lg border border-border bg-white px-3 py-2 text-sm font-mono tracking-wider uppercase"
+              />
+              <button type="submit" className="rounded-lg bg-foreground text-white px-3 py-2 text-sm font-medium hover:opacity-90">
+                Connect
+              </button>
+            </form>
+            <div className="text-[11px] text-muted mt-1.5">Ask your coach for their code. They&apos;ll get a request to approve before you see their plans.</div>
           </div>
         )}
       </div>
