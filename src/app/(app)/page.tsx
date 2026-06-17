@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, requireStaff, getMyCustomerId } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
-import { Calendar, ChevronDown, Dumbbell, Tent } from "lucide-react";
+import { Calendar, ChevronDown, Dumbbell, KeyRound, Tent } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
@@ -13,7 +13,7 @@ import ExerciseList from "@/components/ExerciseList";
 import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
 import TodayNutrition from "@/components/TodayNutrition";
 import { flashUrl } from "@/lib/flash";
-import { classScope, customerScope } from "@/lib/access";
+import { classScope } from "@/lib/access";
 import { rollDay, bmrKcal, type Stats, type DayIntake } from "@/domain/nutrition";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, recentActivity, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds] = await Promise.all([
+  const [todayClasses, upcomingClasses, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode] = await Promise.all([
     // Coach-only views: today's roster, next 7 days, recent customer activity.
     // Athletes don't render any of these, so we skip the queries entirely
     // (saves ~3 round-trips per athlete dashboard load).
@@ -41,9 +41,6 @@ export default async function Dashboard() {
           take: 5,
           include: { camp: true, roster: true },
         })
-      : Promise.resolve([]),
-    isStaff
-      ? db.activityData.findMany({ where: { customer: customerScope(user) }, orderBy: { date: "desc" }, take: 5, include: { customer: true } })
       : Promise.resolve([]),
     listTodos({ user }),
     // The signed-in athlete's own training plan: everything not yet done, plus
@@ -142,6 +139,11 @@ export default async function Dashboard() {
           select: { campId: true },
         })
       : Promise.resolve([]),
+    // The coach's own invitation code — shown on their dashboard so they can
+    // share it without digging into /admin/tenants or a customer profile.
+    user.role === "coach"
+      ? db.user.findUnique({ where: { id: user.id }, select: { invitationCode: true } }).then((u) => u?.invitationCode ?? null)
+      : Promise.resolve(null),
   ]);
 
   const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
@@ -702,11 +704,25 @@ export default async function Dashboard() {
           )}
         </section>
 
-        {/* Staff-only right rail: next-7-day class schedule + recent customer
-            activity. Athletes don't need either — their plan + next class +
-            calendar nav cover this. */}
+        {/* Staff-only right rail. Coaches also get a card with their own
+            invitation code so they can share it with athletes without
+            having to dig into the customer detail page. */}
         {isStaff && (
           <section className="lg:col-span-2 space-y-6">
+            {/* Coach's own invitation code — sticky-prominent so it's easy
+                to copy/paste. Admins don't have a code (they're cross-tenant
+                superusers) so we only show this for role=coach. */}
+            {user.role === "coach" && myInvitationCode && (
+              <div className="bg-card border border-border rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <KeyRound size={14} className="text-muted shrink-0" />
+                  <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Your invitation code</h2>
+                </div>
+                <code className="block text-base font-mono tracking-wider rounded-lg bg-background border border-border px-3 py-2 mb-2 select-all">{myInvitationCode}</code>
+                <p className="text-xs text-muted leading-snug">Share this with an athlete so they can connect with you. Once they paste it on their profile, you&apos;ll see the request in your dashboard inbox to approve.</p>
+              </div>
+            )}
+
             <div>
               <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Upcoming this week</h2>
               {upcomingClasses.length === 0 ? (
@@ -726,21 +742,6 @@ export default async function Dashboard() {
                   ))}
                 </ul>
               )}
-            </div>
-
-            <div>
-              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Recent activity</h2>
-              <div className="bg-card border border-border rounded-xl divide-y divide-border">
-                {recentActivity.map((a) => (
-                  <Link key={a.id} href={`/customers/${a.customerId}`} className="flex items-center justify-between px-4 py-3 hover:bg-background">
-                    <div>
-                      <div className="font-medium text-sm">{a.customer.name}</div>
-                      <div className="text-xs text-muted capitalize">{a.activityType} · {formatDate(a.date)}</div>
-                    </div>
-                    <div className="text-xs text-muted tabular-nums">{a.avgHr ?? "—"} bpm</div>
-                  </Link>
-                ))}
-              </div>
             </div>
           </section>
         )}
