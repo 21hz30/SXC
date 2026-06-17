@@ -53,10 +53,10 @@ async function assertCanEditCustomer(customerId: string): Promise<SessionUser> {
   redirect("/profile");
 }
 
-export default async function CustomerDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ editSection?: EditSection; view?: View; logRace?: string; editGoal?: string; logBenchmark?: string; editBenchmark?: string }> }) {
+export default async function CustomerDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ editSection?: EditSection; view?: View; logRace?: string; editGoal?: string; logBenchmark?: string; editBenchmark?: string; editAdvice?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const { editSection: editSectionParam, view: viewParam, logRace, editGoal, logBenchmark, editBenchmark } = await searchParams;
+  const { editSection: editSectionParam, view: viewParam, logRace, editGoal, logBenchmark, editBenchmark, editAdvice } = await searchParams;
   const editSection: EditSection | null = (["identity", "hyrox", "body", "notes"] as const).find((s) => s === editSectionParam) ?? null;
   const isStaff = user.role === "admin" || user.role === "coach";
   const isAdmin = user.role === "admin";
@@ -329,6 +329,27 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     revalidatePath(`/customers/${id}`);
     revalidatePath("/admin/tenants");
     redirect(flashUrl(`/customers/${id}`, "Demoted to customer"));
+  }
+
+  // ─── Coach: write per-assignment advice (food + suggestion) ──────────
+  // The athlete dashboard already renders both fields on each plan row; this
+  // is the long-missing edit surface so coaches can actually fill them in.
+  async function saveAssignmentAdvice(formData: FormData) {
+    "use server";
+    await requireStaff();
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    if (!assignmentId) return;
+    const foodAdvice = String(formData.get("foodAdvice") ?? "").trim() || null;
+    const coachSuggestion = String(formData.get("coachSuggestion") ?? "").trim() || null;
+    // Scoped update — assignment must belong to the customer in the URL so a
+    // tampered form can't write advice across customers.
+    await db.workoutAssignment.updateMany({
+      where: { id: assignmentId, customerId: id },
+      data: { foodAdvice, coachSuggestion },
+    });
+    revalidatePath(`/customers/${id}`);
+    revalidatePath("/");
+    redirect(flashUrl(`/customers/${id}`, "Advice saved"));
   }
 
   // Benchmark add / delete actions
@@ -836,18 +857,54 @@ export default async function CustomerDetail({ params, searchParams }: { params:
               const fb = done && (a.rpe != null || a.feeling)
                 ? [a.rpe != null ? `RPE ${a.rpe}` : null, a.feeling].filter(Boolean).join(" · ")
                 : null;
+              const editingThis = editAdvice === a.id;
               return (
-                <div key={a.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="w-14 shrink-0 text-[11px] text-muted tabular-nums leading-tight">
-                    {a.scheduledDate ? new Date(a.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Anytime"}
-                  </div>
-                  <Link href={`/workouts/${a.workout.id}`} className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate hover:text-accent">{a.workout.name}</div>
-                    {(a.camp?.name || fb) && (
-                      <div className="text-[11px] text-muted truncate">{[a.camp?.name, fb].filter(Boolean).join(" · ")}</div>
+                // Background tint only when editing — no extra padding, so
+                // the inner row's px-4 keeps alignment consistent with the
+                // surrounding plan rows (no horizontal jump on edit).
+                <div key={a.id} className={editingThis ? "bg-orange-50/40" : ""}>
+                  <div className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="w-14 shrink-0 text-[11px] text-muted tabular-nums leading-tight">
+                      {a.scheduledDate ? new Date(a.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Anytime"}
+                    </div>
+                    <Link href={`/workouts/${a.workout.id}`} className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate hover:text-orange-700">{a.workout.name}</div>
+                      {(a.camp?.name || fb) && (
+                        <div className="text-[11px] text-muted truncate">{[a.camp?.name, fb].filter(Boolean).join(" · ")}</div>
+                      )}
+                    </Link>
+                    <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${meta.cls}`}>{meta.label}</span>
+                    {isStaff && !editingThis && (
+                      <Link href={`/customers/${id}?editAdvice=${a.id}`} className="shrink-0 text-[11px] text-muted hover:text-orange-700 underline">
+                        {a.foodAdvice || a.coachSuggestion ? "Edit advice" : "+ Advice"}
+                      </Link>
                     )}
-                  </Link>
-                  <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 ${meta.cls}`}>{meta.label}</span>
+                  </div>
+                  {/* Read-only display of existing advice when NOT editing — gives
+                      coach the same view of food/coach guidance the athlete sees. */}
+                  {!editingThis && (a.coachSuggestion || a.foodAdvice) && (
+                    <div className="px-4 pb-2.5 -mt-1 space-y-1">
+                      {a.coachSuggestion && <div className="text-[11px] rounded-lg bg-orange-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-orange-700">Coach</span> · {a.coachSuggestion}</div>}
+                      {a.foodAdvice && <div className="text-[11px] rounded-lg bg-emerald-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-emerald-700">Food</span> · {a.foodAdvice}</div>}
+                    </div>
+                  )}
+                  {isStaff && editingThis && (
+                    <form action={saveAssignmentAdvice} className="px-4 pb-3 space-y-2">
+                      <input type="hidden" name="assignmentId" value={a.id} />
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wide text-muted mb-1">Coach suggestion (athlete sees this on the plan card)</label>
+                        <textarea name="coachSuggestion" rows={2} defaultValue={a.coachSuggestion ?? ""} placeholder="e.g. Focus on smooth pacing; cap at RPE 7" className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wide text-muted mb-1">Food / eating plan</label>
+                        <textarea name="foodAdvice" rows={3} defaultValue={a.foodAdvice ?? ""} placeholder="e.g. Pre (2h before): oats + banana + black coffee. Post (≤30 min): 25 g whey + 50 g rice." className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Link href={`/customers/${id}`} className="px-3 py-1.5 text-xs rounded-lg border border-border">Cancel</Link>
+                        <button type="submit" className="px-4 py-1.5 text-xs rounded-lg bg-foreground text-white font-medium">Save advice</button>
+                      </div>
+                    </form>
+                  )}
                 </div>
               );
             })}
