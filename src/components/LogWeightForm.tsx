@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Scale } from "lucide-react";
+import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 /**
  * Quick body-weight entry. One kg input + an optional note, saves a row in
@@ -22,7 +22,6 @@ export default function LogWeightForm({
   /** Pre-formatted date string (yyyy-mm-dd) so SSR and client agree. */
   latestLoggedAtText: string | null;
 }) {
-  const router = useRouter();
   const [weight, setWeight] = useState(latestKg != null ? String(latestKg) : "");
   const [notes, setNotes] = useState("");
   const [pending, startPending] = useTransition();
@@ -41,8 +40,7 @@ export default function LogWeightForm({
     if (notes.trim()) fd.set("notes", notes.trim());
     startPending(async () => {
       await saveAction(fd);
-      setNotes("");
-      router.refresh();
+      reloadWithFlash(`Weight saved — ${kg} kg`);
     });
   }
 

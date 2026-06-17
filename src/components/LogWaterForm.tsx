@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Droplet } from "lucide-react";
+import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 const QUICK_ML = [250, 500, 750, 1000];
 
@@ -12,7 +12,6 @@ const QUICK_ML = [250, 500, 750, 1000];
  * server action whichever way the value arrives.
  */
 export default function LogWaterForm({ addAction }: { addAction: (formData: FormData) => Promise<void> }) {
-  const router = useRouter();
   const [custom, setCustom] = useState("");
   const [pending, startPending] = useTransition();
 
@@ -22,8 +21,7 @@ export default function LogWaterForm({ addAction }: { addAction: (formData: Form
     fd.set("amountMl", String(amountMl));
     startPending(async () => {
       await addAction(fd);
-      setCustom("");
-      router.refresh();
+      reloadWithFlash(`+${amountMl} ml logged`);
     });
   }
 

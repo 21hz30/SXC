@@ -55,12 +55,17 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
     return (
       <li className="flex items-start gap-3 px-3 py-2.5">
         {checkable ? (
+          // `before:` pseudo-element extends the tappable area to 40×40 (Apple
+          // HIG minimum) without growing the layout box — so neighbouring
+          // content (title text 12 px away under `gap-3`) doesn't get pulled
+          // into the tap zone. `touch-manipulation` skips the 300 ms tap
+          // delay iOS adds to small interactive targets.
           <button
             type="button"
             onClick={() => it.id && toggle(it.id)}
             aria-pressed={isChecked}
             aria-label={isChecked ? "Mark exercise not done" : "Mark exercise done"}
-            className={`mt-px shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition ${isChecked ? "bg-emerald-500 border-emerald-500 text-white" : "border-border bg-white text-transparent hover:border-emerald-400"}`}
+            className={`relative shrink-0 mt-px w-5 h-5 rounded-md border flex items-center justify-center transition touch-manipulation before:absolute before:-inset-2.5 before:content-[''] ${isChecked ? "bg-emerald-500 border-emerald-500 text-white" : "border-border bg-white text-transparent hover:border-emerald-400"}`}
           >
             <Check size={13} />
           </button>
@@ -103,14 +108,14 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
           // Group row — nested card with brace header + "Group total: mm:ss".
           return (
             <li key={row.key} className="px-3 py-2.5">
-              <div className="rounded-lg border border-accent/30 bg-card overflow-hidden">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-accent/5 border-b border-border">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-accent/10 text-accent px-2 py-0.5">
+              <div className="rounded-lg border border-orange-300 bg-card overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border-b border-border">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-orange-100 text-orange-700 px-2 py-0.5">
                     <LinkIcon size={10} /> Group
                   </span>
                   <span className="text-xs font-semibold tabular-nums">
                     Group total: {fmtTotal(row.totalSec)}
-                    {row.rounds && row.rounds > 1 && <span className="text-accent ml-1">× {row.rounds}</span>}
+                    {row.rounds && row.rounds > 1 && <span className="text-orange-700 ml-1">× {row.rounds}</span>}
                   </span>
                   <span className="text-[11px] text-muted ml-auto">{row.items.length} exercises</span>
                 </div>

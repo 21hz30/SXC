@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Save } from "lucide-react";
+import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 /**
  * Quick body-stats editor on the nutrition page. The athlete tweaks any of
@@ -17,14 +17,12 @@ export default function BodyStatsForm({
   initial: { weightKg: number | null; heightCm: number | null; age: number | null; gender: string | null };
   saveAction: (formData: FormData) => Promise<void>;
 }) {
-  const router = useRouter();
   const [weight, setWeight] = useState(initial.weightKg != null ? String(initial.weightKg) : "");
   const [height, setHeight] = useState(initial.heightCm != null ? String(initial.heightCm) : "");
   const [age, setAge] = useState(initial.age != null ? String(initial.age) : "");
   const [gender, setGender] = useState(initial.gender ?? "");
   const [pending, startPending] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,9 +34,7 @@ export default function BodyStatsForm({
     fd.set("gender", gender);
     startPending(async () => {
       await saveAction(fd);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
-      router.refresh();
+      reloadWithFlash("Body stats saved · targets updated");
     });
   }
 
@@ -71,7 +67,6 @@ export default function BodyStatsForm({
       </div>
       {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <div className="flex items-center justify-end gap-2">
-        {saved && <span className="text-[11px] text-emerald-700">Saved · targets updated</span>}
         <button
           type="submit"
           disabled={pending}

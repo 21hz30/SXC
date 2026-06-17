@@ -128,7 +128,9 @@ export default function TodoList({ todos: initial }: { todos: TodoItem[] }) {
                   setTodos((cur) => cur.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
                   callAction("toggle", { id: t.id });
                 }}
-                className="w-5 h-5 rounded-md border-2 border-border hover:border-accent flex items-center justify-center shrink-0"
+                // Pseudo-element extends the tap target to 40×40 without
+                // growing the layout box — see PlanExerciseChecklist for rationale.
+                className="relative w-5 h-5 rounded-md border-2 border-border hover:border-orange-500 shrink-0 touch-manipulation before:absolute before:-inset-2.5 before:content-['']"
                 aria-label="Toggle"
               />
               <div className="flex-1 min-w-0">
@@ -170,7 +172,9 @@ export default function TodoList({ todos: initial }: { todos: TodoItem[] }) {
                     setTodos((cur) => cur.map((x) => (x.id === t.id ? { ...x, done: false } : x)));
                     callAction("toggle", { id: t.id });
                   }}
-                  className="w-5 h-5 rounded-md bg-emerald-500 border-2 border-emerald-500 flex items-center justify-center shrink-0 text-white"
+                  // Pseudo-element extends tap area to 40×40 — see PlanExerciseChecklist.
+                  className="relative w-5 h-5 rounded-md bg-emerald-500 border-2 border-emerald-500 flex items-center justify-center shrink-0 text-white touch-manipulation before:absolute before:-inset-2.5 before:content-['']"
+                  aria-label="Untoggle"
                 >
                   <Check size={12} />
                 </button>

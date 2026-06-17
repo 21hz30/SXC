@@ -121,7 +121,7 @@ export default function RaceTab({
             <button
               key={div}
               onClick={() => { setFilterDivision(div); setSelectedRaceId(races.find((r) => r.division === div)?.id ?? null); }}
-              className={`rounded-xl border px-4 py-2.5 text-left transition ${filterDivision === div ? "border-accent bg-accent/5" : "border-border bg-card hover:border-accent"}`}
+              className={`rounded-xl border px-4 py-2.5 text-left transition ${filterDivision === div ? "border-accent bg-orange-50" : "border-border bg-card hover:border-accent"}`}
             >
               <div className="text-[11px] text-muted uppercase tracking-wide">{divisionLabel(div)}</div>
               <div className="text-lg font-semibold tabular-nums">{formatSec(sec)}</div>
@@ -161,11 +161,11 @@ export default function RaceTab({
                   <tr
                     key={r.id}
                     onClick={() => setSelectedRaceId(r.id)}
-                    className={`cursor-pointer ${isSelected ? "bg-accent/5" : "hover:bg-background"}`}
+                    className={`cursor-pointer ${isSelected ? "bg-orange-50" : "hover:bg-background"}`}
                   >
                     <td className="px-4 py-2.5 font-medium">
                       {r.eventName}
-                      {isPb && <span className="ml-2 text-[10px] font-semibold text-accent bg-accent/10 rounded px-1.5 py-0.5">PB</span>}
+                      {isPb && <span className="ml-2 text-[10px] font-semibold text-orange-700 bg-orange-100 rounded px-1.5 py-0.5">PB</span>}
                     </td>
                     <td className="px-3 py-2.5 text-muted">{new Date(r.eventDate).toLocaleDateString()}</td>
                     <td className="px-3 py-2.5 capitalize">{divisionLabel(r.division)}</td>

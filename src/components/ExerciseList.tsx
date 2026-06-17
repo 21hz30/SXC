@@ -87,14 +87,14 @@ export default function ExerciseList({ items }: { items: ExerciseItem[] }) {
           // shared total-time header.
           return (
             <li key={row.key} className="px-3 py-2.5">
-              <div className="rounded-lg border border-accent/30 bg-card overflow-hidden">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-accent/5 border-b border-border">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-accent/10 text-accent px-2 py-0.5">
+              <div className="rounded-lg border border-orange-300 bg-card overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border-b border-border">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-orange-100 text-orange-700 px-2 py-0.5">
                     <Link size={10} /> Group
                   </span>
                   <span className="text-xs font-semibold tabular-nums">
                     Group total: {fmtTotal(row.totalSec)}
-                    {row.rounds && row.rounds > 1 && <span className="text-accent ml-1">× {row.rounds}</span>}
+                    {row.rounds && row.rounds > 1 && <span className="text-orange-700 ml-1">× {row.rounds}</span>}
                   </span>
                   <span className="text-[11px] text-muted ml-auto">{row.items.length} exercises</span>
                 </div>

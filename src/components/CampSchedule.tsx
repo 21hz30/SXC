@@ -105,7 +105,7 @@ export default function CampSchedule({
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {showDetail ? (
-                          <Link href={`/classes/${c.id}`} className="text-sm font-semibold hover:text-accent">{c.title}</Link>
+                          <Link href={`/classes/${c.id}`} className="text-sm font-semibold hover:text-orange-700">{c.title}</Link>
                         ) : (
                           <span className="text-sm font-semibold">{c.title}</span>
                         )}
@@ -128,7 +128,7 @@ export default function CampSchedule({
                       {showDetail && (
                         <Link
                           href={`/classes/${c.id}`}
-                          className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-orange-700"
                         >
                           Detail <ArrowRight size={12} />
                         </Link>
@@ -153,10 +153,10 @@ export default function CampSchedule({
                   ) : (
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {c.workouts.map((w) => (
-                        <span key={w.id} className="inline-flex items-center gap-1 text-xs bg-accent/10 text-accent rounded-full pl-2.5 pr-1 py-0.5">
+                        <span key={w.id} className="inline-flex items-center gap-1 text-xs bg-orange-100 text-orange-700 rounded-full pl-2.5 pr-1 py-0.5">
                           {w.name}
                           {canEdit && (
-                            <button onClick={() => removeWorkout(c.id, w.id)} className="hover:bg-accent/20 rounded-full p-0.5" title="Remove">
+                            <button onClick={() => removeWorkout(c.id, w.id)} className="hover:bg-orange-200 rounded-full p-0.5" title="Remove">
                               <X size={10} />
                             </button>
                           )}

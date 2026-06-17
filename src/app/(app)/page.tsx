@@ -375,7 +375,7 @@ export default async function Dashboard() {
             <div className="mt-2 flex items-start gap-3">
               <Link href={`/classes/${nextClass.id}`} className="min-w-0 flex-1 group">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-lg font-semibold leading-tight truncate group-hover:text-accent">{nextClass.title}</span>
+                  <span className="text-lg font-semibold leading-tight truncate group-hover:text-orange-700">{nextClass.title}</span>
                   {divisionMeta(nextClass.camp?.division) && (
                     <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${divisionMeta(nextClass.camp?.division)!.cls}`}>
                       {divisionMeta(nextClass.camp?.division)!.label}
@@ -446,9 +446,9 @@ export default async function Dashboard() {
             {pendingApplications.map((m) => (
               <li key={m.id} className="flex items-center justify-between gap-3 py-2">
                 <div className="min-w-0">
-                  <Link href={`/customers/${m.customerId}`} className="text-sm font-medium hover:text-accent">{m.customer.name}</Link>
+                  <Link href={`/customers/${m.customerId}`} className="text-sm font-medium hover:text-orange-700">{m.customer.name}</Link>
                   <div className="text-xs text-muted">
-                    applied to <Link href={`/camps/${m.campId}`} className="font-medium hover:text-accent">{m.camp.name}</Link>
+                    applied to <Link href={`/camps/${m.campId}`} className="font-medium hover:text-orange-700">{m.camp.name}</Link>
                     <span className="mx-1">·</span>{formatDate(m.joinedAt)}
                   </div>
                 </div>
@@ -509,7 +509,7 @@ export default async function Dashboard() {
                               <li key={a.id} id={`plan-${a.id}`} className={`scroll-mt-20 bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold">{a.workout.name}</span>
-                                  {a.camp && <span className="text-[11px] text-accent">· {a.camp.name}</span>}
+                                  {a.camp && <span className="text-[11px] text-orange-700">· {a.camp.name}</span>}
                                   {done && <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">done</span>}
                                 </div>
 
@@ -517,7 +517,7 @@ export default async function Dashboard() {
 
                                 {(a.coachSuggestion || a.foodAdvice) && (
                                   <div className="mt-3 space-y-1">
-                                    {a.coachSuggestion && <div className="text-xs rounded-lg bg-accent/5 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-accent">Coach</span> · {a.coachSuggestion}</div>}
+                                    {a.coachSuggestion && <div className="text-xs rounded-lg bg-orange-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-orange-700">Coach</span> · {a.coachSuggestion}</div>}
                                     {a.foodAdvice && <div className="text-xs rounded-lg bg-emerald-50 px-2.5 py-1.5 leading-snug"><span className="font-semibold text-emerald-700">Food</span> · {a.foodAdvice}</div>}
                                   </div>
                                 )}
@@ -577,7 +577,7 @@ export default async function Dashboard() {
                             <div className="flex items-baseline gap-2 flex-wrap min-w-0">
                               <span className="text-sm font-medium">Coming up</span>
                               <span className="text-xs text-muted">{futureItems} workout{futureItems === 1 ? "" : "s"} · {futureGroups.length} day{futureGroups.length === 1 ? "" : "s"}</span>
-                              {futureTodo > 0 && <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-accent/10 text-accent">{futureTodo} to do</span>}
+                              {futureTodo > 0 && <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-orange-100 text-orange-700">{futureTodo} to do</span>}
                             </div>
                             <ChevronDown size={14} className="text-muted shrink-0 transition group-open:rotate-180" />
                           </summary>
@@ -622,7 +622,7 @@ export default async function Dashboard() {
                       <div className="text-sm font-medium truncate">{r.class.title}</div>
                       <div className="text-xs text-muted">
                         {formatDate(r.class.startsAt)}
-                        {r.class.feedbackRequestedAt && <span className="ml-2 text-accent">· requested by your coach</span>}
+                        {r.class.feedbackRequestedAt && <span className="ml-2 text-orange-700">· requested by your coach</span>}
                       </div>
                     </div>
                     <Link href={`/classes/${r.class.id}`} className="shrink-0 rounded-lg bg-foreground text-white px-3 py-1.5 text-xs font-medium hover:opacity-90">

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Plus } from "lucide-react";
+import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 /**
  * Quick sign-up / drop toggle for a class, usable on any class list (camp
@@ -21,7 +21,6 @@ export default function ClassSignupButton({
   isFull: boolean;
   size?: "sm" | "xs";
 }) {
-  const router = useRouter();
   const [signedUp, setSignedUp] = useState(initialSignedUp);
   const [busy, setBusy] = useState(false);
 
@@ -39,14 +38,17 @@ export default function ClassSignupButton({
       const res = await fetch(`/api/class/${classId}/signup`, { method: signedUp ? "DELETE" : "POST" });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
-        setSignedUp(!!body.signedUp);
-      } else {
-        window.alert(body.message === "class full" ? "Sorry, this class is now full." : "Could not update sign-up.");
+        // Hard reload (with a flash toast) — `router.refresh()`'s RSC
+        // payload doesn't always propagate inside iOS WeChat's WKWebView, so
+        // the spot count + "you're in" state would stay stale until the
+        // user pulled to refresh. We only reload on success — on failure
+        // nothing changed server-side, so we just leave the page alone.
+        reloadWithFlash(body.signedUp ? "Signed up" : "Dropped");
+        return; // navigation pending; skip the busy-reset that won't run anyway
       }
+      window.alert(body.message === "class full" ? "Sorry, this class is now full." : "Could not update sign-up.");
     } finally {
       setBusy(false);
-      // Refresh so spot counts elsewhere update too.
-      router.refresh();
     }
   }
 

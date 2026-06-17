@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Sparkles, Loader2 } from "lucide-react";
+import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 type ParsedFood = {
   description: string;
@@ -20,7 +20,6 @@ type ParsedFood = {
  * blank macros save as null, so logging is still possible if AI is down.
  */
 export default function LogMealForm({ saveAction, initialMealType = "" }: { saveAction: (formData: FormData) => Promise<void>; initialMealType?: string }) {
-  const router = useRouter();
   const [description, setDescription] = useState("");
   const [mealType, setMealType] = useState(initialMealType);
   const [calories, setCalories] = useState("");
@@ -85,14 +84,11 @@ export default function LogMealForm({ saveAction, initialMealType = "" }: { save
     if (aiRaw) fd.set("aiAnalysisJson", aiRaw);
     startSave(async () => {
       await saveAction(fd);
-      // Reset on success — keep the initial meal type (so logging a 2nd
-      // breakfast doesn't have the user re-pick from "—").
-      setDescription("");
-      setMealType(initialMealType);
-      setCalories(""); setProtein(""); setCarbs(""); setFat(""); setFiber("");
-      setNotes("");
-      setAiRaw(null);
-      router.refresh();
+      // Hard reload with a one-off `?flash=` so the global <Toaster> picks
+      // up "Meal saved" as a brief confirmation. Reload is needed because
+      // iOS WeChat's WKWebView caches the RSC payload and `router.refresh()`
+      // wouldn't surface the new meal in today's log.
+      reloadWithFlash("Meal saved");
     });
   }
 
@@ -128,7 +124,12 @@ export default function LogMealForm({ saveAction, initialMealType = "" }: { save
             type="button"
             onClick={estimate}
             disabled={estimating || !description.trim()}
-            className="w-full rounded-lg border border-accent/40 bg-accent/5 hover:bg-accent/10 text-accent px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-40"
+            // iOS WeChat WKWebView (pre-iOS 16.4) doesn't render Tailwind v4's
+            // `color-mix(in oklab, …)` output that backs `bg-accent/5`, so the
+            // button rendered as a solid orange block with invisible text on
+            // older devices. Switched to fixed Tailwind orange palette so the
+            // compiled CSS is plain sRGB rgba().
+            className="w-full rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-40"
           >
             {estimating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             {estimating ? "Estimating…" : "Estimate with AI"}

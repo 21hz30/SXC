@@ -53,9 +53,9 @@ export default function TagCombobox({
         onClick={() => inputRef.current?.focus()}
       >
         {value.map((t) => (
-          <span key={t} className="inline-flex items-center gap-1 text-xs bg-accent/10 text-accent rounded-full pl-2.5 pr-1 py-1">
+          <span key={t} className="inline-flex items-center gap-1 text-xs bg-orange-100 text-orange-700 rounded-full pl-2.5 pr-1 py-1">
             {t}
-            <button type="button" onClick={() => remove(t)} className="hover:bg-accent/20 rounded-full p-0.5"><X size={10} /></button>
+            <button type="button" onClick={() => remove(t)} className="hover:bg-orange-200 rounded-full p-0.5"><X size={10} /></button>
           </span>
         ))}
         <input
@@ -79,7 +79,7 @@ export default function TagCombobox({
             <button key={s} type="button" onMouseDown={(e) => { e.preventDefault(); add(s); }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-background">{s}</button>
           ))}
           {showCreate && (
-            <button type="button" onMouseDown={(e) => { e.preventDefault(); add(text); }} className="block w-full text-left px-3 py-1.5 text-sm text-accent hover:bg-background">+ Create &ldquo;{text.trim()}&rdquo;</button>
+            <button type="button" onMouseDown={(e) => { e.preventDefault(); add(text); }} className="block w-full text-left px-3 py-1.5 text-sm text-orange-700 hover:bg-background">+ Create &ldquo;{text.trim()}&rdquo;</button>
           )}
         </div>
       )}
