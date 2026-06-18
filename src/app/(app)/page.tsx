@@ -4,11 +4,12 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, requireStaff, getMyCustomerId } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
-import { Calendar, ChevronDown, Dumbbell, KeyRound, Tent } from "lucide-react";
+import { Calendar, ChevronDown, Dumbbell, KeyRound, Tent, UserPlus } from "lucide-react";
 import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
 import { backfillCampPlan } from "@/domain/camps";
+import { decideConnection } from "@/domain/coachConnections";
 import ExerciseList from "@/components/ExerciseList";
 import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
 import TodayNutrition from "@/components/TodayNutrition";
@@ -23,7 +24,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode] = await Promise.all([
+  const [todayClasses, upcomingClasses, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode, pendingConnections] = await Promise.all([
     // Coach-only views: today's roster, next 7 days, recent customer activity.
     // Athletes don't render any of these, so we skip the queries entirely
     // (saves ~3 round-trips per athlete dashboard load).
@@ -144,6 +145,19 @@ export default async function Dashboard() {
     user.role === "coach"
       ? db.user.findUnique({ where: { id: user.id }, select: { invitationCode: true } }).then((u) => u?.invitationCode ?? null)
       : Promise.resolve(null),
+    // Athletes who pasted this coach's invitation code and are waiting to be
+    // approved (#31). A coach sees only their own inbox; an admin sees every
+    // tenant's pending requests (with the target coach named) so nothing stalls.
+    isStaff
+      ? db.customerCoach.findMany({
+          where: { status: "pending", ...(user.role === "coach" ? { coachUserId: user.id } : {}) },
+          orderBy: { requestedAt: "asc" },
+          include: {
+            customer: { select: { id: true, name: true } },
+            coach: { select: { id: true, name: true } },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
@@ -344,6 +358,24 @@ export default async function Dashboard() {
     redirect(flashUrl("/", "Application rejected"));
   }
 
+  // Staff approve / decline an athlete's connection request (#31). The rules
+  // (ownership, pending-only, active-vs-delete) live in decideConnection.
+  async function approveConnection(formData: FormData) {
+    "use server";
+    const actor = await requireStaff();
+    const res = await decideConnection(actor, String(formData.get("connId") ?? ""), "approve");
+    revalidatePath("/");
+    if (res.ok) revalidatePath("/customers");
+    redirect(flashUrl("/", res.message));
+  }
+  async function rejectConnection(formData: FormData) {
+    "use server";
+    const actor = await requireStaff();
+    const res = await decideConnection(actor, String(formData.get("connId") ?? ""), "decline");
+    revalidatePath("/");
+    redirect(flashUrl("/", res.message));
+  }
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <header className="mb-8">
@@ -462,6 +494,43 @@ export default async function Dashboard() {
                   <form action={rejectApplication}>
                     <input type="hidden" name="memberId" value={m.id} />
                     <ConfirmSubmit message={`Reject ${m.customer.name}'s application to ${m.camp.name}?`} className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:text-red-600 hover:bg-amber-100">Reject</ConfirmSubmit>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Athletes who entered this coach's invitation code, awaiting approval
+          (#31). Sky-tinted to set it apart from the amber camp applications. */}
+      {isStaff && pendingConnections.length > 0 && (
+        <div className="mb-8 bg-sky-50 border border-sky-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <UserPlus size={16} className="text-sky-600 shrink-0" />
+            <h2 className="text-sm font-semibold text-sky-900">
+              {pendingConnections.length} athlete{pendingConnections.length === 1 ? "" : "s"} want{pendingConnections.length === 1 ? "s" : ""} to connect
+            </h2>
+          </div>
+          <ul className="divide-y divide-sky-200">
+            {pendingConnections.map((conn) => (
+              <li key={conn.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <Link href={`/customers/${conn.customerId}`} className="text-sm font-medium hover:text-orange-700">{conn.customer.name}</Link>
+                  <div className="text-xs text-muted">
+                    {/* Coaches know it's them; admins need the target coach named. */}
+                    {user.role === "admin" ? <>wants <span className="font-medium">{conn.coach.name}</span> as their coach</> : "wants you as their coach"}
+                    <span className="mx-1">·</span>{formatDate(conn.requestedAt)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <form action={approveConnection}>
+                    <input type="hidden" name="connId" value={conn.id} />
+                    <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium hover:opacity-90">Approve</button>
+                  </form>
+                  <form action={rejectConnection}>
+                    <input type="hidden" name="connId" value={conn.id} />
+                    <ConfirmSubmit message={`Decline ${conn.customer.name}'s request to connect?`} className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:text-red-600 hover:bg-sky-100">Decline</ConfirmSubmit>
                   </form>
                 </div>
               </li>

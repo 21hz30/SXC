@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireStaff, requireUser , getMyCustomerId } from "@/lib/auth";
+import { campScope } from "@/lib/access";
 import { formatDate } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { flashUrl } from "@/lib/flash";
@@ -13,11 +14,13 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
   const user = await requireUser();
   const isStaff = user.role === "admin" || user.role === "coach";
   const { new: isNew } = await searchParams;
-  // Everyone sees all camps (staff share them; customers browse to apply).
+  // Staff see the camps they own (admin = all); customers still browse EVERY
+  // camp so they can discover and apply (their membership badge is added below).
   // Camps, the coach list (admin), and the customer's memberships in parallel.
   const myCustomerId = isStaff ? null : await getMyCustomerId();
   const [camps, coaches, myMemberships] = await Promise.all([
     db.camp.findMany({
+      where: isStaff ? campScope(user) : {},
       orderBy: { startDate: "desc" },
       include: { members: true, classes: true, coach: true, createdBy: true },
     }),

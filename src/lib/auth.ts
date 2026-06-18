@@ -9,7 +9,10 @@ const COOKIE = "sxc_session";
 export const SESSION_COOKIE = COOKIE;
 
 export type Role = "admin" | "coach" | "customer";
-export type SessionUser = { id: string; username: string; name: string; role: Role };
+// `tenantId` is the coach's team (null for admins — they're cross-tenant — and
+// for customers, who are app-wide). It drives multi-tenant query scoping in
+// `lib/access.ts`, so it travels on every session user.
+export type SessionUser = { id: string; username: string; name: string; role: Role; tenantId: string | null };
 
 function sign(value: string): string {
   const secret = process.env.SESSION_SECRET ?? "dev-secret";
@@ -46,7 +49,7 @@ export const getAccount = cache(async function getAccount(): Promise<Account | n
   if (!userId) return null;
   const u = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, name: true, role: true, customerId: true, customer: { select: { onboardedAt: true } } },
+    select: { id: true, username: true, name: true, role: true, tenantId: true, customerId: true, customer: { select: { onboardedAt: true } } },
   });
   if (!u) return null;
   return {
@@ -54,6 +57,7 @@ export const getAccount = cache(async function getAccount(): Promise<Account | n
     username: u.username,
     name: u.name,
     role: u.role as Role,
+    tenantId: u.tenantId,
     customerId: u.customerId,
     onboardedAt: u.customer?.onboardedAt ?? null,
   };
@@ -61,7 +65,7 @@ export const getAccount = cache(async function getAccount(): Promise<Account | n
 
 export async function getSessionUser(): Promise<SessionUser | null> {
   const a = await getAccount();
-  return a ? { id: a.id, username: a.username, name: a.name, role: a.role } : null;
+  return a ? { id: a.id, username: a.username, name: a.name, role: a.role, tenantId: a.tenantId } : null;
 }
 
 /** The signed-in user's linked customer id (cached). */
@@ -121,7 +125,7 @@ export async function login(username: string, password: string): Promise<Session
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
-  return { id: u.id, username: u.username, name: u.name, role: u.role as Role };
+  return { id: u.id, username: u.username, name: u.name, role: u.role as Role, tenantId: u.tenantId };
 }
 
 export async function clearSession() {

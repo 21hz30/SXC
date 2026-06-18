@@ -10,6 +10,7 @@ import { requireCoach } from "@/lib/auth";
 import { customerScope } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
 import { createAccount, AccountError } from "@/domain/accounts";
+import { addCoachAddedConnection } from "@/domain/coachConnections";
 import AccountForm from "@/components/AccountForm";
 import TagCombobox from "@/components/TagCombobox";
 import CustomerList, { type CustItem } from "@/components/CustomerList";
@@ -41,9 +42,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     db.customer.findMany({
       // Non-staff customers, PLUS any staff who joined a camp as a participant
       // (an admin can coach one camp yet be a member of another) — badged below.
+      // AND-combined (not spread) because customerScope can itself return an
+      // `OR` for coaches; spreading two `OR` keys would clobber the scope.
       where: {
-        ...customerScope(user),
-        OR: [{ userAccount: null }, { userAccount: { role: "customer" } }, { campMembers: { some: {} } }],
+        AND: [
+          customerScope(user),
+          { OR: [{ userAccount: null }, { userAccount: { role: "customer" } }, { campMembers: { some: {} } }] },
+        ],
       },
       orderBy: { name: "asc" },
       include: { rosterEntries: true, campMembers: { select: { campId: true } }, userAccount: { select: { role: true } } },
@@ -121,7 +126,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
 
   async function createCustomer(formData: FormData) {
     "use server";
-    await requireCoach();
+    const actor = await requireCoach();
     const name = String(formData.get("name") ?? "").trim();
     if (!name) redirect("/customers?new=1&error=name");
     const email = String(formData.get("email") ?? "").trim() || null;
@@ -164,6 +169,10 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       if (e instanceof AccountError) redirect("/customers?new=1&error=dupuser");
       throw e;
     }
+    // A COACH who adds an athlete is immediately connected to them — otherwise
+    // multi-tenant scoping would hide the athlete they just created. Admins see
+    // every customer, so they need no link.
+    if (actor.role === "coach") await addCoachAddedConnection(c.id, actor.id);
     revalidatePath("/customers");
     redirect(flashUrl(`/customers/${c.id}`, `${c.name} added with login “${username}”`));
   }

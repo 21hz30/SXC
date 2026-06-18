@@ -8,6 +8,7 @@ import { categoryLabel } from "@/domain/exercises";
 import { cloneWorkout } from "@/domain/workouts";
 import { WORKOUT_TYPES, workoutTypeMeta } from "@/lib/workoutTypes";
 import { getMyCustomerId, requireUser } from "@/lib/auth";
+import { workoutScope } from "@/lib/access";
 import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +18,11 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
   const isStaff = user.role === "admin" || user.role === "coach";
   const { new: isNew, type: typeFilter } = await searchParams;
 
-  // Staff see the whole shared library. A customer sees ONLY workouts they
-  // built for themselves — the coach library is not shared with athletes.
+  // Staff see their tenant's shared library (admin = every tenant's). A customer
+  // sees ONLY workouts they built for themselves — the coach library is not
+  // shared with athletes.
   const myCustomerId = isStaff ? null : await getMyCustomerId();
-  const where = isStaff ? { ownerCustomerId: null } : { ownerCustomerId: myCustomerId };
+  const where = isStaff ? workoutScope(user) : { ownerCustomerId: myCustomerId };
 
   const workouts = await db.workout.findMany({
     where,
@@ -62,7 +64,15 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
       if (!ownerCustomerId) redirect("/profile");
     }
     const w = await db.workout.create({
-      data: { name, description: String(formData.get("description") ?? "").trim() || null, type: String(formData.get("type") ?? "").trim() || null, ownerCustomerId },
+      data: {
+        name,
+        description: String(formData.get("description") ?? "").trim() || null,
+        type: String(formData.get("type") ?? "").trim() || null,
+        ownerCustomerId,
+        // Staff workouts join their tenant's shared library (visible to other
+        // coaches in the same tenant); athlete-private workouts stay untenanted.
+        ...(ownerCustomerId ? {} : { tenantId: u.tenantId, createdByUserId: u.id, visibility: "team" }),
+      },
     });
     revalidatePath("/workouts");
     redirect(`/workouts/${w.id}`);
@@ -75,10 +85,16 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
     const u = await requireUser();
     const workoutId = String(formData.get("workoutId") ?? "");
     if (!workoutId) redirect("/workouts");
-    const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true } });
+    const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true, tenantId: true } });
     const staff = u.role === "admin" || u.role === "coach";
     const mine = staff ? null : await getMyCustomerId();
-    const ok = w && (staff ? w.ownerCustomerId === null : w.ownerCustomerId === mine);
+    // Staff duplicate a library workout (a coach only within their own tenant;
+    // an admin across any). A customer duplicates only their own private one.
+    const ok = w && (
+      staff
+        ? w.ownerCustomerId === null && (u.role === "admin" || w.tenantId === u.tenantId)
+        : w.ownerCustomerId === mine
+    );
     if (!ok) redirect("/workouts");
     const copy = await cloneWorkout({ user: u }, workoutId);
     revalidatePath("/workouts");

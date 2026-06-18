@@ -4,16 +4,21 @@ import Image from "next/image";
 import { cookies } from "next/headers";
 import { getSessionUser, makeToken, SESSION_COOKIE } from "@/lib/auth";
 import { createAccount, AccountError } from "@/domain/accounts";
+import { findCoachByCode, connectByCode } from "@/domain/coachConnections";
 import PasswordInput from "@/components/PasswordInput";
 import srcLogo from "@/assets/brand/src-logo.png";
 
 export default async function RegisterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; code?: string }>;
 }) {
   if (await getSessionUser()) redirect("/");
-  const { error } = await searchParams;
+  const { error, code: codeParam } = await searchParams;
+  // A coach shares /register?code=SRC-TAY-XXXX — pre-fill (and keep) the code
+  // so the athlete doesn't have to type it. Uppercased to match how codes are
+  // minted and looked up.
+  const presetCode = (codeParam ?? "").trim().toUpperCase();
 
   async function doRegister(formData: FormData) {
     "use server";
@@ -21,25 +26,42 @@ export default async function RegisterPage({
     const password = String(formData.get("password") ?? "");
     const name = String(formData.get("name") ?? "").trim() || username;
     const email = String(formData.get("email") ?? "").trim() || null;
+    const code = String(formData.get("code") ?? "").trim().toUpperCase();
+    // Preserve the entered code across validation bounces so it isn't lost.
+    const codeQS = code ? `&code=${encodeURIComponent(code)}` : "";
 
     // Username: this is the LOGIN name. English letters and numbers only —
     // no spaces or special characters — so it's safe and easy to type.
-    if (!/^[a-z0-9]{3,}$/.test(username)) redirect("/register?error=username");
+    if (!/^[a-z0-9]{3,}$/.test(username)) redirect(`/register?error=username${codeQS}`);
     // Password rules: 8+ chars, at least one letter and one number.
     const passwordOk =
       password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
-    if (!passwordOk) redirect("/register?error=invalid");
+    if (!passwordOk) redirect(`/register?error=invalid${codeQS}`);
+
+    // Hard-gated onboarding: every new athlete must arrive through a coach's
+    // invitation code, so they land tied to a real coach/tenant (not floating
+    // in an empty app). Validate the code BEFORE creating the account so a bad
+    // code never leaves an orphan login behind.
+    if (!code) redirect(`/register?error=nocode${codeQS}`);
+    if (!(await findCoachByCode(code))) redirect(`/register?error=badcode${codeQS}`);
 
     // Public sign-up creates an athlete (customer) account: a login + a linked
     // profile. Staff accounts are created by an admin from the Team page.
     let userId: string;
+    let customerId: string;
     try {
       const res = await createAccount({ username, password, name, email, role: "customer" });
       userId = res.userId;
+      customerId = res.customerId;
     } catch (e) {
-      if (e instanceof AccountError) redirect("/register?error=taken");
+      if (e instanceof AccountError) redirect(`/register?error=taken${codeQS}`);
       throw e;
     }
+
+    // Tie the new athlete to the coach as a PENDING request — the coach approves
+    // it from their dashboard inbox (#31). Same path as the profile's connect-
+    // by-code; for a brand-new customer it always succeeds.
+    await connectByCode(customerId, code);
 
     // Auto-login, then land on the profile where onboarding pops up.
     const jar = await cookies();
@@ -58,6 +80,10 @@ export default async function RegisterPage({
     ? "Username must be English letters and numbers only (at least 3, no spaces or symbols)."
     : error === "invalid"
     ? "Password must be at least 8 characters and include a letter and a number."
+    : error === "nocode"
+    ? "Enter your coach's invitation code to join. Ask your coach for it."
+    : error === "badcode"
+    ? "That invitation code didn't match any coach. Double-check it with your coach."
     : null;
 
   return (
@@ -67,6 +93,22 @@ export default async function RegisterPage({
           <Image src={srcLogo} alt="SRC by Peoplearth" width={112} height={112} priority />
           <div className="text-sm text-muted mt-2">Create your athlete account</div>
         </div>
+
+        <label className="block text-sm font-medium mb-1.5">
+          Coach invitation code <span className="text-accent font-semibold">· required to join</span>
+        </label>
+        <input
+          name="code"
+          defaultValue={presetCode}
+          required
+          autoCapitalize="characters"
+          spellCheck={false}
+          placeholder="e.g. SRC-TAY-9X3K"
+          className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base font-mono tracking-wider uppercase outline-none focus:border-accent"
+        />
+        <p className="mt-1.5 mb-3 text-xs text-muted leading-snug">
+          Ask your coach for their code. You&apos;ll appear in their dashboard for approval right after signing up.
+        </p>
 
         <label className="block text-sm font-medium mb-1.5">
           Username <span className="text-accent font-semibold">· your login name</span>

@@ -1,14 +1,18 @@
 /**
- * Role-based access helpers.
+ * Role-based access helpers (multi-tenant).
  *
- * Three roles today:
- *   - admin    → sees everything
- *   - coach    → sees only their own camps + customers in those camps
- *   - customer → sees only themselves (UI not built yet)
+ * Three roles:
+ *   - admin    → cross-tenant superuser; sees everything
+ *   - coach    → scoped to their OWN tenant/ownership: their tenant's workout
+ *                library, the camps they run, the customers connected to them,
+ *                and the classes in their camps. A coach in tenant A never sees
+ *                tenant B's data (and vice-versa).
+ *   - customer → sees only their own world (their profile, their camps, the
+ *                classes in those camps + drop-ins they can apply to).
  *
  * The pattern is to return a Prisma `where` clause from each scope helper.
  * Pages spread that clause into their query: `where: { ...campScope(user), ... }`.
- * Admin gets `{}` (no constraint), so queries are unchanged.
+ * Admin gets `{}` (no constraint), so admin queries are unchanged.
  *
  * This keeps the access rules in ONE place; pages just import & spread.
  */
@@ -20,23 +24,47 @@ export function isAdmin(u: SessionUser): boolean { return u.role === "admin"; }
 export function isCoach(u: SessionUser): boolean { return u.role === "coach"; }
 export function isCustomer(u: SessionUser): boolean { return u.role === "customer"; }
 
-// Staff (admin + coach) share one workspace: every coach and admin sees all
-// camps, customers, classes and workouts. Only customers are scoped to their
-// own world. `isStaff` centralises that rule.
-function isStaff(u: SessionUser): boolean {
-  return u.role === "admin" || u.role === "coach";
+/**
+ * Workout-library `where` filter (the shared, non-private side — callers still
+ * pair this with `ownerCustomerId: null`). Admin = every tenant's library;
+ * coach = only their own tenant's. A tenant-less coach (shouldn't happen post
+ * backfill) matches nothing rather than leaking another team's workouts.
+ */
+export function workoutScope(u: SessionUser): Record<string, unknown> {
+  if (isAdmin(u)) return { ownerCustomerId: null };
+  if (u.role === "coach") return { ownerCustomerId: null, tenantId: u.tenantId ?? "__none__" };
+  return { id: "__none__" };
 }
 
-/** Camp `where` filter: staff = all, customer = camps they're a member of. */
+/**
+ * Camp `where` filter.
+ *   admin    → all camps
+ *   coach    → camps they coach or created
+ *   customer → camps they're a member of (used where a customer manages, NOT
+ *              where they browse-to-apply — that view stays unscoped on purpose)
+ */
 export function campScope(u: SessionUser): Record<string, unknown> {
-  if (isStaff(u)) return {};
+  if (isAdmin(u)) return {};
+  if (u.role === "coach") return { OR: [{ coachId: u.id }, { createdById: u.id }] };
   if (u.role === "customer") return { members: { some: { customer: { userAccount: { id: u.id } } } } };
   return { id: "__none__" }; // unknown role → nothing
 }
 
-/** Customer `where` filter: staff = all, customer = self. */
+/**
+ * Customer `where` filter.
+ *   admin    → all customers
+ *   coach    → customers connected to them (active) OR in a camp they run
+ *   customer → self
+ */
 export function customerScope(u: SessionUser): Record<string, unknown> {
-  if (isStaff(u)) return {};
+  if (isAdmin(u)) return {};
+  if (u.role === "coach")
+    return {
+      OR: [
+        { coachConnections: { some: { coachUserId: u.id, status: "active" } } },
+        { campMembers: { some: { camp: { coachId: u.id } } } },
+      ],
+    };
   if (u.role === "customer") return { userAccount: { id: u.id } };
   return { id: "__none__" };
 }
@@ -51,11 +79,23 @@ export function nonStaffCustomerWhere(): Record<string, unknown> {
   return { OR: [{ userAccount: null }, { userAccount: { role: "customer" } }] };
 }
 
-/** Class `where` filter: staff = all, customer = classes in their camps. */
+/**
+ * Class `where` filter.
+ *   admin    → all classes
+ *   coach    → classes in a camp they coach/created, or that they created
+ *              directly (standalone classes)
+ *   customer → their camps' classes PLUS any drop-in (to discover & apply)
+ */
 export function classScope(u: SessionUser): Record<string, unknown> {
-  if (isStaff(u)) return {};
-  // A customer sees their own camps' classes PLUS any drop-in class (so they can
-  // discover and apply for sessions outside their camp).
+  if (isAdmin(u)) return {};
+  if (u.role === "coach")
+    return {
+      OR: [
+        { camp: { coachId: u.id } },
+        { camp: { createdById: u.id } },
+        { createdById: u.id },
+      ],
+    };
   if (u.role === "customer")
     return {
       OR: [
@@ -66,19 +106,43 @@ export function classScope(u: SessionUser): Record<string, unknown> {
   return { id: "__none__" };
 }
 
-/** Check if a user can access a specific camp record. */
-export function canAccessCamp(u: SessionUser, camp: { coachId: string | null; id: string }): boolean {
-  if (isStaff(u)) return true;
-  // customer access checked at query level via campScope; this is an extra guard
+/**
+ * Can this user open a specific camp record (direct-URL guard)?
+ *   admin → any; coach → only a camp they coach/created; customer → handled at
+ *   the query level (this returns false for them as an extra guard).
+ * `createdById` is optional because some callers don't load it — the coachId
+ * check still holds.
+ */
+export function canAccessCamp(u: SessionUser, camp: { coachId: string | null; createdById?: string | null; id: string }): boolean {
+  if (isAdmin(u)) return true;
+  if (u.role === "coach") return camp.coachId === u.id || camp.createdById === u.id;
   return false;
 }
 
-/** Check if a user can access a specific customer record. */
+/**
+ * Can this user open a specific customer profile (direct-URL guard)?
+ *   admin → any
+ *   anyone → their OWN linked profile (so a coach/athlete can see themselves)
+ *   coach → an athlete actively connected to them, or in a camp they run
+ *   customer → only self (covered by the own-profile check above)
+ */
 export function canAccessCustomer(
   u: SessionUser,
-  customer: { campMembers: { camp: { coachId: string | null } }[]; userAccount?: { id: string } | null }
+  customer: {
+    campMembers: { camp: { coachId: string | null } }[];
+    coachConnections?: { coachUserId: string; status: string }[];
+    userAccount?: { id: string } | null;
+  }
 ): boolean {
-  if (isStaff(u)) return true;
-  if (u.role === "customer") return customer.userAccount?.id === u.id;
+  if (isAdmin(u)) return true;
+  if (customer.userAccount?.id === u.id) return true; // your own profile, any role
+  if (u.role === "coach")
+    return (
+      // Active connection, OR a pending request the athlete sent to THIS coach
+      // (they entered this coach's code — consent-based, lets the coach vet
+      // them before approving), OR a member of a camp this coach runs.
+      (customer.coachConnections ?? []).some((cc) => cc.coachUserId === u.id && (cc.status === "active" || cc.status === "pending")) ||
+      customer.campMembers.some((cm) => cm.camp.coachId === u.id)
+    );
   return false;
 }

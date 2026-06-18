@@ -226,7 +226,7 @@ export async function adjustClassWorkout(
 
 /** Deep-copy a workout (name + " (copy)", description, tags, all exercises),
  *  preserving its owner. Returns the new workout id. */
-export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: string }> {
+export async function cloneWorkout(ctx: Ctx, workoutId: string): Promise<{ id: string }> {
   const orig = await db.workout.findUnique({
     where: { id: workoutId },
     include: { items: { orderBy: { order: "asc" } } },
@@ -239,6 +239,12 @@ export async function cloneWorkout(_ctx: Ctx, workoutId: string): Promise<{ id: 
       type: orig.type,
       tags: orig.tags,
       ownerCustomerId: orig.ownerCustomerId,
+      // Keep a library clone in the SAME tenant/visibility (so it stays in that
+      // team's library); credit the cloning coach as author. Athlete-private
+      // clones (ownerCustomerId set) stay untenanted with no author.
+      tenantId: orig.tenantId,
+      visibility: orig.visibility,
+      createdByUserId: orig.ownerCustomerId ? null : ctx.user.id,
       items: {
         create: orig.items.map((it, i) => ({
           order: i,

@@ -14,6 +14,7 @@ import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
 import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS, divisionsForGender } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
+import { connectByCode } from "@/domain/coachConnections";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
 import CustomerInsights from "@/components/CustomerInsights";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
@@ -252,40 +253,17 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   async function connectCoachByCode(formData: FormData) {
     "use server";
     await requireUser();
-    // The check matches what gates the UI: the actor's linked customer must
-    // BE the customer being viewed. Role doesn't matter — admins/coaches with
-    // their own Customer record can manage their own coach connections too.
+    // The gate matches the UI: the actor's linked customer must BE the customer
+    // being viewed. Role doesn't matter — admins/coaches with their own Customer
+    // record manage their own coach connections too. The connect rules live in
+    // connectByCode.
     const myCid = await getMyCustomerId();
     if (!myCid || myCid !== id) {
       redirect(flashUrl(`/customers/${id}`, "You can only manage your own coaches"));
     }
-    const raw = String(formData.get("code") ?? "").trim().toUpperCase();
-    if (!raw) redirect(flashUrl(`/customers/${id}`, "Enter a code"));
-    const coach = await db.user.findUnique({
-      where: { invitationCode: raw },
-      select: { id: true, name: true, role: true, customerId: true, tenant: { select: { name: true } } },
-    });
-    // Code must resolve to a coach (admins don't have codes; we still guard).
-    if (!coach || coach.role !== "coach") {
-      redirect(flashUrl(`/customers/${id}`, "That code didn't match any coach"));
-    }
-    // Block self-coaching: a coach can't subscribe to their own code.
-    if (coach!.customerId === id) {
-      redirect(flashUrl(`/customers/${id}`, "That's your own code"));
-    }
-    // Block duplicate connection (any status).
-    const existing = await db.customerCoach.findUnique({
-      where: { customerId_coachUserId: { customerId: id, coachUserId: coach!.id } },
-    });
-    if (existing) {
-      const what = existing.status === "active" ? "already connected" : existing.status === "pending" ? "already pending" : "previously rejected";
-      redirect(flashUrl(`/customers/${id}`, `Coach ${coach!.name}: ${what}`));
-    }
-    await db.customerCoach.create({
-      data: { customerId: id, coachUserId: coach!.id, status: "pending", source: "code" },
-    });
-    revalidatePath(`/customers/${id}`);
-    redirect(flashUrl(`/customers/${id}`, `Request sent to ${coach!.name} — they'll approve soon`));
+    const res = await connectByCode(id, String(formData.get("code") ?? ""));
+    if (res.ok) revalidatePath(`/customers/${id}`);
+    redirect(flashUrl(`/customers/${id}`, res.ok ? `Request sent to ${res.coachName} — they'll approve soon` : res.message));
   }
 
   async function disconnectCoach(formData: FormData) {
