@@ -9,7 +9,7 @@ import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { listTodos } from "@/domain/todos";
 import { backfillCampPlan } from "@/domain/camps";
-import { decideConnection } from "@/domain/coachConnections";
+import { decideConnection, connectByCode, disconnectCoachConnection } from "@/domain/coachConnections";
 import ExerciseList from "@/components/ExerciseList";
 import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
 import TodayNutrition from "@/components/TodayNutrition";
@@ -24,7 +24,7 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode, pendingConnections] = await Promise.all([
+  const [todayClasses, upcomingClasses, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode, pendingConnections, myCoaches] = await Promise.all([
     // Coach-only views: today's roster, next 7 days, recent customer activity.
     // Athletes don't render any of these, so we skip the queries entirely
     // (saves ~3 round-trips per athlete dashboard load).
@@ -158,6 +158,15 @@ export default async function Dashboard() {
           },
         })
       : Promise.resolve([]),
+    // The athlete's own coach connections (active + pending), for the dashboard
+    // "Your coaches" quick-connect card. Athletes can link multiple coaches.
+    myCustomerId && !isStaff
+      ? db.customerCoach.findMany({
+          where: { customerId: myCustomerId, status: { in: ["pending", "active"] } },
+          orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
+          include: { coach: { select: { id: true, name: true, tenant: { select: { name: true } } } } },
+        })
+      : Promise.resolve([]),
   ]);
 
   const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
@@ -275,6 +284,27 @@ export default async function Dashboard() {
     });
     revalidatePath("/");
     redirect(flashUrl("/", "Added to your plan"));
+  }
+
+  // Athlete connects to a coach by code straight from the dashboard (quick
+  // connect). Reuses the same rules as the profile's "My coaches" — pending
+  // request the coach approves. Athletes can link multiple coaches.
+  async function connectMyCoach(formData: FormData) {
+    "use server";
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    const res = await connectByCode(mine, String(formData.get("code") ?? ""));
+    revalidatePath("/");
+    redirect(flashUrl("/", res.ok ? `Request sent to ${res.coachName} — they'll approve soon` : res.message));
+  }
+  // Athlete drops one of their coach connections from the dashboard.
+  async function disconnectMyCoach(formData: FormData) {
+    "use server";
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    await disconnectCoachConnection(mine, String(formData.get("connId") ?? ""));
+    revalidatePath("/");
+    redirect(flashUrl("/", "Coach disconnected"));
   }
 
   // Athlete signs up for a class from the dashboard's "Next class" card. Same
@@ -679,6 +709,58 @@ export default async function Dashboard() {
                   <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Add</button>
                 </form>
               )}
+            </div>
+          )}
+
+          {/* Quick-connect with a coach (athletes only). Athletes can link more
+              than one coach — each connection is approved by that coach. */}
+          {!isStaff && myCustomerId && (
+            <div>
+              <div className="flex items-baseline justify-between mb-3">
+                <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Your coaches</h2>
+                {myCoaches.length > 0 && (
+                  <span className="text-xs text-muted">{myCoaches.filter((c) => c.status === "active").length} connected</span>
+                )}
+              </div>
+              <div className="bg-card border border-border rounded-xl p-4">
+                {myCoaches.length === 0 ? (
+                  <p className="text-sm text-muted mb-3">You&apos;re not connected to a coach yet. Enter your coach&apos;s code to send a request.</p>
+                ) : (
+                  <ul className="divide-y divide-border mb-3">
+                    {myCoaches.map((conn) => (
+                      <li key={conn.id} className="flex items-center justify-between gap-3 py-2 first:pt-0">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{conn.coach.name}</div>
+                          {conn.coach.tenant && <div className="text-[11px] text-muted truncate">{conn.coach.tenant.name}</div>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-[10px] font-semibold uppercase tracking-wide rounded-full px-1.5 py-0.5 ${conn.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                            {conn.status === "active" ? "connected" : "pending"}
+                          </span>
+                          <form action={disconnectMyCoach}>
+                            <input type="hidden" name="connId" value={conn.id} />
+                            <ConfirmSubmit message={`Disconnect from ${conn.coach.name}? You can reconnect later with their code.`} className="text-[11px] text-muted hover:text-red-600 underline">Disconnect</ConfirmSubmit>
+                          </form>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <form action={connectMyCoach} className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    name="code"
+                    required
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    placeholder="Coach code e.g. SRC-TAY-9X3K"
+                    className="flex-1 min-w-0 rounded-lg border border-border bg-white px-3 py-2 text-sm font-mono tracking-wider uppercase"
+                  />
+                  <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium hover:opacity-90 inline-flex items-center justify-center gap-1.5">
+                    <UserPlus size={15} /> Connect
+                  </button>
+                </form>
+                <p className="text-[11px] text-muted mt-2 leading-snug">Add as many coaches as you like — each gets a request to approve before you see their plans.</p>
+              </div>
             </div>
           )}
 

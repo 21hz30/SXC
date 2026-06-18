@@ -14,7 +14,7 @@ import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
 import { benchmarkLabel, benchmarkDef, benchmarksByGroup, benchmarkOrder, genderLabel, divisionLabel, GENDERS, DIVISIONS, divisionsForGender } from "@/domain/benchmarks";
 import { canAccessCustomer } from "@/lib/access";
-import { connectByCode } from "@/domain/coachConnections";
+import { connectByCode, disconnectCoachConnection } from "@/domain/coachConnections";
 import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
 import CustomerInsights from "@/components/CustomerInsights";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
@@ -253,11 +253,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     if (!myCid || myCid !== id) {
       redirect(flashUrl(`/customers/${id}`, "You can only manage your own coaches"));
     }
-    const connId = String(formData.get("connId") ?? "");
-    if (!connId) return;
-    // Scoped delete: own customer's row only — prevents the rare case of a
-    // tampered form trying to disconnect somebody else.
-    await db.customerCoach.deleteMany({ where: { id: connId, customerId: id } });
+    await disconnectCoachConnection(id, String(formData.get("connId") ?? ""));
     revalidatePath(`/customers/${id}`);
     redirect(flashUrl(`/customers/${id}`, "Coach disconnected"));
   }

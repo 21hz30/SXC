@@ -76,6 +76,16 @@ export async function addCoachAddedConnection(customerId: string, coachUserId: s
     });
 }
 
+/**
+ * A customer drops one of their own coach connections (active or pending).
+ * Scoped to the customer so a tampered form can't disconnect someone else's,
+ * and idempotent (deleting an already-gone row is a no-op via deleteMany).
+ */
+export async function disconnectCoachConnection(customerId: string, connId: string): Promise<void> {
+  if (!connId) return;
+  await db.customerCoach.deleteMany({ where: { id: connId, customerId } });
+}
+
 export type DecideResult = { ok: boolean; message: string };
 
 /**
