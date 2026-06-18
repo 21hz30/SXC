@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hashPassword, requireAdmin } from "@/lib/auth";
 import { createAccount, AccountError } from "@/domain/accounts";
-import { Plus } from "lucide-react";
+import { promoteUserToCoach } from "@/domain/roles";
+import { Plus, ShieldPlus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import PasswordInput from "@/components/PasswordInput";
 import AccountForm from "@/components/AccountForm";
@@ -16,13 +17,18 @@ export const dynamic = "force-dynamic";
 export default async function CoachesPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; error?: string }> }) {
   await requireAdmin();
   const { new: isNew, edit, error } = await searchParams;
-  const users = await db.user.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      camps: true,
-      customer: { select: { email: true } },
-    },
-  });
+  const [users, tenants] = await Promise.all([
+    db.user.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        camps: true,
+        customer: { select: { email: true } },
+      },
+    }),
+    // Tenants power the per-row "Promote to coach" action (which team a new
+    // coach joins). With a single tenant the choice is implicit (one click).
+    db.tenant.findMany({ orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
+  ]);
   const editingUser = edit ? users.find((u) => u.id === edit) ?? null : null;
 
   // Same flow as adding a customer — staff are athletes too, with a full profile
@@ -88,16 +94,24 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
 
     const existing = await db.user.findUnique({
       where: { id: userId },
-      select: { customerId: true, name: true },
+      select: { customerId: true, name: true, tenantId: true, invitationCode: true },
     });
     if (!existing) redirect("/coaches");
+
+    // Picking "Coach" in this dialog needs a tenant + invitation code, which a
+    // bare role write can't supply (the dialog has no tenant picker — that's the
+    // per-row "Promote to coach" button). So when promoting to coach we DON'T
+    // write the role here; promoteUserToCoach sets role + tenant + code together
+    // below, and we surface its result. Existing coaches (already have a code)
+    // take the normal path so editing their name never re-mints.
+    const promotingToCoach = role === "coach" && !existing.invitationCode;
 
     const userData: {
       username: string;
       name: string;
-      role: string;
+      role?: string;
       passwordHash?: string;
-    } = { username, name, role };
+    } = { username, name, ...(promotingToCoach ? {} : { role }) };
     if (password) userData.passwordHash = await hashPassword(password);
 
     await db.$transaction(async (tx) => {
@@ -112,6 +126,13 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
         });
       }
     });
+
+    if (promotingToCoach) {
+      const tenantId = existing.tenantId ?? (await db.tenant.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }))?.id;
+      if (!tenantId) redirect(flashUrl("/coaches", "Create a tenant before adding a coach"));
+      const res = await promoteUserToCoach(userId, tenantId);
+      if (!res.ok) redirect(flashUrl("/coaches", res.message));
+    }
 
     revalidatePath("/coaches");
     redirect(flashUrl("/coaches", `${existing.name} updated`));
@@ -130,6 +151,25 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     revalidatePath("/coaches");
     revalidatePath("/customers");
     redirect(flashUrl("/coaches", `${u?.name ?? "User"} removed`));
+  }
+
+  // Promote a customer-role user to coach: assigns the tenant + mints their
+  // invitation code (shared logic with the customer-profile panel).
+  async function promoteToCoach(formData: FormData) {
+    "use server";
+    await requireAdmin();
+    const userId = String(formData.get("userId") ?? "");
+    const tenantId = String(formData.get("tenantId") ?? "");
+    // This button is offered for customer rows only — re-check server-side so a
+    // forged/stale form can't target a coach or admin (which would demote them).
+    const target = await db.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (target?.role !== "customer") {
+      redirect(flashUrl("/coaches", "Only customers can be promoted here"));
+    }
+    const res = await promoteUserToCoach(userId, tenantId);
+    revalidatePath("/coaches");
+    revalidatePath("/customers");
+    redirect(flashUrl("/coaches", res.ok ? `Promoted to coach in ${res.tenantName} — code ${res.code}` : res.message));
   }
 
   return (
@@ -206,6 +246,26 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
                 <td className="px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">
                     <Link href={`/coaches?edit=${u.id}`} className="text-xs text-muted hover:text-foreground">Edit</Link>
+                    {/* Promote-to-coach: customer rows only. One click when there's
+                        a single tenant; a compact picker when there are several. */}
+                    {u.role === "customer" && tenants.length > 0 && (
+                      <form action={promoteToCoach} className="flex items-center gap-1">
+                        <input type="hidden" name="userId" value={u.id} />
+                        {tenants.length === 1 ? (
+                          <input type="hidden" name="tenantId" value={tenants[0].id} />
+                        ) : (
+                          <select name="tenantId" defaultValue={tenants[0].id} aria-label="Tenant for new coach" className="text-xs rounded border border-border bg-white px-1 py-0.5 max-w-[7rem]">
+                            {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        )}
+                        <ConfirmSubmit
+                          message={`Promote ${u.name} to coach${tenants.length === 1 ? ` in ${tenants[0].name}` : ""}? They'll get their own invitation code to onboard athletes.`}
+                          className="text-xs text-blue-600 hover:text-blue-700 whitespace-nowrap inline-flex items-center gap-1"
+                        >
+                          <ShieldPlus size={13} /> Promote to coach
+                        </ConfirmSubmit>
+                      </form>
+                    )}
                     <form action={deleteUser}>
                       <input type="hidden" name="userId" value={u.id} />
                       <ConfirmSubmit message={`Delete the account for ${u.name} (${u.username})? This cannot be undone.`} className="text-xs text-muted hover:text-red-600">Remove</ConfirmSubmit>

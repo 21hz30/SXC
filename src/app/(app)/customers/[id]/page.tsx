@@ -6,7 +6,7 @@ import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { createSession } from "@/domain/chat";
 import { requireUser, requireStaff, requireAdmin, clearSession, getMyCustomerId, type SessionUser } from "@/lib/auth";
-import { mintInvitationCode } from "@/lib/invitationCode";
+import { promoteUserToCoach } from "@/domain/roles";
 import { Sparkles, Pencil, UserCheck } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import RoleBadge from "@/components/RoleBadge";
@@ -196,38 +196,18 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     "use server";
     await requireAdmin();
     const tenantId = String(formData.get("tenantId") ?? "").trim();
-    if (!tenantId) redirect(flashUrl(`/customers/${id}`, "Pick a tenant first"));
     const target = await db.customer.findUnique({
       where: { id },
-      select: { userAccount: { select: { id: true, username: true } } },
+      select: { userAccount: { select: { id: true } } },
     });
     if (!target?.userAccount) {
       redirect(flashUrl(`/customers/${id}`, "Customer has no linked account — can't promote"));
     }
-    const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { slug: true, name: true } });
-    if (!tenant) redirect(flashUrl(`/customers/${id}`, "Tenant not found"));
-    // Retry on the (extremely unlikely) collision with another coach's code.
-    // IMPORTANT: keep `redirect()` OUTSIDE the try — Next.js implements it
-    // by throwing a NEXT_REDIRECT signal, so a bare `catch (e)` would swallow
-    // the successful redirect and loop again, double-writing the row.
-    let mintedCode: string | null = null;
-    let attempt = 0;
-    while (attempt < 5 && !mintedCode) {
-      const code = mintInvitationCode(tenant!.slug, target!.userAccount!.username);
-      try {
-        await db.user.update({
-          where: { id: target!.userAccount!.id },
-          data: { role: "coach", tenantId, invitationCode: code },
-        });
-        mintedCode = code;
-      } catch (e) {
-        attempt++;
-        if (attempt === 5) throw e;
-      }
-    }
+    // Sets role + tenant + mints the invitation code (shared with the Team page).
+    const res = await promoteUserToCoach(target.userAccount.id, tenantId);
     revalidatePath(`/customers/${id}`);
     revalidatePath("/admin/tenants");
-    redirect(flashUrl(`/customers/${id}`, `Promoted to coach in ${tenant!.name} — code ${mintedCode}`));
+    redirect(flashUrl(`/customers/${id}`, res.ok ? `Promoted to coach in ${res.tenantName} — code ${res.code}` : res.message));
   }
 
   async function promoteToAdmin() {
