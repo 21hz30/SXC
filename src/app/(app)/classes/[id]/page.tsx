@@ -17,7 +17,7 @@ import WorkoutCreateDrawer from "@/components/WorkoutCreateDrawer";
 import AddWorkoutPicker from "@/components/AddWorkoutPicker";
 import WatchDataPanel, { type WatchRow } from "@/components/WatchDataPanel";
 import HrZoneBars from "@/components/HrZoneBars";
-import { canAccessCamp } from "@/lib/access";
+import { canAccessCamp, customerScope, workoutScope } from "@/lib/access";
 import { classStatus, canSignUp, CLASS_STATUS_META } from "@/lib/classStatus";
 import { HYROX_MOCK_STATIONS } from "@/lib/hyrox";
 
@@ -396,7 +396,22 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   }
 
   // ---- Staff view (full management) ----
-  if (cls.camp && !canAccessCamp(user, cls.camp)) redirect("/calendar");
+  // Tenant isolation: a coach manages only classes in a camp they run, or a
+  // standalone class they created (admins span all). The earlier guard skipped
+  // standalone classes — a cross-tenant hole.
+  const canManageClass = cls.camp ? canAccessCamp(user, cls.camp) : (user.role === "admin" || cls.createdById === user.id);
+  if (!canManageClass) redirect("/calendar");
+
+  // Re-check the same rights inside each staff action (forged/stale form guard).
+  async function assertManageClass() {
+    "use server";
+    const u = await requireCoach();
+    const c = await db.class.findUnique({ where: { id }, select: { createdById: true, camp: { select: { id: true, coachId: true, createdById: true } } } });
+    if (!c) redirect("/calendar");
+    const ok = c.camp ? canAccessCamp(u, c.camp) : (u.role === "admin" || c.createdById === u.id);
+    if (!ok) redirect("/calendar");
+    return u;
+  }
 
   // Candidates to add to the roster:
   //  - drop-in classes accept ANY customer (open to walk-ins outside the camp)
@@ -416,14 +431,14 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
             orderBy: { customer: { name: "asc" } },
           })
           .then((rows) => rows.map((m) => m.customer))
-      : db.customer.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      : db.customer.findMany({ where: customerScope(user), select: { id: true, name: true }, orderBy: { name: "asc" } }),
     listPerformance({ user }, id),
     db.classReport.findMany({
       where: { classId: id },
       select: { customerId: true, publishedAt: true, updatedAt: true },
     }),
     listWatchData({ user }, id) as Promise<WatchRow[]>,
-    db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true, tags: true } }),
+    db.workout.findMany({ where: workoutScope(user), orderBy: { name: "asc" }, select: { id: true, name: true, tags: true } }),
   ]);
   const rosterCandidates = candidates.filter((c) => !rosteredIds.has(c.id));
   const reportByCustomer = new Map(reports.map((r) => [r.customerId, r]));
@@ -446,6 +461,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
   async function updateClass(formData: FormData) {
     "use server";
+    await assertManageClass();
     const title = String(formData.get("title") ?? "").trim();
     const date = String(formData.get("date") ?? "");
     const time = String(formData.get("time") ?? "") || "07:00";
@@ -468,6 +484,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
   async function deleteClass() {
     "use server";
+    await assertManageClass();
     const target = await db.class.findUnique({ where: { id }, select: { campId: true } });
     await db.class.delete({ where: { id } });
     if (target?.campId) {
@@ -481,7 +498,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   // their dashboard + a form on this class page).
   async function requestFeedback() {
     "use server";
-    await requireCoach();
+    await assertManageClass();
     await db.class.update({ where: { id }, data: { feedbackRequestedAt: new Date() } });
     revalidatePath(`/classes/${id}`);
     redirect(flashUrl(`/classes/${id}`, "Feedback requested from all members"));
@@ -489,17 +506,23 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
   async function setAttendance(formData: FormData) {
     "use server";
+    await assertManageClass();
     const entryId = String(formData.get("entryId"));
     const status = String(formData.get("status"));
-    await db.rosterEntry.update({ where: { id: entryId }, data: { attendance: status } });
+    await db.rosterEntry.updateMany({ where: { id: entryId, classId: id }, data: { attendance: status } });
     revalidatePath(`/classes/${id}`);
     redirect(flashUrl(`/classes/${id}`, "Attendance updated"));
   }
 
   async function addToRoster(formData: FormData) {
     "use server";
+    const u = await assertManageClass();
     const customerId = String(formData.get("customerId") ?? "");
     if (!customerId) return;
+    // The athlete must be in the actor's scope (their connected athletes / camp
+    // members) so a forged form can't roster a foreign-tenant athlete.
+    const inScope = await db.customer.findFirst({ where: { id: customerId, ...customerScope(u) }, select: { id: true } });
+    if (!inScope) redirect(flashUrl(`/classes/${id}`, "That athlete isn't one of yours"));
     await db.rosterEntry.create({ data: { classId: id, customerId } });
     revalidatePath(`/classes/${id}`);
     redirect(flashUrl(`/classes/${id}`, "Athlete added to roster"));
@@ -507,8 +530,9 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
   async function removeFromRoster(formData: FormData) {
     "use server";
+    await assertManageClass();
     const entryId = String(formData.get("entryId") ?? "");
-    await db.rosterEntry.delete({ where: { id: entryId } });
+    await db.rosterEntry.deleteMany({ where: { id: entryId, classId: id } });
     revalidatePath(`/classes/${id}`);
     redirect(flashUrl(`/classes/${id}`, "Removed from roster"));
   }
@@ -517,7 +541,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   // Performance row logged. Coach reviews each one before publishing.
   async function generateAllReports() {
     "use server";
-    await requireCoach();
+    await assertManageClass();
     const { generateClassReport, upsertReport } = await import("@/domain/reports");
     const perfCids = await db.performance.findMany({
       where: { classId: id },
@@ -545,7 +569,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   // Coach cancels (or reopens) the class. Other statuses are derived.
   async function toggleCancel() {
     "use server";
-    await requireCoach();
+    await assertManageClass();
     const c = await db.class.findUnique({ where: { id }, select: { canceledAt: true } });
     await db.class.update({ where: { id }, data: { canceledAt: c?.canceledAt ? null : new Date() } });
     revalidatePath(`/classes/${id}`);
@@ -557,7 +581,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   // have already seen it.
   async function releaseWorkout() {
     "use server";
-    await requireCoach();
+    await assertManageClass();
     const fresh = await db.class.update({ where: { id }, data: { workoutsRevealedAt: new Date() }, select: { campId: true } });
     if (fresh.campId) revalidatePath(`/camps/${fresh.campId}`);
     revalidatePath(`/classes/${id}`);

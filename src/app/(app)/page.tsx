@@ -14,7 +14,7 @@ import ExerciseList from "@/components/ExerciseList";
 import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
 import TodayNutrition from "@/components/TodayNutrition";
 import { flashUrl } from "@/lib/flash";
-import { classScope } from "@/lib/access";
+import { classScope, campScope, canAccessCamp } from "@/lib/access";
 import { rollDay, bmrKcal, type Stats, type DayIntake } from "@/domain/nutrition";
 
 export const dynamic = "force-dynamic";
@@ -72,9 +72,11 @@ export default async function Dashboard() {
       ? db.performance.findMany({ where: { customerId: myCustomerId, workoutId: null }, select: { classId: true } })
       : Promise.resolve([]),
     // Pending camp applications — staff approve/reject these from the dashboard.
+    // Scoped to the coach's own camps (admins see all) so a coach's inbox never
+    // surfaces another tenant's applications.
     isStaff
       ? db.campMember.findMany({
-          where: { status: "pending" },
+          where: { status: "pending", camp: campScope(user) },
           include: { customer: { select: { id: true, name: true } }, camp: { select: { id: true, name: true } } },
           orderBy: { joinedAt: "asc" },
         })
@@ -367,23 +369,28 @@ export default async function Dashboard() {
     const actor = await requireStaff();
     const memberId = String(formData.get("memberId") ?? "");
     if (!memberId) return;
-    const m = await db.campMember.update({ where: { id: memberId }, data: { status: "active" }, select: { campId: true, customerId: true } });
+    // Only act on an application to a camp the actor runs (admins span all).
+    const member = await db.campMember.findUnique({ where: { id: memberId }, select: { campId: true, customerId: true, camp: { select: { id: true, coachId: true, createdById: true } } } });
+    if (!member || !canAccessCamp(actor, member.camp)) redirect(flashUrl("/", "That application isn't yours to review"));
+    await db.campMember.update({ where: { id: memberId }, data: { status: "active" } });
     // Catch the approved member up on the plan already assigned for this camp.
-    await backfillCampPlan(m.campId, m.customerId, actor.id);
+    await backfillCampPlan(member.campId, member.customerId, actor.id);
     revalidatePath("/");
-    revalidatePath(`/camps/${m.campId}`);
+    revalidatePath(`/camps/${member.campId}`);
     revalidatePath("/camps");
     redirect(flashUrl("/", "Application approved"));
   }
   // Staff reject (delete) a pending application.
   async function rejectApplication(formData: FormData) {
     "use server";
-    await requireStaff();
+    const actor = await requireStaff();
     const memberId = String(formData.get("memberId") ?? "");
     if (!memberId) return;
-    const m = await db.campMember.delete({ where: { id: memberId }, select: { campId: true } });
+    const member = await db.campMember.findUnique({ where: { id: memberId }, select: { campId: true, camp: { select: { id: true, coachId: true, createdById: true } } } });
+    if (!member || !canAccessCamp(actor, member.camp)) redirect(flashUrl("/", "That application isn't yours to review"));
+    await db.campMember.delete({ where: { id: memberId } });
     revalidatePath("/");
-    revalidatePath(`/camps/${m.campId}`);
+    revalidatePath(`/camps/${member.campId}`);
     revalidatePath("/camps");
     redirect(flashUrl("/", "Application rejected"));
   }

@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireStaff } from "@/lib/auth";
 import { canAccessCamp } from "@/lib/access";
 import { flashUrl } from "@/lib/flash";
 import { formatDate, formatTime } from "@/lib/utils";
@@ -29,7 +29,22 @@ export default async function ReportPage({
     include: { camp: true },
   });
   if (!cls) notFound();
-  if (cls.camp && !canAccessCamp(user, cls.camp)) redirect("/calendar");
+  // Class reports are a staff tool. A coach may manage one only for a class in a
+  // camp they run, or a standalone class they created; admins span all. (The
+  // earlier guard skipped campless classes entirely — a cross-tenant hole.)
+  const isStaff = user.role === "admin" || user.role === "coach";
+  const canManage = isStaff && (cls.camp ? canAccessCamp(user, cls.camp) : (user.role === "admin" || cls.createdById === user.id));
+  if (!canManage) redirect("/calendar");
+
+  // Re-check the same rights inside each server action (forged form guard).
+  async function assertCanManageReport() {
+    "use server";
+    const u = await requireStaff();
+    const c = await db.class.findUnique({ where: { id }, select: { createdById: true, camp: { select: { id: true, coachId: true, createdById: true } } } });
+    if (!c) redirect("/calendar");
+    const ok = c.camp ? canAccessCamp(u, c.camp) : (u.role === "admin" || c.createdById === u.id);
+    if (!ok) redirect("/calendar");
+  }
 
   const customer = await db.customer.findUnique({ where: { id: customerId } });
   if (!customer) notFound();
@@ -40,6 +55,7 @@ export default async function ReportPage({
 
   async function generate() {
     "use server";
+    await assertCanManageReport();
     const { contentMarkdown, model } = await generateClassReport(id, customerId);
     await upsertReport(id, customerId, contentMarkdown, model);
     revalidatePath(`/classes/${id}/reports/${customerId}`);
@@ -49,6 +65,7 @@ export default async function ReportPage({
 
   async function save(formData: FormData) {
     "use server";
+    await assertCanManageReport();
     const content = String(formData.get("content") ?? "").trim();
     if (!content) return;
     await db.classReport.update({
@@ -61,6 +78,7 @@ export default async function ReportPage({
 
   async function publish() {
     "use server";
+    await assertCanManageReport();
     await db.classReport.update({
       where: { classId_customerId: { classId: id, customerId } },
       data: { publishedAt: new Date() },
@@ -71,6 +89,7 @@ export default async function ReportPage({
 
   async function unpublish() {
     "use server";
+    await assertCanManageReport();
     await db.classReport.update({
       where: { classId_customerId: { classId: id, customerId } },
       data: { publishedAt: null },
@@ -81,6 +100,7 @@ export default async function ReportPage({
 
   async function deleteReport() {
     "use server";
+    await assertCanManageReport();
     await db.classReport.delete({
       where: { classId_customerId: { classId: id, customerId } },
     });

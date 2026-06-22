@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { createSession } from "@/domain/chat";
-import { requireUser, requireStaff, requireAdmin, clearSession, getMyCustomerId, type SessionUser } from "@/lib/auth";
+import { requireUser, requireAdmin, clearSession, getMyCustomerId, type SessionUser } from "@/lib/auth";
 import { promoteUserToCoach } from "@/domain/roles";
 import { Sparkles, Pencil, UserCheck } from "lucide-react";
 import BackButton from "@/components/BackButton";
@@ -45,12 +45,19 @@ function parseSec(v: FormDataEntryValue | null): number | null {
 // over request state.
 async function assertCanEditCustomer(customerId: string): Promise<SessionUser> {
   const u = await requireUser();
-  if (u.role === "admin" || u.role === "coach") return u;
+  if (u.role === "admin") return u;
+  // Coach: only an athlete connected to them or in one of their camps. Anyone:
+  // their own linked profile. Same rule as the page-view guard (canAccessCustomer),
+  // so writes can't reach a customer the actor can't even see.
   const target = await db.customer.findUnique({
     where: { id: customerId },
-    select: { userAccount: { select: { id: true } } },
+    select: {
+      userAccount: { select: { id: true } },
+      campMembers: { select: { camp: { select: { coachId: true } } } },
+      coachConnections: { select: { coachUserId: true, status: true } },
+    },
   });
-  if (target?.userAccount?.id === u.id) return u;
+  if (target && canAccessCustomer(u, target)) return u;
   redirect("/profile");
 }
 
@@ -130,7 +137,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
   async function chatAboutCustomer() {
     "use server";
-    const user = await requireStaff();
+    const user = await assertCanEditCustomer(id);
     const session = await createSession({ user }, { customerId: id });
     redirect(`/customers/${id}?chat=${session.id}`);
   }
@@ -290,7 +297,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   // is the long-missing edit surface so coaches can actually fill them in.
   async function saveAssignmentAdvice(formData: FormData) {
     "use server";
-    await requireStaff();
+    await assertCanEditCustomer(id);
     const assignmentId = String(formData.get("assignmentId") ?? "");
     if (!assignmentId) return;
     const foodAdvice = String(formData.get("foodAdvice") ?? "").trim() || null;
@@ -309,6 +316,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   // Benchmark add / delete actions
   async function addBenchmark(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     const metric = String(formData.get("metric") ?? "").trim();
     const valueRaw = String(formData.get("value") ?? "").trim();
     if (!metric || !valueRaw) return;
@@ -333,14 +341,16 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   }
   async function deleteBenchmark(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     const bid = String(formData.get("benchmarkId") ?? "");
     if (!bid) return;
-    await db.benchmark.delete({ where: { id: bid } });
+    await db.benchmark.deleteMany({ where: { id: bid, customerId: id } });
     revalidatePath(`/customers/${id}`);
     redirect(flashUrl(`/customers/${id}`, "Benchmark deleted"));
   }
   async function updateBenchmark(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     const bid = String(formData.get("benchmarkId") ?? "");
     const valueRaw = String(formData.get("value") ?? "").trim();
     if (!bid || !valueRaw) return;
@@ -349,8 +359,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       : Number(valueRaw);
     if (!Number.isFinite(value)) return;
     const testedAtRaw = String(formData.get("testedAt") ?? "").trim();
-    await db.benchmark.update({
-      where: { id: bid },
+    await db.benchmark.updateMany({
+      where: { id: bid, customerId: id },
       data: { value, ...(testedAtRaw ? { testedAt: new Date(testedAtRaw) } : {}) },
     });
     revalidatePath(`/customers/${id}`);
@@ -359,6 +369,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
   async function addActivity(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     await db.activityData.create({
       data: {
         customerId: id,
@@ -381,6 +392,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
   async function addRaceResult(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     const eventName = String(formData.get("eventName") ?? "").trim();
     const eventDate = String(formData.get("eventDate") ?? "");
     const division = String(formData.get("division") ?? "open");
@@ -407,15 +419,17 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
   async function deleteRaceResult(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     const raceId = String(formData.get("raceId") ?? "");
     if (!raceId) return;
-    await db.raceResult.delete({ where: { id: raceId } });
+    await db.raceResult.deleteMany({ where: { id: raceId, customerId: id } });
     revalidatePath(`/customers/${id}`);
     redirect(flashUrl(`/customers/${id}?view=race`, "Race result deleted"));
   }
 
   async function upsertRaceGoal(formData: FormData) {
     "use server";
+    await assertCanEditCustomer(id);
     const division = String(formData.get("division") ?? "open");
     const targetDateRaw = String(formData.get("targetDate") ?? "").trim();
     const data = {

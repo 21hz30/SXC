@@ -8,6 +8,7 @@ import ConfirmSubmit from "@/components/ConfirmSubmit";
 import CampSchedule from "@/components/CampSchedule";
 import CampPlanBuilder from "@/components/CampPlanBuilder";
 import { requireStaff, requireUser , getMyCustomerId } from "@/lib/auth";
+import { canAccessCamp, customerScope, workoutScope } from "@/lib/access";
 import { customerDetail, customerOptionLabel } from "@/domain/customers";
 import { backfillCampPlan } from "@/domain/camps";
 import { flashUrl } from "@/lib/flash";
@@ -52,9 +53,11 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         },
       },
     }),
-    isStaff ? db.customer.findMany({ orderBy: { name: "asc" } }) : Promise.resolve([]),
+    // Add-member + workout pickers, tenant-scoped: a coach only sees the
+    // athletes connected to them and their own tenant's library (admin = all).
+    isStaff ? db.customer.findMany({ where: customerScope(user), orderBy: { name: "asc" } }) : Promise.resolve([]),
     isStaff
-      ? db.workout.findMany({ where: { ownerCustomerId: null }, orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } })
+      ? db.workout.findMany({ where: workoutScope(user), orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } })
       : Promise.resolve([]),
     edit ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } }) : Promise.resolve([]),
     // Staff have a profile too, so they can join the camp and its classes as a
@@ -78,6 +81,21 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       : Promise.resolve([]),
   ]);
   if (!camp) notFound();
+  // Tenant isolation: a coach can only open a camp they coach/created. Admins
+  // see all; customers may view any camp (they browse to apply), so this guard
+  // is staff-only. Customers who aren't members still only see the public
+  // overview (the roster/plan stay gated by `canSeeInside` below).
+  if (isStaff && !canAccessCamp(user, camp)) redirect(flashUrl("/camps", "That camp isn't in your tenant"));
+
+  // Re-checks camp management rights inside a server action (forged/stale form
+  // can't mutate another tenant's camp). Returns the acting staff user.
+  async function assertManageCamp() {
+    "use server";
+    const u = await requireStaff();
+    const c = await db.camp.findUnique({ where: { id }, select: { id: true, coachId: true, createdById: true } });
+    if (!c || !canAccessCamp(u, c)) redirect(flashUrl("/camps", "That camp isn't in your tenant"));
+    return u;
+  }
 
   // Active members vs pending applicants.
   const activeMembers = camp.members.filter((m) => m.status !== "pending");
@@ -133,7 +151,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
   async function updateCamp(formData: FormData) {
     "use server";
-    await requireStaff();
+    await assertManageCamp();
     const name = String(formData.get("name") ?? "").trim();
     const startDate = String(formData.get("startDate") ?? "");
     const endDate = String(formData.get("endDate") ?? "");
@@ -156,7 +174,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
   async function deleteCamp() {
     "use server";
-    await requireStaff();
+    await assertManageCamp();
     await db.camp.delete({ where: { id } });
     revalidatePath("/camps");
     redirect(flashUrl("/camps", "Camp deleted"));
@@ -164,11 +182,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
   async function addMember(formData: FormData) {
     "use server";
-    const actor = await requireStaff();
+    const actor = await assertManageCamp();
     const customerId = String(formData.get("customerId"));
     // Staff add → an active member straight away (upsert in case they had a
-    // pending application).
+    // pending application). The customer must be in the actor's scope so a coach
+    // can't pull a foreign-tenant athlete into their camp via a forged form.
     if (customerId) {
+      const inScope = await db.customer.findFirst({ where: { id: customerId, ...customerScope(actor) }, select: { id: true } });
+      if (!inScope) redirect(flashUrl(`/camps/${id}`, "That athlete isn't one of yours"));
       await db.campMember.upsert({
         where: { campId_customerId: { campId: id, customerId } },
         create: { campId: id, customerId, status: "active" },
@@ -182,21 +203,26 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
   async function removeMember(formData: FormData) {
     "use server";
-    await requireStaff();
+    await assertManageCamp();
     const memberId = String(formData.get("memberId"));
-    const m = await db.campMember.findUnique({ where: { id: memberId }, select: { customerId: true } });
+    // Scope to THIS camp so a forged memberId can't drop a member of another camp.
+    const m = await db.campMember.findUnique({ where: { id: memberId }, select: { customerId: true, campId: true } });
+    if (!m || m.campId !== id) redirect(flashUrl(`/camps/${id}`, "Not a member of this camp"));
     await db.campMember.delete({ where: { id: memberId } });
     // Removing a member also drops this camp's training plan from them, so they
     // no longer see it. Workouts they already completed stay as history.
-    if (m) await db.workoutAssignment.deleteMany({ where: { campId: id, customerId: m.customerId, status: { not: "completed" } } });
+    await db.workoutAssignment.deleteMany({ where: { campId: id, customerId: m.customerId, status: { not: "completed" } } });
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Member removed"));
   }
   async function approveMember(formData: FormData) {
     "use server";
-    const actor = await requireStaff();
+    const actor = await assertManageCamp();
     const memberId = String(formData.get("memberId"));
-    const m = await db.campMember.update({ where: { id: memberId }, data: { status: "active" }, select: { customerId: true } });
+    // Scope to THIS camp so a forged memberId can't approve an applicant elsewhere.
+    const m = await db.campMember.findUnique({ where: { id: memberId }, select: { customerId: true, campId: true } });
+    if (!m || m.campId !== id) redirect(flashUrl(`/camps/${id}`, "Not an applicant of this camp"));
+    await db.campMember.update({ where: { id: memberId }, data: { status: "active" } });
     // Newly-approved member catches up on the plan already assigned for this camp.
     await backfillCampPlan(id, m.customerId, actor.id);
     revalidatePath(`/camps/${id}`);
@@ -252,7 +278,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   // and other weeks keep their plan; completed sessions are always kept.
   async function assignCampPlan(formData: FormData) {
     "use server";
-    const actor = await requireStaff();
+    const actor = await assertManageCamp();
     type PlanDay = { workouts?: { workoutId?: string; note?: string }[] };
     let plan: { weekStart?: string; days?: PlanDay[] };
     try {
@@ -306,14 +332,14 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   // Wipe the camp's plan, keeping any already-completed sessions for the record.
   async function clearCampPlan() {
     "use server";
-    await requireStaff();
+    await assertManageCamp();
     await db.workoutAssignment.deleteMany({ where: { campId: id, status: { not: "completed" } } });
     revalidatePath(`/camps/${id}`);
     redirect(flashUrl(`/camps/${id}`, "Plan cleared"));
   }
   async function addClass(formData: FormData) {
     "use server";
-    const u = await requireStaff();
+    const u = await assertManageCamp();
     const title = String(formData.get("title") ?? "").trim();
     const date = String(formData.get("date") ?? "");
     const time = String(formData.get("time") ?? "") || "07:00";
@@ -335,7 +361,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
   }
   async function deleteClass(formData: FormData) {
     "use server";
-    await requireStaff();
+    await assertManageCamp();
     const classId = String(formData.get("classId") ?? "");
     if (!classId) return;
     // Roster, assigned workouts and performances cascade via the schema.

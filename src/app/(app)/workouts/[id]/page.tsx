@@ -16,8 +16,11 @@ export default async function WorkoutDetail({ params }: { params: Promise<{ id: 
 
   const isStaff = user.role === "admin" || user.role === "coach";
   const myCustomerId = await getMyCustomerId();
-  // Staff may edit shared-library workouts; a customer may edit only their own.
-  const canEdit = isStaff ? w.ownerCustomerId === null : w.ownerCustomerId === myCustomerId;
+  // Staff may edit shared-library workouts — but a coach only within their own
+  // tenant (admins across any); a customer may edit only their own private one.
+  const canEdit = isStaff
+    ? w.ownerCustomerId === null && (user.role === "admin" || w.tenantId === user.tenantId)
+    : w.ownerCustomerId === myCustomerId;
   // An athlete can still VIEW (read-only) any workout that's on their plan — e.g.
   // a camp workout they tapped from the calendar — even though they can't edit it.
   const canView =

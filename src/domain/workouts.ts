@@ -10,11 +10,13 @@ import type { Category, WorkoutItemInput } from "./exercises";
  * the workout doesn't exist or the caller isn't allowed.
  */
 export async function assertCanEditWorkout(ctx: Ctx, workoutId: string): Promise<void> {
-  const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true } });
+  const w = await db.workout.findUnique({ where: { id: workoutId }, select: { ownerCustomerId: true, tenantId: true } });
   if (!w) throw new Error("workout not found");
   const staff = ctx.user.role === "admin" || ctx.user.role === "coach";
   if (staff) {
     if (w.ownerCustomerId !== null) throw new Error("forbidden: athlete-owned workout");
+    // A coach may only edit library workouts in their OWN tenant; admins span all.
+    if (ctx.user.role === "coach" && w.tenantId !== ctx.user.tenantId) throw new Error("forbidden: other tenant");
     return;
   }
   const myCid = await getMyCustomerId();
@@ -47,6 +49,8 @@ export type WorkoutDTO = {
   type: string | null;
   tags: string | null;
   ownerCustomerId: string | null;
+  /** Owning tenant (null for athlete-private / legacy). Drives edit scoping. */
+  tenantId: string | null;
   items: WorkoutItemDTO[];
 };
 
@@ -107,6 +111,7 @@ export async function getWorkout(_ctx: Ctx, id: string): Promise<WorkoutDTO | nu
     type: w.type,
     tags: w.tags,
     ownerCustomerId: w.ownerCustomerId,
+    tenantId: w.tenantId,
     items: w.items.map(toItemDTO),
   };
 }

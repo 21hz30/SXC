@@ -59,12 +59,21 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
         heightCm: Number(formData.get("heightCm")) || null,
       },
     });
+    let newUserId: string;
     try {
-      await createAccount({ username, password, name, role, email, customerId: c.id });
+      const res = await createAccount({ username, password, name, role, email, customerId: c.id });
+      newUserId = res.userId;
     } catch (e) {
       await db.customer.delete({ where: { id: c.id } }).catch(() => {});
       if (e instanceof AccountError) redirect("/coaches?new=1&error=dupuser");
       throw e;
+    }
+    // A new coach needs a tenant + invitation code to be usable (createAccount
+    // only sets the role). Assign the default tenant + mint a code — same as the
+    // per-row "Promote to coach" button. (Admins span tenants, so no link.)
+    if (role === "coach") {
+      const tenantId = (await db.tenant.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }))?.id;
+      if (tenantId) await promoteUserToCoach(newUserId, tenantId);
     }
     revalidatePath("/coaches");
     redirect(flashUrl("/coaches", `${name} added as ${role}`));
