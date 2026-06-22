@@ -25,10 +25,15 @@ export default async function RegisterPage({
     const username = String(formData.get("username") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const name = String(formData.get("name") ?? "").trim() || username;
-    const email = String(formData.get("email") ?? "").trim() || null;
-    const code = String(formData.get("code") ?? "").trim().toUpperCase();
-    // Preserve the entered code across validation bounces so it isn't lost.
+    const phone = String(formData.get("phone") ?? "").trim();
+    // A coach invitation only arrives as a deep-link (/register?code=…) now —
+    // there's no code field on the lean sign-up form. Keep it across bounces.
+    const code = presetCode;
     const codeQS = code ? `&code=${encodeURIComponent(code)}` : "";
+
+    // Sign-up asks for the four essentials only: login name, display name,
+    // phone, password. Email + coach connection are gathered later, in
+    // onboarding, to keep this form short.
 
     // Username: this is the LOGIN name. English letters and numbers only —
     // no spaces or special characters — so it's safe and easy to type.
@@ -37,20 +42,19 @@ export default async function RegisterPage({
     const passwordOk =
       password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
     if (!passwordOk) redirect(`/register?error=invalid${codeQS}`);
-
-    // The coach code is OPTIONAL. An athlete can join with no coach — they can
-    // still browse and sign up for drop-in classes, and add a coach later from
-    // their profile. But IF they typed a code, it must be valid (so a typo
-    // doesn't silently create a coachless account they didn't intend). Checked
-    // before account creation so a bad code never leaves an orphan login behind.
-    if (code && !(await findCoachByCode(code))) redirect(`/register?error=badcode${codeQS}`);
+    // Phone is required for every athlete (their coach needs a way to reach
+    // them). Loose check — 6–20 digits once symbols are stripped — so CN mobiles
+    // and international numbers both pass.
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (phoneDigits.length < 6 || phoneDigits.length > 20) redirect(`/register?error=phone${codeQS}`);
 
     // Public sign-up creates an athlete (customer) account: a login + a linked
-    // profile. Staff accounts are created by an admin from the Team page.
+    // profile. Phone may "claim" a profile a coach already pre-made (handled in
+    // createAccount). Staff accounts are created by an admin from the Team page.
     let userId: string;
     let customerId: string;
     try {
-      const res = await createAccount({ username, password, name, email, role: "customer" });
+      const res = await createAccount({ username, password, name, phone, role: "customer" });
       userId = res.userId;
       customerId = res.customerId;
     } catch (e) {
@@ -58,10 +62,11 @@ export default async function RegisterPage({
       throw e;
     }
 
-    // If they supplied a (valid) code, request the connection — pending until
-    // the coach approves it from their dashboard inbox (#31). No code → skip,
-    // and they start as a free drop-in athlete.
-    if (code) await connectByCode(customerId, code);
+    // Invited via a coach's deep-link? Request the connection — pending until the
+    // coach approves it from their inbox (#31). A stale/invalid code is ignored
+    // rather than blocking sign-up; athletes without a link connect later, in
+    // onboarding or from their profile's "My coaches".
+    if (code && (await findCoachByCode(code))) await connectByCode(customerId, code);
 
     // Auto-login, then land on the profile where onboarding pops up.
     const jar = await cookies();
@@ -80,8 +85,8 @@ export default async function RegisterPage({
     ? "Username must be English letters and numbers only (at least 3, no spaces or symbols)."
     : error === "invalid"
     ? "Password must be at least 8 characters and include a letter and a number."
-    : error === "badcode"
-    ? "That invitation code didn't match any coach. Leave it blank to join without a coach, or double-check the code."
+    : error === "phone"
+    ? "Enter a valid phone number."
     : null;
 
   return (
@@ -92,20 +97,11 @@ export default async function RegisterPage({
           <div className="text-sm text-muted mt-2">Create your athlete account</div>
         </div>
 
-        <label className="block text-sm font-medium mb-1.5">
-          Coach invitation code <span className="text-muted font-normal">· optional</span>
-        </label>
-        <input
-          name="code"
-          defaultValue={presetCode}
-          autoCapitalize="characters"
-          spellCheck={false}
-          placeholder="e.g. SRC-TAY-9X3K"
-          className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base font-mono tracking-wider uppercase outline-none focus:border-accent"
-        />
-        <p className="mt-1.5 mb-3 text-xs text-muted leading-snug">
-          Have a code from your coach? Enter it to connect (they&apos;ll approve you). No code? You can still sign up for drop-in classes and add a coach later.
-        </p>
+        {presetCode && (
+          <p className="mb-5 rounded-lg border border-border bg-background px-3 py-2.5 text-xs text-muted leading-snug">
+            You&apos;ve been invited by a coach — we&apos;ll send them your connection request right after you sign up.
+          </p>
+        )}
 
         <label className="block text-sm font-medium mb-1.5">
           Username <span className="text-accent font-semibold">· your login name</span>
@@ -126,12 +122,22 @@ export default async function RegisterPage({
         </p>
 
         <label className="block text-sm font-medium mb-1.5">
-          Full name <span className="text-muted font-normal">· your real name</span>
+          Display name <span className="text-muted font-normal">· optional</span>
         </label>
-        <input name="name" autoComplete="name" placeholder="e.g. Maya Rodríguez" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
+        <input name="name" autoComplete="name" placeholder="e.g. Peter Zhang" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
 
-        <label className="block text-sm font-medium mb-1.5">Email <span className="text-muted font-normal">(so your coach can link your profile)</span></label>
-        <input name="email" type="email" autoComplete="email" className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3" />
+        <label className="block text-sm font-medium mb-1.5">
+          Phone <span className="text-accent font-semibold">· required</span>
+        </label>
+        <input
+          name="phone"
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          required
+          placeholder="e.g. 13800138000"
+          className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base outline-none focus:border-accent mb-3"
+        />
 
         <label className="block text-sm font-medium mb-1.5">Password</label>
         <PasswordInput

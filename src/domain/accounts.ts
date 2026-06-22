@@ -23,12 +23,14 @@ export async function createAccount(input: {
   name?: string;
   role: Role;
   email?: string | null;
+  phone?: string | null;
   /** Link the login to an already-created profile instead of making a new one. */
   customerId?: string;
 }): Promise<{ userId: string; customerId: string }> {
   const username = input.username.trim().toLowerCase();
   const name = (input.name ?? username).trim() || username;
   const email = input.email?.trim() || null;
+  const phone = input.phone?.trim() || null;
 
   // Login name: English letters and numbers only, no spaces or symbols.
   if (!/^[a-z0-9]{3,}$/.test(username)) {
@@ -37,11 +39,15 @@ export async function createAccount(input: {
   const taken = await db.user.findUnique({ where: { username } });
   if (taken) throw new AccountError("That username is already taken.");
 
-  // Link to a provided profile; else try to adopt an unlinked one by email.
+  // Link to a caller-provided profile; else adopt an unlinked one a coach
+  // pre-made for this phone. Phone is the unique handle coaches key athletes by
+  // (and the required sign-up field), so a self-registering athlete "claims"
+  // their existing profile — inheriting roster / benchmarks / reports — instead
+  // of spawning a duplicate. No phone match → a fresh profile.
   let customerId: string | null = input.customerId ?? null;
-  if (!customerId && email) {
+  if (!customerId && phone) {
     const existing = await db.customer.findFirst({
-      where: { email, userAccount: null },
+      where: { phone, userAccount: null },
       select: { id: true },
     });
     if (existing) customerId = existing.id;
@@ -49,7 +55,7 @@ export async function createAccount(input: {
 
   if (!customerId) {
     const created = await db.customer.create({
-      data: { name, email },
+      data: { name, email, phone },
       select: { id: true },
     });
     customerId = created.id;

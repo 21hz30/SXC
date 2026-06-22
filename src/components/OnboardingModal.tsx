@@ -19,7 +19,7 @@ function toSec(e: DivEntry): number | null {
 
 /**
  * First-login onboarding — a 3-step wizard:
- *   1. Basics (gender, age, height, weight, phone)
+ *   1. Basics (gender, age, height, weight, email, coach code)
  *   2. Divisions completed + PB per division   → seeds RaceResults
  *   3. Next race date + divisions planned + goal → seeds RaceGoals
  * Saving (or skipping) marks onboarding complete so it never reappears.
@@ -29,7 +29,7 @@ export default function OnboardingModal({ firstName }: Props) {
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
 
-  const [basics, setBasics] = useState({ gender: "", age: "", heightCm: "", weightKg: "", phone: "" });
+  const [basics, setBasics] = useState({ gender: "", age: "", heightCm: "", weightKg: "", email: "", coachCode: "" });
   const [finished, setFinished] = useState<Record<string, DivEntry>>(emptyDivs);
   const [noRaces, setNoRaces] = useState(false); // "I haven't raced a Hyrox yet"
   // Planned races: raceId → list of divisions the athlete plans for that race.
@@ -67,7 +67,8 @@ export default function OnboardingModal({ firstName }: Props) {
       age: basics.age || null,
       heightCm: basics.heightCm || null,
       weightKg: basics.weightKg || null,
-      phone: basics.phone || null,
+      email: basics.email || null,
+      coachCode: basics.coachCode || null,
       finished: noRaces
         ? []
         : divisionsForGender(basics.gender).filter((d) => finished[d.value]?.on).map((d) => ({
@@ -134,9 +135,23 @@ export default function OnboardingModal({ firstName }: Props) {
               <Field label="Weight (kg)">
                 <input value={basics.weightKg} onChange={(e) => setB("weightKg", e.target.value)} type="number" min={30} max={250} step="0.1" placeholder="kg" className="ob-input" />
               </Field>
-              <Field label="Phone (optional)">
-                <input value={basics.phone} onChange={(e) => setB("phone", e.target.value)} type="tel" placeholder="for your coach" className="ob-input" />
-              </Field>
+              <div className="col-span-2">
+                <Field label="Email (optional)">
+                  <input value={basics.email} onChange={(e) => setB("email", e.target.value)} type="email" placeholder="you@example.com" className="ob-input" />
+                </Field>
+              </div>
+              <div className="col-span-2">
+                <Field label="Coach invitation code (optional)">
+                  <input
+                    value={basics.coachCode}
+                    onChange={(e) => setB("coachCode", e.target.value.toUpperCase())}
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    placeholder="e.g. SRC-TAY-9X3K"
+                    className="ob-input font-mono tracking-wider uppercase"
+                  />
+                </Field>
+              </div>
             </div>
           )}
 

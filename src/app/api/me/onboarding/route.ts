@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { findRace } from "@/domain/races";
+import { findCoachByCode, connectByCode } from "@/domain/coachConnections";
 
 type DivPB = { division: string; pbSec?: number | null };
 type RacePlanInput = { raceId: string; division: string };
@@ -63,10 +64,19 @@ export async function PATCH(req: NextRequest) {
   const age = num("age"); if (age !== undefined) data.age = age;
   const heightCm = num("heightCm"); if (heightCm !== undefined) data.heightCm = heightCm;
   const weightKg = num("weightKg"); if (weightKg !== undefined) data.weightKg = weightKg;
-  const phone = str("phone"); if (phone !== undefined) data.phone = phone;
+  // Phone is captured at sign-up now; onboarding collects email + coach code.
+  const email = str("email"); if (email !== undefined) data.email = email;
   if (allDivisions.length) data.division = allDivisions.join(",");
   if (earliest) data.goalRaceDate = earliest;
   await db.customer.update({ where: { id: customerId }, data });
+
+  // Optional: connect to a coach via the invitation code entered in onboarding.
+  // Idempotent (connectByCode no-ops if already connected/pending) and a bad
+  // code is ignored, so onboarding never blocks on a typo or stale link.
+  const coachCode = str("coachCode");
+  if (coachCode && (await findCoachByCode(coachCode))) {
+    await connectByCode(customerId, coachCode);
+  }
 
   // 2) PB per finished division → a RaceResult (the canonical PB source).
   for (const f of finished) {

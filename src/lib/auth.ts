@@ -38,7 +38,7 @@ export function decodeToken(token: string | undefined): string | null {
   }
 }
 
-export type Account = SessionUser & { customerId: string | null; onboardedAt: Date | null };
+export type Account = SessionUser & { customerId: string | null; onboardedAt: Date | null; phone: string | null };
 
 // One cached account lookup per request. The layout, each page's requireUser,
 // nested guard helpers, and the many "what's my customerId?" lookups all funnel
@@ -49,7 +49,7 @@ export const getAccount = cache(async function getAccount(): Promise<Account | n
   if (!userId) return null;
   const u = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, name: true, role: true, tenantId: true, customerId: true, customer: { select: { onboardedAt: true } } },
+    select: { id: true, username: true, name: true, role: true, tenantId: true, customerId: true, customer: { select: { onboardedAt: true, phone: true } } },
   });
   if (!u) return null;
   return {
@@ -60,6 +60,7 @@ export const getAccount = cache(async function getAccount(): Promise<Account | n
     tenantId: u.tenantId,
     customerId: u.customerId,
     onboardedAt: u.customer?.onboardedAt ?? null,
+    phone: u.customer?.phone ?? null,
   };
 });
 

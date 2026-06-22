@@ -8,6 +8,7 @@ import AiSidebar from "@/components/AiSidebar";
 import ChatSessionsPanel from "@/components/ChatSessionsPanel";
 import Toaster from "@/components/Toaster";
 import OnboardingModal from "@/components/OnboardingModal";
+import PhoneModal from "@/components/PhoneModal";
 import MainShell from "@/components/MainShell";
 import MobileNav from "@/components/MobileNav";
 import SidebarNav, { type SidebarNavItem } from "@/components/SidebarNav";
@@ -29,6 +30,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // completed (or skipped) it once. `onboardedAt` comes from the same cached
   // account lookup — no extra query.
   const needsOnboarding = account.customerId != null && account.onboardedAt === null;
+
+  // Phone backfill: phone is now required at customer sign-up, but customers who
+  // registered before that may have none. Prompt them for it once, after any
+  // first-login onboarding (gating on `!needsOnboarding` keeps the two modals
+  // from stacking). Scoped to the customer role — staff aren't shown this
+  // athlete-facing prompt, and many staff profiles legitimately have no phone.
+  const needsPhone =
+    account.role === "customer" && account.customerId != null && !account.phone && !needsOnboarding;
 
   const isStaff = user.role === "admin" || user.role === "coach";
   const nav: SidebarNavItem[] = [
@@ -88,6 +97,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AiSidebar user={{ name: user.name, role: user.role }} />
       <Suspense fallback={null}><Toaster /></Suspense>
       {needsOnboarding && <OnboardingModal firstName={user.name.split(" ")[0]} />}
+      {needsPhone && <PhoneModal />}
     </div>
   );
 }
