@@ -12,6 +12,7 @@ import { backfillCampPlan } from "@/domain/camps";
 import { decideConnection, connectByCode, disconnectCoachConnection } from "@/domain/coachConnections";
 import ExerciseList from "@/components/ExerciseList";
 import PlanExerciseChecklist from "@/components/PlanExerciseChecklist";
+import MarkDoneFeedback from "@/components/MarkDoneFeedback";
 import TodayNutrition from "@/components/TodayNutrition";
 import { flashUrl } from "@/lib/flash";
 import { classScope, campScope, canAccessCamp } from "@/lib/access";
@@ -642,25 +643,9 @@ export default async function Dashboard() {
                                     <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
                                   </form>
                                 ) : (
-                                  <form action={logMyAssignment} className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-                                    <input type="hidden" name="assignmentId" value={a.id} />
-                                    <input type="hidden" name="status" value="completed" />
-                                    <div>
-                                      <label className="block text-[10px] text-muted mb-0.5">RPE (1–10)</label>
-                                      <input name="rpe" type="number" min={1} max={10} className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] text-muted mb-0.5">Feeling</label>
-                                      <input name="feeling" placeholder="legs heavy…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                                    </div>
-                                    <div className="col-span-2">
-                                      <label className="block text-[10px] text-muted mb-0.5">Notes</label>
-                                      <input name="notes" placeholder="anything worth noting…" className="w-full rounded-md border border-border px-2 py-1 text-xs" />
-                                    </div>
-                                    <div className="col-span-2 sm:col-span-4 flex justify-end">
-                                      <button type="submit" className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs font-medium">Mark done</button>
-                                    </div>
-                                  </form>
+                                  /* Tapping "Mark done" pops a feedback sheet (RPE / feeling /
+                                     notes) so it isn't skipped, then marks the assignment done. */
+                                  <MarkDoneFeedback assignmentId={a.id} workoutName={a.workout.name} action={logMyAssignment} />
                                 ))}
                               </li>
                             );
