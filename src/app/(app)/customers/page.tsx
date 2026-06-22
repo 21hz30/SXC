@@ -385,7 +385,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   {/* Mock-test results */}
                   {selData.mocks.length > 0 && (
                     <div className="rounded-xl border border-border p-4">
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-muted uppercase tracking-wide mb-2"><Timer size={12} /> Mock tests</div>
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-muted uppercase tracking-wide mb-2"><Timer size={12} /> Simulation races</div>
                       <div className="divide-y divide-border">
                         {selData.mocks.map((m) => {
                           let splits = 0;

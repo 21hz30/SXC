@@ -94,7 +94,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       update: { timesJson: Object.keys(times).length ? JSON.stringify(times) : null, totalSec },
     });
     revalidatePath(`/classes/${id}`);
-    redirect(flashUrl(`/classes/${id}`, "Mock result saved"));
+    redirect(flashUrl(`/classes/${id}`, "Simulation result saved"));
   }
   // A mock-test entry form for one athlete: a time per exercise + a total.
   const mockFormFor = (customerId: string) => {
@@ -283,7 +283,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
         {/* Mock test — the athlete records their own time per exercise */}
         {cls.isMockTest && myCustomerId && (
           <div className="bg-card border border-border rounded-xl p-5 mb-6">
-            <h2 className="text-sm font-medium uppercase tracking-wide text-muted">Mock test — your result</h2>
+            <h2 className="text-sm font-medium uppercase tracking-wide text-muted">Simulation race — your result</h2>
             <p className="text-xs text-muted mt-0.5 mb-3">Record your time per exercise (mm:ss), or just the total.</p>
             {mockFormFor(myCustomerId)}
           </div>
@@ -697,7 +697,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
           </label>
           <label className="flex items-center gap-1.5 text-xs text-muted pb-2 cursor-pointer">
             <input type="checkbox" name="isMockTest" defaultChecked={cls.isMockTest} className="rounded border-border" />
-            Mock test
+            Simulation race
           </label>
           <div className="flex gap-2 ml-auto">
             <Link href={`/classes/${id}`} className="px-3 py-2 text-sm rounded-lg border border-border">Cancel</Link>
@@ -781,7 +781,7 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
       {/* Mock test results — coach can record/edit each athlete's times */}
       {cls.isMockTest && (
         <section className="bg-card border border-border rounded-xl p-6 mb-6">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-1">Mock test results</h2>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-1">Simulation race results</h2>
           <p className="text-xs text-muted mb-4">Record each athlete&apos;s time per exercise (mm:ss) <span className="font-medium text-foreground">and their total time</span> — athletes can also enter their own from this page. Athletes still to record open ready to fill in.</p>
           {cls.roster.length === 0 ? (
             <div className="text-sm text-muted">No athletes on the roster yet.</div>

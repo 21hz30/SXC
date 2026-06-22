@@ -796,7 +796,7 @@ export default async function Dashboard() {
 
           {myMockResults.length > 0 && (
             <div>
-              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Recent mock tests</h2>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Recent simulation races</h2>
               <ul className="bg-card border border-border rounded-xl divide-y divide-border">
                 {myMockResults.map((mr) => {
                   let count = 0;

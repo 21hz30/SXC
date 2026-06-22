@@ -22,7 +22,7 @@ import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 
 export const dynamic = "force-dynamic";
 
-type View = "training" | "race";
+type View = "training" | "race" | "simulation";
 type EditSection = "identity" | "hyrox" | "body" | "notes";
 
 // Parse "mm:ss" or plain seconds → integer seconds. Empty input → null.
@@ -117,7 +117,13 @@ export default async function CustomerDetail({ params, searchParams }: { params:
   // keep it for staff so coaches can log the very first race.
   const hasRaceData = c.raceResults.length > 0 || c.raceGoals.length > 0;
   const showRace = hasRaceData || isStaff;
-  const view: View = viewParam === "race" && showRace ? "race" : "training";
+  // Simulation-race results (formerly "mock tests") get their own tab once the
+  // athlete has any — staff always see it so they can review across sessions.
+  const showSimulation = c.mockResults.length > 0 || isStaff;
+  const view: View =
+    viewParam === "race" && showRace ? "race"
+      : viewParam === "simulation" && showSimulation ? "simulation"
+        : "training";
 
   const attended = c.rosterEntries.filter((r) => r.attendance === "attended").length;
   const totalMarked = c.rosterEntries.filter((r) => r.attendance !== "pending").length;
@@ -550,11 +556,12 @@ export default async function CustomerDetail({ params, searchParams }: { params:
         </div>
       </header>
 
-      {/* Tab toggle — only shown once there's race data (or for staff). */}
-      {showRace && (
+      {/* Tab toggle — shown once there's race or simulation data (or for staff). */}
+      {(showRace || showSimulation) && (
         <div className="mb-6 inline-flex rounded-lg border border-border overflow-hidden text-sm">
           <Link href={`/customers/${id}`} className={`px-4 py-2 ${view === "training" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Overview</Link>
-          <Link href={`/customers/${id}?view=race`} className={`px-4 py-2 ${view === "race" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Race</Link>
+          {showRace && <Link href={`/customers/${id}?view=race`} className={`px-4 py-2 border-l border-border ${view === "race" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Race</Link>}
+          {showSimulation && <Link href={`/customers/${id}?view=simulation`} className={`px-4 py-2 border-l border-border ${view === "simulation" ? "bg-foreground text-white" : "bg-background text-muted hover:bg-card"}`}>Simulation</Link>}
         </div>
       )}
 
@@ -1039,9 +1046,36 @@ export default async function CustomerDetail({ params, searchParams }: { params:
         )}
       </section>
 
-      {c.mockResults.length > 0 && (
+      {/* Simulation-race results now live in their own "Simulation" tab below. */}
+
+      <section>
+        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Class history</h2>
+        <div className="bg-card border border-border rounded-xl divide-y divide-border">
+          {c.rosterEntries.slice(0, 20).map((r) => (
+            <Link key={r.id} href={`/classes/${r.classId}`} className="flex justify-between items-center px-5 py-3 hover:bg-background">
+              <div>
+                <div className="font-medium text-sm">{r.class.title}</div>
+                <div className="text-xs text-muted">{formatDate(r.class.startsAt)} · {formatTime(r.class.startsAt)}</div>
+              </div>
+              <AttendancePill status={r.attendance} finished={new Date(r.class.startsAt) < new Date()} />
+            </Link>
+          ))}
+        </div>
+      </section>
+      </>
+      )}
+
+      {view === "simulation" && (
       <section className="mb-6">
-        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Mock tests ({c.mockResults.length})</h2>
+        <div className="flex items-baseline justify-between gap-2 mb-3 flex-wrap">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Simulation races <span className="font-normal">({c.mockResults.length})</span></h2>
+          <span className="text-[11px] text-muted">Recorded in a class marked “Simulation race”.</span>
+        </div>
+        {c.mockResults.length === 0 ? (
+          <div className="bg-card border border-dashed border-border rounded-xl p-6 text-center text-sm text-muted">
+            No simulation races yet. They show up here once {isSelf ? "you record" : `${c.name.split(" ")[0]} records`} a time in a class marked “Simulation race”.
+          </div>
+        ) : (
         <div className="bg-card border border-border rounded-xl divide-y divide-border overflow-hidden">
           {c.mockResults.map((mr) => {
             let times: Record<string, number> = {};
@@ -1075,24 +1109,8 @@ export default async function CustomerDetail({ params, searchParams }: { params:
             );
           })}
         </div>
+        )}
       </section>
-      )}
-
-      <section>
-        <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Class history</h2>
-        <div className="bg-card border border-border rounded-xl divide-y divide-border">
-          {c.rosterEntries.slice(0, 20).map((r) => (
-            <Link key={r.id} href={`/classes/${r.classId}`} className="flex justify-between items-center px-5 py-3 hover:bg-background">
-              <div>
-                <div className="font-medium text-sm">{r.class.title}</div>
-                <div className="text-xs text-muted">{formatDate(r.class.startsAt)} · {formatTime(r.class.startsAt)}</div>
-              </div>
-              <AttendancePill status={r.attendance} finished={new Date(r.class.startsAt) < new Date()} />
-            </Link>
-          ))}
-        </div>
-      </section>
-      </>
       )}
 
       {view === "race" && (
