@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, Camera } from "lucide-react";
 import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 type ParsedFood = {
@@ -14,12 +14,13 @@ type ParsedFood = {
 };
 
 /**
- * "Log a meal" form. Type what you ate → "Estimate with AI" fills in the
- * macro fields → tweak any number → save. Pure two-step flow: AI suggests,
- * you correct. No coupling between the AI estimate and the save itself —
- * blank macros save as null, so logging is still possible if AI is down.
+ * "Log a meal" form. Describe what you ate (or snap a photo) → AI fills in the
+ * macro fields → tweak any number → save. Pure two-step flow: AI suggests, you
+ * correct. No coupling between the AI estimate and the save itself — blank
+ * macros save as null, so logging is still possible if AI is down. The photo
+ * button only shows when a vision model is configured (`visionEnabled`).
  */
-export default function LogMealForm({ saveAction, initialMealType = "" }: { saveAction: (formData: FormData) => Promise<void>; initialMealType?: string }) {
+export default function LogMealForm({ saveAction, initialMealType = "", visionEnabled = false }: { saveAction: (formData: FormData) => Promise<void>; initialMealType?: string; visionEnabled?: boolean }) {
   const [description, setDescription] = useState("");
   const [mealType, setMealType] = useState(initialMealType);
   const [calories, setCalories] = useState("");
@@ -30,8 +31,20 @@ export default function LogMealForm({ saveAction, initialMealType = "" }: { save
   const [notes, setNotes] = useState("");
   const [aiRaw, setAiRaw] = useState<string | null>(null);
   const [estimating, setEstimating] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Fill the form fields from an AI estimate (shared by text + photo paths).
+  function applyParsed(p: ParsedFood & { raw?: string }) {
+    if (p.description) setDescription(p.description);
+    if (p.calories != null) setCalories(String(p.calories));
+    if (p.proteinG != null) setProtein(String(Math.round(p.proteinG * 10) / 10));
+    if (p.carbsG != null) setCarbs(String(Math.round(p.carbsG * 10) / 10));
+    if (p.fatG != null) setFat(String(Math.round(p.fatG * 10) / 10));
+    if (p.fiberG != null) setFiber(String(Math.round(p.fiberG * 10) / 10));
+    setAiRaw(p.raw ?? null);
+  }
 
   async function estimate() {
     if (!description.trim()) {
@@ -50,18 +63,80 @@ export default function LogMealForm({ saveAction, initialMealType = "" }: { save
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "AI couldn't estimate this — fill the numbers manually.");
       }
-      const p = (await res.json()) as ParsedFood & { raw: string };
-      setDescription(p.description || description);
-      if (p.calories != null) setCalories(String(p.calories));
-      if (p.proteinG != null) setProtein(String(Math.round(p.proteinG * 10) / 10));
-      if (p.carbsG != null) setCarbs(String(Math.round(p.carbsG * 10) / 10));
-      if (p.fatG != null) setFat(String(Math.round(p.fatG * 10) / 10));
-      if (p.fiberG != null) setFiber(String(Math.round(p.fiberG * 10) / 10));
-      setAiRaw(p.raw ?? null);
+      applyParsed((await res.json()) as ParsedFood & { raw: string });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setEstimating(false);
+    }
+  }
+
+  // Resize the photo (longest edge → 1024px) and JPEG-compress it client-side
+  // so the upload is ~100–200 KB, not a multi-MB phone original. Honors EXIF
+  // orientation so iOS portrait photos aren't sent to the model sideways.
+  async function shrinkToJpegBase64(file: File): Promise<string> {
+    let src: CanvasImageSource;
+    let sw: number;
+    let sh: number;
+    try {
+      // createImageBitmap with `from-image` bakes EXIF rotation into the bitmap.
+      const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+      src = bmp;
+      sw = bmp.width;
+      sh = bmp.height;
+    } catch {
+      // Fallback for browsers without the option: decode via <img> (no EXIF fix).
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = () => reject(new Error("read failed"));
+        r.readAsDataURL(file);
+      });
+      const img: HTMLImageElement = await new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error("decode failed"));
+        im.src = dataUrl;
+      });
+      src = img;
+      sw = img.width;
+      sh = img.height;
+    }
+    const MAX = 1024;
+    const scale = Math.min(1, MAX / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * scale));
+    const h = Math.max(1, Math.round(sh * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas unsupported");
+    ctx.drawImage(src, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.8).split(",")[1] ?? "";
+  }
+
+  async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same photo be re-picked
+    if (!file) return;
+    setError(null);
+    setAnalyzing(true);
+    try {
+      const imageBase64 = await shrinkToJpegBase64(file);
+      const res = await fetch("/api/nutrition/food/photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64, mediaType: "image/jpeg" }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Couldn't read the photo — describe the meal instead.");
+      }
+      applyParsed((await res.json()) as ParsedFood & { raw: string });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAnalyzing(false);
     }
   }
 
@@ -107,34 +182,42 @@ export default function LogMealForm({ saveAction, initialMealType = "" }: { save
           className={inputCls + " resize-y min-h-[3rem]"}
         />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className={labelCls}>Meal (optional)</label>
-          <select value={mealType} onChange={(e) => setMealType(e.target.value)} className={inputCls + " bg-white"}>
-            <option value="">—</option>
-            <option value="breakfast">Breakfast</option>
-            <option value="lunch">Lunch</option>
-            <option value="dinner">Dinner</option>
-            <option value="snack">Snack</option>
-            <option value="supplement">Supplement</option>
-          </select>
-        </div>
-        <div className="flex items-end">
-          <button
-            type="button"
-            onClick={estimate}
-            disabled={estimating || !description.trim()}
-            // iOS WeChat WKWebView (pre-iOS 16.4) doesn't render Tailwind v4's
-            // `color-mix(in oklab, …)` output that backs `bg-accent/5`, so the
-            // button rendered as a solid orange block with invisible text on
-            // older devices. Switched to fixed Tailwind orange palette so the
-            // compiled CSS is plain sRGB rgba().
-            className="w-full rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-40"
-          >
-            {estimating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {estimating ? "Estimating…" : "Estimate with AI"}
-          </button>
-        </div>
+      {/* AI assist: snap a photo OR describe it, then the model fills the macros.
+          Stacks on phones, side-by-side from sm up. */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        {visionEnabled && (
+          <label className={`flex-1 cursor-pointer rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 ${analyzing || estimating ? "opacity-40 pointer-events-none" : ""}`}>
+            {/* capture="environment" opens the rear camera on iOS; the native
+                sheet also offers Photo Library. Works in the home-screen PWA. */}
+            <input type="file" accept="image/*" capture="environment" onChange={onPhoto} disabled={analyzing || estimating} className="hidden" />
+            {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+            {analyzing ? "Reading photo…" : "Take a photo"}
+          </label>
+        )}
+        <button
+          type="button"
+          onClick={estimate}
+          disabled={estimating || analyzing || !description.trim()}
+          // iOS WeChat WKWebView (pre-iOS 16.4) doesn't render Tailwind v4's
+          // color-mix(oklab) output that backs bg-accent/5, so we use the fixed
+          // Tailwind orange palette (plain sRGB rgba) instead.
+          className="flex-1 rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-40"
+        >
+          {estimating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          {estimating ? "Estimating…" : "Estimate with AI"}
+        </button>
+      </div>
+
+      <div>
+        <label className={labelCls}>Meal (optional)</label>
+        <select value={mealType} onChange={(e) => setMealType(e.target.value)} className={inputCls + " bg-white"}>
+          <option value="">—</option>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner">Dinner</option>
+          <option value="snack">Snack</option>
+          <option value="supplement">Supplement</option>
+        </select>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 border-t border-border">

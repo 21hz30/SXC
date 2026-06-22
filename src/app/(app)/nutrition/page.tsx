@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
+import { hasDedicatedVisionModel } from "@/lib/ai";
 import { startOfDay, endOfDay, formatTime } from "@/lib/utils";
 import { Trash2, Utensils, Droplet, Scale, Camera, User2 } from "lucide-react";
 import TodayNutrition from "@/components/TodayNutrition";
@@ -288,10 +289,10 @@ export default async function NutritionPage({ searchParams }: { searchParams: Pr
             <Utensils size={13} /> Log a meal{initialMealType && <span className="text-[10px] text-accent font-semibold uppercase rounded-full bg-accent/10 px-2 py-0.5 ml-1">{MEAL_LABEL[initialMealType]}</span>}
           </h2>
           <span className="text-[11px] text-muted inline-flex items-center gap-1">
-            <Camera size={12} /> Photo + AI parsing — coming next
+            <Camera size={12} /> {hasDedicatedVisionModel() ? "Snap a photo or describe it — AI fills the macros" : "Describe it — AI fills the macros"}
           </span>
         </div>
-        <LogMealForm saveAction={saveMeal} initialMealType={initialMealType} />
+        <LogMealForm saveAction={saveMeal} initialMealType={initialMealType} visionEnabled={hasDedicatedVisionModel()} />
       </section>
 
       {/* WATER */}

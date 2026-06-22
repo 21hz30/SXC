@@ -10,12 +10,12 @@
  *   saving — the nutrition logger is "AI suggests, you correct," same model
  *   as Calorify.
  *
- * Vision (photo → macros) goes through `getAIVisionConfig()` and is added in
- * a follow-up when Qwen is wired in. The text-parse path here is the MVP.
+ * - `parseFoodFromImage` does the same from a PHOTO, using the dedicated
+ *   vision model (any Anthropic-compatible Messages API, e.g. SiliconFlow).
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
-import { getAIClient, getAIModel } from "@/lib/ai";
+import { getAIClient, getAIModel, getAIVisionClient, getAIVisionConfig } from "@/lib/ai";
 import { getPrompt } from "./prompts";
 import type { DayIntake } from "./nutrition";
 
@@ -89,17 +89,77 @@ export async function parseFoodWithAI(description: string): Promise<ParsedFood> 
     system,
     messages: [{ role: "user", content: description }],
   });
-  const raw = resp.content
+  return toParsedFood(textOf(resp), description, model);
+}
+
+// Allowed base64 image media types for the Anthropic image block.
+const IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+type ImageMediaType = (typeof IMAGE_MEDIA_TYPES)[number];
+export function isSupportedFoodImageType(t: string): t is ImageMediaType {
+  return (IMAGE_MEDIA_TYPES as readonly string[]).includes(t);
+}
+
+/**
+ * Estimate a meal's macros from a PHOTO. Uses the dedicated vision model via the
+ * Anthropic-compatible Messages API (image content block). Same JSON contract +
+ * ParsedFood shape as the text parser, so the caller fills the same form fields.
+ * Throws if the vision model is unreachable; the route handles that gracefully.
+ */
+export async function parseFoodFromImage(imageBase64: string, mediaType: ImageMediaType): Promise<ParsedFood> {
+  const client = getAIVisionClient();
+  const { model } = getAIVisionConfig();
+  const system = await getPrompt("nutrition.foodParse");
+  const resp = await client.messages.create({
+    model,
+    // Generous headroom: a reasoning ("thinking") vision model spends tokens
+    // analysing the image before emitting the tiny JSON, so a low cap would
+    // truncate the answer into invalid JSON and we'd lose every macro.
+    max_tokens: 8000,
+    system,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
+          // Self-contained vision instruction so the (text-framed) system prompt
+          // doesn't leave the model guessing — it carries the full task itself.
+          {
+            type: "text",
+            text:
+              "This is a PHOTO of a meal. Identify each food and drink you can see, then " +
+              "estimate the TOTAL macros for the whole plate. Reply with ONLY the JSON " +
+              "object from your instructions — `description` = the foods you see, and " +
+              "calories / proteinG / carbsG / fatG / fiberG as numbers.",
+          },
+        ],
+      },
+    ],
+  });
+  return toParsedFood(textOf(resp), "Meal from photo", model);
+}
+
+/** Concatenate the text blocks of a Messages response. */
+function textOf(resp: Anthropic.Messages.Message): string {
+  return resp.content
     .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("")
     .trim();
+}
+
+/**
+ * Coerce the model's raw text into a ParsedFood: extract the JSON block and
+ * pull the macro numbers, falling back to `fallbackDescription` (so the athlete
+ * always gets *something* to edit even if the model didn't return clean JSON).
+ * Shared by the text and photo parsers.
+ */
+function toParsedFood(raw: string, fallbackDescription: string, model: string): ParsedFood {
   let parsed: Partial<ParsedFood> = {};
   try {
     const o = JSON.parse(extractJson(raw)) as Record<string, unknown>;
     const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
     parsed = {
-      description: typeof o.description === "string" && o.description.trim() ? o.description.trim() : description,
+      description: typeof o.description === "string" && o.description.trim() ? o.description.trim() : fallbackDescription,
       calories: num(o.calories) != null ? Math.round(num(o.calories)!) : null,
       proteinG: num(o.proteinG),
       carbsG: num(o.carbsG),
@@ -107,12 +167,10 @@ export async function parseFoodWithAI(description: string): Promise<ParsedFood> 
       fiberG: num(o.fiberG),
     };
   } catch {
-    // If JSON parsing failed, the athlete still gets the raw text echoed back
-    // in description so they can manually fill the macro fields.
-    parsed.description = description;
+    parsed.description = fallbackDescription;
   }
   return {
-    description: parsed.description ?? description,
+    description: parsed.description ?? fallbackDescription,
     calories: parsed.calories ?? null,
     proteinG: parsed.proteinG ?? null,
     carbsG: parsed.carbsG ?? null,

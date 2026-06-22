@@ -29,22 +29,36 @@ export function getAIModel(): string {
 }
 
 /**
- * Config for the vision model. The food logger will read this to call a
- * vision-capable endpoint (e.g. Qwen-VL via DashScope's OpenAI-compatible
- * `/chat/completions`). Falls back to the text AI when the vision-specific
- * env vars are unset so callers don't blow up during early development.
+ * Config for the vision model behind the food-photo macro estimator. Any
+ * provider with an **Anthropic-compatible Messages API** works (e.g.
+ * SiliconFlow's https://api.siliconflow.cn/v1/messages), so the same
+ * `@anthropic-ai/sdk` client is reused — just with an image content block.
+ * The MODEL must be vision-capable (a text/code model can't read images).
+ * Falls back to the text AI vars so non-photo code paths don't crash.
  */
 export function getAIVisionConfig(): { apiKey: string; baseURL: string | null; model: string } {
   const apiKey = process.env.AI_VISION_API_KEY ?? process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_VISION_API_KEY or AI_API_KEY missing in .env");
   const baseURL = process.env.AI_VISION_BASE_URL ?? process.env.AI_BASE_URL ?? null;
-  // Default model is what we'll switch to — qwen-vl-max via DashScope. Until
-  // AI_VISION_MODEL is set we just use the text model so test calls don't crash.
-  const model = process.env.AI_VISION_MODEL ?? process.env.AI_MODEL ?? "qwen-vl-max";
+  const model = process.env.AI_VISION_MODEL ?? process.env.AI_MODEL ?? "moonshotai/Kimi-VL-A3B-Thinking";
   return { apiKey, baseURL, model };
 }
 
-/** True when AI_VISION_* env vars are wired (and not just falling back). */
+/**
+ * True only when a DEDICATED vision model is wired (both key and model). The
+ * UI gates the "Take a photo" button on this so it never appears when vision
+ * would just fall back to the text model (which can't read images).
+ */
 export function hasDedicatedVisionModel(): boolean {
   return !!process.env.AI_VISION_API_KEY && !!process.env.AI_VISION_MODEL;
+}
+
+let _visionClient: Anthropic | null = null;
+
+/** Anthropic SDK client pointed at the vision endpoint (cached per process). */
+export function getAIVisionClient(): Anthropic {
+  if (_visionClient) return _visionClient;
+  const { apiKey, baseURL } = getAIVisionConfig();
+  _visionClient = new Anthropic({ apiKey, baseURL: baseURL ?? undefined });
+  return _visionClient;
 }
