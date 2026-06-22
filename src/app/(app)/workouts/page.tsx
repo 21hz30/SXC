@@ -13,10 +13,12 @@ import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkoutsPage({ searchParams }: { searchParams: Promise<{ new?: string; type?: string }> }) {
+export default async function WorkoutsPage({ searchParams }: { searchParams: Promise<{ new?: string; type?: string; creator?: string; tag?: string }> }) {
   const user = await requireUser();
   const isStaff = user.role === "admin" || user.role === "coach";
-  const { new: isNew, type: typeFilter } = await searchParams;
+  const { new: isNew, type: typeFilter, creator: creatorParam, tag: tagParam } = await searchParams;
+  const creatorFilter = creatorParam || null;
+  const tagFilter = tagParam || null;
 
   // Staff see their tenant's shared library (admin = every tenant's). A customer
   // sees ONLY workouts they built for themselves — the coach library is not
@@ -30,11 +32,51 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
     include: {
       items: { orderBy: { order: "asc" }, take: 6 },
       classes: { include: { class: { select: { startsAt: true } } } },
+      createdBy: { select: { id: true, name: true } },
     },
   });
-  // Filter tabs (with counts) + the filtered view.
-  const typeCounts = WORKOUT_TYPES.map((t) => ({ ...t, count: workouts.filter((w) => w.type === t.key).length }));
-  const shown = typeFilter ? workouts.filter((w) => w.type === typeFilter) : workouts;
+
+  // Faceted filters: Type (tabs) · Created-by (staff library) · Tag. Each
+  // dimension's options/counts are computed within the OTHER active filters, and
+  // the list is filtered by all three together.
+  type Row = (typeof workouts)[number];
+  const mType = (w: Row) => !typeFilter || w.type === typeFilter;
+  const mCreator = (w: Row) => !creatorFilter || w.createdByUserId === creatorFilter;
+  const mTag = (w: Row) => !tagFilter || splitTags(w.tags).includes(tagFilter);
+
+  const typeCounts = WORKOUT_TYPES.map((t) => ({
+    ...t,
+    count: workouts.filter((w) => mCreator(w) && mTag(w) && w.type === t.key).length,
+  }));
+  const allTypeCount = workouts.filter((w) => mCreator(w) && mTag(w)).length;
+
+  // Distinct authors (stable list), each counted within the active Type+Tag.
+  // Athlete-private workouts have no author, so this is a staff-library concept.
+  const creatorMap = new Map<string, { id: string; name: string; count: number }>();
+  if (isStaff) {
+    for (const w of workouts) {
+      if (w.createdByUserId && w.createdBy && !creatorMap.has(w.createdByUserId)) {
+        creatorMap.set(w.createdByUserId, { id: w.createdByUserId, name: w.createdBy.name, count: 0 });
+      }
+    }
+    for (const w of workouts) {
+      if (w.createdByUserId && mType(w) && mTag(w)) {
+        const e = creatorMap.get(w.createdByUserId);
+        if (e) e.count++;
+      }
+    }
+  }
+  const creators = [...creatorMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Distinct tags (stable list), each counted within the active Type+Creator.
+  const tagMap = new Map<string, number>();
+  for (const w of workouts) for (const t of splitTags(w.tags)) if (!tagMap.has(t)) tagMap.set(t, 0);
+  for (const w of workouts) if (mType(w) && mCreator(w)) for (const t of splitTags(w.tags)) tagMap.set(t, (tagMap.get(t) ?? 0) + 1);
+  const tagOptions = [...tagMap.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+
+  const shown = workouts.filter((w) => mType(w) && mCreator(w) && mTag(w));
+  const anyFilter = !!typeFilter || !!creatorFilter || !!tagFilter;
+  const cur = { type: typeFilter, creator: creatorFilter ?? undefined, tag: tagFilter ?? undefined };
 
   // Customers also see the workouts their coach assigned them (distinct, recent
   // first) so they can review or copy one into their own library to practice.
@@ -217,13 +259,41 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
 
       {!isStaff && <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">My workouts</h2>}
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        <Link href="/workouts" className={`text-xs rounded-full px-3 py-1.5 border transition ${!typeFilter ? "bg-foreground text-white border-foreground" : "border-border text-muted hover:border-accent"}`}>All <span className="tabular-nums">{workouts.length}</span></Link>
-        {typeCounts.map((t) => (
-          <Link key={t.key} href={`/workouts?type=${t.key}`} className={`text-xs rounded-full px-3 py-1.5 border transition ${typeFilter === t.key ? "bg-foreground text-white border-foreground" : "border-border text-muted hover:border-accent"}`}>
-            {t.label} <span className="tabular-nums opacity-70">{t.count}</span>
-          </Link>
-        ))}
+      {/* Filters — Type (tabs) · Created by (staff library) · Tag. Each chip
+          preserves the other active filters; counts are faceted. Wraps on H5. */}
+      <div className="space-y-2.5 mb-4">
+        <div className="flex flex-wrap gap-2">
+          <Link href={filtersUrl(cur, { type: undefined })} className={chipCls(!typeFilter)}>All <span className="tabular-nums opacity-70">{allTypeCount}</span></Link>
+          {typeCounts.map((t) => (
+            <Link key={t.key} href={filtersUrl(cur, { type: t.key })} className={chipCls(typeFilter === t.key)}>
+              {t.label} <span className="tabular-nums opacity-70">{t.count}</span>
+            </Link>
+          ))}
+        </div>
+
+        {isStaff && creators.length > 1 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted mr-0.5">Created by</span>
+            <Link href={filtersUrl(cur, { creator: undefined })} className={chipCls(!creatorFilter)}>All</Link>
+            {creators.map((c) => (
+              <Link key={c.id} href={filtersUrl(cur, { creator: c.id })} className={chipCls(creatorFilter === c.id)}>
+                <span data-no-i18n>{c.name}</span> <span className="tabular-nums opacity-70">{c.count}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        {tagOptions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted mr-0.5">Tag</span>
+            <Link href={filtersUrl(cur, { tag: undefined })} className={chipCls(!tagFilter)}>All</Link>
+            {tagOptions.map((t) => (
+              <Link key={t.name} href={filtersUrl(cur, { tag: t.name })} className={chipCls(tagFilter === t.name)}>
+                <span data-no-i18n>{t.name}</span> <span className="tabular-nums opacity-70">{t.count}</span>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -260,7 +330,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
                 </Link>
               )}
               <div className="mt-3 flex flex-wrap gap-1.5">
-                {(w.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean).map((t) => (
+                {splitTags(w.tags).map((t) => (
                   <span key={t} className="text-xs bg-accent/10 text-accent rounded-full px-2 py-0.5">{t}</span>
                 ))}
               </div>
@@ -269,10 +339,37 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
         })}
         {shown.length === 0 && (
           <div className="text-center text-sm text-muted py-10 bg-card border border-border border-dashed rounded-xl">
-            {typeFilter ? "No workouts of this type yet." : "No workouts yet — tap “New workout” to start."}
+            {anyFilter ? "No workouts match these filters." : "No workouts yet — tap “New workout” to start."}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/** "pro team, strength" → ["pro team", "strength"]; empty/blank → []. */
+function splitTags(tags: string | null | undefined): string[] {
+  return (tags ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+/** Filter-chip styling — solid when active, outline + hover otherwise. */
+function chipCls(active: boolean): string {
+  return `text-xs rounded-full px-3 py-1.5 border transition ${
+    active ? "bg-foreground text-white border-foreground" : "border-border text-muted hover:border-accent"
+  }`;
+}
+
+/** Build /workouts?… keeping the current filters but overriding the patched
+ *  dimension(s). Pass `undefined` for a dimension to clear it ("All"). */
+function filtersUrl(
+  cur: { type?: string; creator?: string; tag?: string },
+  patch: { type?: string; creator?: string; tag?: string },
+): string {
+  const m = { ...cur, ...patch };
+  const qs = new URLSearchParams();
+  if (m.type) qs.set("type", m.type);
+  if (m.creator) qs.set("creator", m.creator);
+  if (m.tag) qs.set("tag", m.tag);
+  const s = qs.toString();
+  return s ? `/workouts?${s}` : "/workouts";
 }
