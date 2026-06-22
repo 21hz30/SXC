@@ -45,13 +45,10 @@ export default function PhoneModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-sm bg-card border border-border rounded-2xl p-6 shadow-xl">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-4">
           <Phone size={18} className="text-orange-600 shrink-0" />
           <h2 className="text-lg font-semibold">Add your phone number</h2>
         </div>
-        <p className="text-sm text-muted mb-4 leading-snug">
-          We need a contact number on your profile so your coach can reach you. It only takes a second.
-        </p>
         <form onSubmit={save}>
           <input
             value={phone}

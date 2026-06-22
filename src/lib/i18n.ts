@@ -91,7 +91,6 @@ export const DICT: Record<string, string> = {
   "Email (optional)": "邮箱（可选）",
   "Coach invitation code (optional)": "教练邀请码（可选）",
   "Add your phone number": "填写你的电话号码",
-  "We need a contact number on your profile so your coach can reach you. It only takes a second.": "我们需要你档案里的联系电话，方便教练与你联系。只需几秒钟。",
   "Save my number": "保存号码",
   "Enter a valid phone number.": "请输入有效的电话号码。",
   "Couldn't save — please try again.": "保存失败，请重试。",
