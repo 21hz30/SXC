@@ -38,12 +38,12 @@ export default async function RegisterPage({
       password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
     if (!passwordOk) redirect(`/register?error=invalid${codeQS}`);
 
-    // Hard-gated onboarding: every new athlete must arrive through a coach's
-    // invitation code, so they land tied to a real coach/tenant (not floating
-    // in an empty app). Validate the code BEFORE creating the account so a bad
-    // code never leaves an orphan login behind.
-    if (!code) redirect(`/register?error=nocode${codeQS}`);
-    if (!(await findCoachByCode(code))) redirect(`/register?error=badcode${codeQS}`);
+    // The coach code is OPTIONAL. An athlete can join with no coach — they can
+    // still browse and sign up for drop-in classes, and add a coach later from
+    // their profile. But IF they typed a code, it must be valid (so a typo
+    // doesn't silently create a coachless account they didn't intend). Checked
+    // before account creation so a bad code never leaves an orphan login behind.
+    if (code && !(await findCoachByCode(code))) redirect(`/register?error=badcode${codeQS}`);
 
     // Public sign-up creates an athlete (customer) account: a login + a linked
     // profile. Staff accounts are created by an admin from the Team page.
@@ -58,10 +58,10 @@ export default async function RegisterPage({
       throw e;
     }
 
-    // Tie the new athlete to the coach as a PENDING request — the coach approves
-    // it from their dashboard inbox (#31). Same path as the profile's connect-
-    // by-code; for a brand-new customer it always succeeds.
-    await connectByCode(customerId, code);
+    // If they supplied a (valid) code, request the connection — pending until
+    // the coach approves it from their dashboard inbox (#31). No code → skip,
+    // and they start as a free drop-in athlete.
+    if (code) await connectByCode(customerId, code);
 
     // Auto-login, then land on the profile where onboarding pops up.
     const jar = await cookies();
@@ -80,10 +80,8 @@ export default async function RegisterPage({
     ? "Username must be English letters and numbers only (at least 3, no spaces or symbols)."
     : error === "invalid"
     ? "Password must be at least 8 characters and include a letter and a number."
-    : error === "nocode"
-    ? "Enter your coach's invitation code to join. Ask your coach for it."
     : error === "badcode"
-    ? "That invitation code didn't match any coach. Double-check it with your coach."
+    ? "That invitation code didn't match any coach. Leave it blank to join without a coach, or double-check the code."
     : null;
 
   return (
@@ -95,19 +93,18 @@ export default async function RegisterPage({
         </div>
 
         <label className="block text-sm font-medium mb-1.5">
-          Coach invitation code <span className="text-accent font-semibold">· required to join</span>
+          Coach invitation code <span className="text-muted font-normal">· optional</span>
         </label>
         <input
           name="code"
           defaultValue={presetCode}
-          required
           autoCapitalize="characters"
           spellCheck={false}
           placeholder="e.g. SRC-TAY-9X3K"
           className="w-full rounded-lg border border-border bg-white px-3 py-3 text-base font-mono tracking-wider uppercase outline-none focus:border-accent"
         />
         <p className="mt-1.5 mb-3 text-xs text-muted leading-snug">
-          Ask your coach for their code. You&apos;ll appear in their dashboard for approval right after signing up.
+          Have a code from your coach? Enter it to connect (they&apos;ll approve you). No code? You can still sign up for drop-in classes and add a coach later.
         </p>
 
         <label className="block text-sm font-medium mb-1.5">
