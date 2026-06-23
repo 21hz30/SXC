@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Sparkles, Loader2, Camera } from "lucide-react";
+import { Sparkles, Loader2, Camera, Upload } from "lucide-react";
 import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
 type ParsedFood = {
@@ -169,6 +169,9 @@ export default function LogMealForm({ saveAction, initialMealType = "", visionEn
 
   const inputCls = "w-full rounded-lg border border-border bg-white px-3 py-2 text-sm";
   const labelCls = "block text-xs font-medium text-muted uppercase tracking-wide mb-1";
+  // Shared style for the two photo buttons (camera + library). Fixed sRGB sky
+  // palette, not bg-accent/N — that color-mix output is invisible on old iOS.
+  const photoBtnCls = `flex-1 cursor-pointer rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 ${analyzing || estimating ? "opacity-40 pointer-events-none" : ""}`;
 
   return (
     <form onSubmit={submit} className="bg-card border border-border rounded-xl p-5 space-y-4">
@@ -182,17 +185,26 @@ export default function LogMealForm({ saveAction, initialMealType = "", visionEn
           className={inputCls + " resize-y min-h-[3rem]"}
         />
       </div>
-      {/* AI assist: snap a photo OR describe it, then the model fills the macros.
-          Stacks on phones, side-by-side from sm up. */}
-      <div className="flex flex-col sm:flex-row gap-2">
+      {/* AI assist: snap a photo, upload one from the library, or describe it —
+          the model fills the macros. The two photo buttons share a row; "Estimate
+          with AI" sits below. All wrap cleanly on H5. */}
+      <div className="space-y-2">
         {visionEnabled && (
-          <label className={`flex-1 cursor-pointer rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 ${analyzing || estimating ? "opacity-40 pointer-events-none" : ""}`}>
-            {/* capture="environment" opens the rear camera on iOS; the native
-                sheet also offers Photo Library. Works in the home-screen PWA. */}
-            <input type="file" accept="image/*" capture="environment" onChange={onPhoto} disabled={analyzing || estimating} className="hidden" />
-            {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-            {analyzing ? "Reading photo…" : "Take a photo"}
-          </label>
+          <div className="flex gap-2">
+            {/* capture="environment" jumps straight to the rear camera. */}
+            <label className={photoBtnCls}>
+              <input type="file" accept="image/*" capture="environment" onChange={onPhoto} disabled={analyzing || estimating} className="hidden" />
+              {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+              {analyzing ? "Reading photo…" : "Take a photo"}
+            </label>
+            {/* No capture → the native picker offers the Photo Library + Files,
+                so the athlete can upload an existing photo of their meal. */}
+            <label className={photoBtnCls}>
+              <input type="file" accept="image/*" onChange={onPhoto} disabled={analyzing || estimating} className="hidden" />
+              {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {analyzing ? "Reading photo…" : "Upload photo"}
+            </label>
+          </div>
         )}
         <button
           type="button"
@@ -201,7 +213,7 @@ export default function LogMealForm({ saveAction, initialMealType = "", visionEn
           // iOS WeChat WKWebView (pre-iOS 16.4) doesn't render Tailwind v4's
           // color-mix(oklab) output that backs bg-accent/5, so we use the fixed
           // Tailwind orange palette (plain sRGB rgba) instead.
-          className="flex-1 rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-40"
+          className="w-full rounded-lg border border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-40"
         >
           {estimating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           {estimating ? "Estimating…" : "Estimate with AI"}
