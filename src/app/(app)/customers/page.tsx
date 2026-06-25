@@ -51,7 +51,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         ],
       },
       orderBy: { name: "asc" },
-      include: { rosterEntries: true, campMembers: { select: { campId: true } }, userAccount: { select: { role: true } } },
+      // Roster rows are only tallied by attendance — select that one field rather
+      // than hydrating every customer's full class history.
+      include: { rosterEntries: { select: { attendance: true } }, campMembers: { select: { campId: true } }, userAccount: { select: { role: true } } },
     }),
     db.camp.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);

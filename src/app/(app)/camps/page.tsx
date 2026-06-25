@@ -22,7 +22,13 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
     db.camp.findMany({
       where: isStaff ? campScope(user) : {},
       orderBy: { startDate: "desc" },
-      include: { members: true, classes: true, coach: true, createdBy: true },
+      // Only counts + the two names are rendered — don't hydrate every member /
+      // class row (and two full coach rows) per camp.
+      include: {
+        _count: { select: { members: true, classes: true } },
+        coach: { select: { name: true } },
+        createdBy: { select: { name: true } },
+      },
     }),
     user.role === "admin"
       ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } })
@@ -140,8 +146,8 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
             </div>
             <div className="flex gap-6 mt-4 text-sm text-muted">
               <div>📅 {formatDate(c.startDate)} → {formatDate(c.endDate)}</div>
-              <div>👥 {c.members.length} members</div>
-              <div>🏋️ {c.classes.length} classes</div>
+              <div>👥 {c._count.members} members</div>
+              <div>🏋️ {c._count.classes} classes</div>
             </div>
           </Link>
         ))}

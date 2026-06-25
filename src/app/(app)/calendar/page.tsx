@@ -51,7 +51,9 @@ export default async function CalendarPage({
     db.class.findMany({
       where: { startsAt: { gte: queryStart, lte: queryEnd }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
-      include: { roster: true, camp: true },
+      // Only customerId (signed-up check) + attendance (count) + roster size are
+      // read — don't drag every full RosterEntry row across a 42-day month view.
+      include: { roster: { select: { customerId: true, attendance: true } }, camp: true },
     }),
     db.todo.findMany({
       where: { ownerId: user.id, dueDate: { gte: queryStart, lte: queryEnd } },
