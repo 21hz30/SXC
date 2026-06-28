@@ -80,7 +80,7 @@ function toItemDTO(r: Awaited<ReturnType<typeof db.workoutItem.findFirst>>): Wor
   };
 }
 
-export async function listWorkouts(_ctx: Ctx) {
+export async function listWorkouts() {
   return db.workout.findMany({
     orderBy: { createdAt: "desc" },
     include: {
@@ -172,7 +172,7 @@ export async function saveWorkout(
  * Returns the effective workout id (the clone's id when a copy was made).
  */
 export async function adjustClassWorkout(
-  _ctx: Ctx,
+  ctx: Ctx,
   classId: string,
   workoutId: string,
   items: WorkoutItemInput[]
@@ -185,7 +185,7 @@ export async function adjustClassWorkout(
   const shared = otherClassUses > 0;
 
   if (!shared) {
-    await saveWorkout(_ctx, workoutId, {
+    await saveWorkout(ctx, workoutId, {
       name: orig.name,
       description: orig.description,
       type: orig.type,
@@ -201,6 +201,9 @@ export async function adjustClassWorkout(
       description: orig.description,
       type: orig.type,
       tags: orig.tags,
+      tenantId: orig.tenantId,
+      visibility: orig.visibility,
+      createdByUserId: orig.ownerCustomerId ? null : ctx.user.id,
       items: {
         create: items.map((it, i) => ({
           order: i,

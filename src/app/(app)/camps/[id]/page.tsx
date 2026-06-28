@@ -370,6 +370,8 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     redirect(flashUrl(`/camps/${id}`, "Class deleted"));
   }
 
+  const nowMs = new Date().getTime();
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <BackButton fallback="/camps" label="Back" />
@@ -675,7 +677,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
               // (mirrors the class page) OR once a coach pre-released them;
               // staff always see them. We don't even send the names to members
               // early — nothing to leak.
-              const revealed = isStaff || !!c.workoutsRevealedAt || Date.now() >= c.startsAt.getTime() - 30 * 60_000;
+              const revealed = isStaff || !!c.workoutsRevealedAt || nowMs >= c.startsAt.getTime() - 30 * 60_000;
               return {
                 id: c.id,
                 title: c.title,

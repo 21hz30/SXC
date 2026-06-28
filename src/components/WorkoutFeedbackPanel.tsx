@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 
 export type Member = { customerId: string; name: string };
@@ -33,6 +33,20 @@ function blankRow(customerId: string, workoutId: string): WorkoutPerfRow {
   };
 }
 
+function buildRows(
+  members: Member[],
+  initial: WorkoutPerfRow[],
+  workoutId: string,
+  current?: Record<string, WorkoutPerfRow>,
+): Record<string, WorkoutPerfRow> {
+  const map: Record<string, WorkoutPerfRow> = {};
+  for (const m of members) {
+    const existing = initial.find((p) => p.customerId === m.customerId);
+    map[m.customerId] = current?.[m.customerId] ?? existing ?? blankRow(m.customerId, workoutId);
+  }
+  return map;
+}
+
 /**
  * Per-workout feedback table for one workout in a class. Each rostered athlete
  * gets a compact row to log status / RPE / fatigue / feeling / injury for THIS
@@ -52,32 +66,16 @@ export default function WorkoutFeedbackPanel({
   exercises: Exercise[];
   initial: WorkoutPerfRow[];
 }) {
-  const [rows, setRows] = useState<Record<string, WorkoutPerfRow>>(() => {
-    const map: Record<string, WorkoutPerfRow> = {};
-    for (const m of members) {
-      const existing = initial.find((p) => p.customerId === m.customerId);
-      map[m.customerId] = existing ?? blankRow(m.customerId, workoutId);
-    }
-    return map;
-  });
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
-
   // Resync rows when the roster set changes (e.g. an athlete added/removed).
   const memberIdsKey = members.map((m) => m.customerId).join(",");
-  useEffect(() => {
-    setRows((cur) => {
-      const map = { ...cur };
-      for (const m of members) {
-        if (!map[m.customerId]) {
-          const existing = initial.find((p) => p.customerId === m.customerId);
-          map[m.customerId] = existing ?? blankRow(m.customerId, workoutId);
-        }
-      }
-      return map;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memberIdsKey]);
+  const [rowsKey, setRowsKey] = useState(memberIdsKey);
+  const [rows, setRows] = useState<Record<string, WorkoutPerfRow>>(() => buildRows(members, initial, workoutId));
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  if (memberIdsKey !== rowsKey) {
+    setRowsKey(memberIdsKey);
+    setRows((cur) => buildRows(members, initial, workoutId, cur));
+  }
 
   async function patch(customerId: string, fields: Partial<WorkoutPerfRow>) {
     setRows((cur) => ({ ...cur, [customerId]: { ...cur[customerId], ...fields } }));

@@ -120,6 +120,36 @@ export function canAccessCamp(u: SessionUser, camp: { coachId: string | null; cr
 }
 
 /**
+ * Can this staff user mutate a class? Mirrors the page-level guard used by the
+ * class detail UI, but is small enough for API routes to reuse before writes.
+ */
+export function canManageClass(
+  u: SessionUser,
+  cls: {
+    createdById: string | null;
+    camp: { id: string; coachId: string | null; createdById?: string | null } | null;
+  },
+): boolean {
+  if (isAdmin(u)) return true;
+  if (u.role !== "coach") return false;
+  return cls.camp ? canAccessCamp(u, cls.camp) : cls.createdById === u.id;
+}
+
+/**
+ * Can this staff user attach/clone a shared library workout? Athlete-private
+ * workouts stay private; coaches are scoped to their tenant's library.
+ */
+export function canUseLibraryWorkout(
+  u: SessionUser,
+  workout: { ownerCustomerId: string | null; tenantId: string | null },
+): boolean {
+  if (workout.ownerCustomerId !== null) return false;
+  if (isAdmin(u)) return true;
+  if (u.role === "coach") return workout.tenantId === u.tenantId;
+  return false;
+}
+
+/**
  * Can this user open a specific customer profile (direct-URL guard)?
  *   admin → any
  *   anyone → their OWN linked profile (so a coach/athlete can see themselves)

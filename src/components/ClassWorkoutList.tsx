@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { GripVertical, Minus, Plus, Copy } from "lucide-react";
 import { toast } from "@/components/Toaster";
@@ -14,18 +14,18 @@ type Item = { workoutId: string; rounds: number; card: React.ReactNode };
  */
 export default function ClassWorkoutList({ classId, items }: { classId: string; items: Item[] }) {
   const router = useRouter();
+  // Re-sync when the server set changes (a workout was added/removed).
+  const key = items.map((i) => i.workoutId).join(",");
+  const [itemsKey, setItemsKey] = useState(key);
   const [order, setOrder] = useState<Item[]>(items);
   const [rounds, setRounds] = useState<Record<string, number>>(() => Object.fromEntries(items.map((i) => [i.workoutId, i.rounds])));
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
-
-  // Re-sync when the server set changes (a workout was added/removed).
-  const key = items.map((i) => i.workoutId).join(",");
-  useEffect(() => {
+  if (key !== itemsKey) {
+    setItemsKey(key);
     setOrder(items);
     setRounds(Object.fromEntries(items.map((i) => [i.workoutId, i.rounds])));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }
 
   async function persistOrder(next: Item[]) {
     try {

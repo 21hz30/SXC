@@ -6,7 +6,6 @@ import { formatTime, formatDate } from "@/lib/utils";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
-import { formatItem } from "@/domain/exercises";
 import ExerciseList from "@/components/ExerciseList";
 import { requireUser, requireCoach, getMyCustomerId } from "@/lib/auth";
 import { listPerformance } from "@/domain/performance";
@@ -145,11 +144,12 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
 
     const myEntry = myCustomerId ? cls.roster.find((r) => r.customerId === myCustomerId) ?? null : null;
     const status = classStatus({ canceledAt: cls.canceledAt, startsAt: cls.startsAt, durationMin: cls.durationMin, capacity: cls.capacity, rosterCount: cls.roster.length });
+    const nowMs = new Date().getTime();
     // Members see the workout 30 minutes before start — or sooner if the
     // coach pre-released it manually.
-    const planRevealed = !!cls.workoutsRevealedAt || Date.now() >= cls.startsAt.getTime() - 30 * 60_000;
+    const planRevealed = !!cls.workoutsRevealedAt || nowMs >= cls.startsAt.getTime() - 30 * 60_000;
     // Feedback opens once the class has started (or the coach explicitly asks).
-    const classStarted = cls.startsAt.getTime() <= Date.now();
+    const classStarted = cls.startsAt.getTime() <= nowMs;
     const showFeedback = !!myCustomerId && (classStarted || !!cls.feedbackRequestedAt);
     const [myPerf, myWatch] = myCustomerId
       ? await Promise.all([
@@ -591,7 +591,8 @@ export default async function ClassDetail({ params, searchParams }: { params: Pr
   // Show the pre-release button only when there's something to release and it
   // isn't already visible to members. Coach reveals = within 30 min of start
   // OR they manually released.
-  const staffPlanRevealed = !!cls.workoutsRevealedAt || Date.now() >= cls.startsAt.getTime() - 30 * 60_000;
+  const nowMs = new Date().getTime();
+  const staffPlanRevealed = !!cls.workoutsRevealedAt || nowMs >= cls.startsAt.getTime() - 30 * 60_000;
   const canPreRelease = !staffPlanRevealed && cls.workouts.length > 0;
 
   const status = classStatus({ canceledAt: cls.canceledAt, startsAt: cls.startsAt, durationMin: cls.durationMin, capacity: cls.capacity, rosterCount: cls.roster.length });

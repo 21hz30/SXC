@@ -29,6 +29,7 @@ export default function CustomerInsights({ customerId, customerName }: { custome
   useEffect(() => {
     try {
       const s = localStorage.getItem(key);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (s) setData(JSON.parse(s));
     } catch {}
   }, [key]);

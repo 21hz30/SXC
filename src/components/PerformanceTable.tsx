@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 
@@ -38,6 +38,15 @@ function blankRow(customerId: string): PerfRow {
   };
 }
 
+function buildRows(members: Member[], initial: PerfRow[], current?: Record<string, PerfRow>): Record<string, PerfRow> {
+  const map: Record<string, PerfRow> = {};
+  for (const m of members) {
+    const existing = initial.find((p) => p.customerId === m.customerId);
+    map[m.customerId] = current?.[m.customerId] ?? existing ?? blankRow(m.customerId);
+  }
+  return map;
+}
+
 export default function PerformanceTable({
   classId,
   members,
@@ -52,33 +61,17 @@ export default function PerformanceTable({
 }) {
   // Flat exercise count drives whether the expand toggle is shown.
   const totalExercises = workoutGroups.reduce((n, g) => n + g.items.length, 0);
-  const [rows, setRows] = useState<Record<string, PerfRow>>(() => {
-    const map: Record<string, PerfRow> = {};
-    for (const m of members) {
-      const existing = initial.find((p) => p.customerId === m.customerId);
-      map[m.customerId] = existing ?? blankRow(m.customerId);
-    }
-    return map;
-  });
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
-
   // When the roster changes (a member added/removed on the class page), make
   // sure every member has a row so the table never reads from `undefined`.
   const memberIdsKey = members.map((m) => m.customerId).join(",");
-  useEffect(() => {
-    setRows((cur) => {
-      const map = { ...cur };
-      for (const m of members) {
-        if (!map[m.customerId]) {
-          const existing = initial.find((p) => p.customerId === m.customerId);
-          map[m.customerId] = existing ?? blankRow(m.customerId);
-        }
-      }
-      return map;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memberIdsKey]);
+  const [rowsKey, setRowsKey] = useState(memberIdsKey);
+  const [rows, setRows] = useState<Record<string, PerfRow>>(() => buildRows(members, initial));
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  if (memberIdsKey !== rowsKey) {
+    setRowsKey(memberIdsKey);
+    setRows((cur) => buildRows(members, initial, cur));
+  }
 
   async function patch(customerId: string, fields: Partial<PerfRow>) {
     setRows((cur) => ({ ...cur, [customerId]: { ...cur[customerId], ...fields } }));

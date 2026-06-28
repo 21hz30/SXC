@@ -68,7 +68,10 @@ function Row({ it, n }: { it: ExerciseItem; n: number }) {
 export default function ExerciseList({ items }: { items: ExerciseItem[] }) {
   if (!items?.length) return null;
   const rows = groupItems(items);
-  let n = 0;
+  const numberedRows = rows.map((row, i) => ({
+    row,
+    n: rows.slice(0, i + 1).filter((r) => r.kind === "solo").length,
+  }));
   return (
     <div className="mt-3 rounded-xl border border-border bg-background overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-foreground/[0.02]">
@@ -78,9 +81,8 @@ export default function ExerciseList({ items }: { items: ExerciseItem[] }) {
         </span>
       </div>
       <ol className="divide-y divide-border">
-        {rows.map((row, i) => {
+        {numberedRows.map(({ row, n }, i) => {
           if (row.kind === "solo") {
-            n += 1;
             return <Row key={row.item.id ?? `s-${i}`} it={row.item} n={n} />;
           }
           // Group row — render the members as a nested numbered list with a

@@ -29,6 +29,7 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
     if (!checkable) return;
     try {
       const raw = localStorage.getItem(key);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw) setChecked(new Set(JSON.parse(raw) as string[]));
     } catch {}
   }, [key, checkable]);
@@ -46,6 +47,10 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
   if (!items?.length) return null;
   const doneCount = items.filter((it) => it.id && checked.has(it.id)).length;
   const rows = groupItems(items);
+  const numberedRows = rows.map((row, i) => ({
+    row,
+    n: rows.slice(0, i + 1).filter((r) => r.kind === "solo").length,
+  }));
 
   // Render one numbered or tick-able row (used inside both solo and group contexts).
   const Row = ({ it, n }: { it: ExerciseItem; n: number }) => {
@@ -90,7 +95,6 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
     );
   };
 
-  let n = 0;
   return (
     <div className="mt-3 rounded-xl border border-border bg-background overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-foreground/[0.02]">
@@ -100,9 +104,8 @@ export default function PlanExerciseChecklist({ items, storageKey }: { items: Ex
         </span>
       </div>
       <ol className="divide-y divide-border">
-        {rows.map((row, i) => {
+        {numberedRows.map(({ row, n }, i) => {
           if (row.kind === "solo") {
-            n += 1;
             return <Row key={row.item.id ?? `s-${i}`} it={row.item} n={n} />;
           }
           // Group row — nested card with brace header + "Group total: mm:ss".

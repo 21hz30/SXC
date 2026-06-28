@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Check, Plus } from "lucide-react";
 import { reloadWithFlash } from "@/lib/reloadWithFlash";
 
@@ -21,11 +21,15 @@ export default function ClassSignupButton({
   isFull: boolean;
   size?: "sm" | "xs";
 }) {
+  const [syncedSignedUp, setSyncedSignedUp] = useState(initialSignedUp);
   const [signedUp, setSignedUp] = useState(initialSignedUp);
   const [busy, setBusy] = useState(false);
 
   // Keep in sync if the parent feeds a new value (e.g. after navigation).
-  useEffect(() => setSignedUp(initialSignedUp), [initialSignedUp]);
+  if (initialSignedUp !== syncedSignedUp) {
+    setSyncedSignedUp(initialSignedUp);
+    setSignedUp(initialSignedUp);
+  }
 
   async function toggle(e: React.MouseEvent) {
     // Don't let a surrounding link/card capture the click.

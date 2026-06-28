@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { X, ArrowRight, MapPin } from "lucide-react";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
@@ -39,16 +39,16 @@ export default function CampSchedule({
   showDetail?: boolean;
   signupEnabled?: boolean;
 }) {
-  const [classes, setClasses] = useState<Klass[]>(initialClasses);
-
   // Re-sync from the server when the set of classes changes (e.g. a class was
   // added/removed on the camp page). Keyed on class IDs so optimistic workout
   // assignments within existing classes aren't clobbered on every re-render.
   const classIdsKey = initialClasses.map((c) => c.id).join(",");
-  useEffect(() => {
+  const [classesKey, setClassesKey] = useState(classIdsKey);
+  const [classes, setClasses] = useState<Klass[]>(initialClasses);
+  if (classIdsKey !== classesKey) {
+    setClassesKey(classIdsKey);
     setClasses(initialClasses);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classIdsKey]);
+  }
 
   async function addWorkout(classId: string, workout: Workout) {
     // optimistic

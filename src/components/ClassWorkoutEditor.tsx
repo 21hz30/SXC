@@ -19,6 +19,19 @@ function fmtTotal(sec: number | null): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function stripClientId({ id, ...rest }: Item): Omit<Item, "id"> {
+  void id;
+  return rest;
+}
+
+function toGroupMember({ id, groupKey, groupTimeSec, groupRounds, ...rest }: Item): GroupMember {
+  void id;
+  void groupKey;
+  void groupTimeSec;
+  void groupRounds;
+  return rest;
+}
+
 /**
  * Inline editor for a single workout *within a class*. Read-only by default;
  * "Adjust" reveals the editable station list. Saving posts to the class
@@ -117,7 +130,7 @@ export default function ClassWorkoutEditor({
     const res = await fetch(`/api/class/${classId}/workouts/${workoutId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: items.map(({ id: _id, ...rest }) => rest) }),
+      body: JSON.stringify({ items: items.map(stripClientId) }),
     });
     setSaving(false);
     if (res.ok) {
@@ -131,7 +144,10 @@ export default function ClassWorkoutEditor({
 
   if (!editing) {
     const rows = groupItems(initialItems);
-    let n = 0;
+    const numberedRows = rows.map((row, i) => ({
+      row,
+      n: rows.slice(0, i + 1).filter((r) => r.kind === "solo").length,
+    }));
     return (
       <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-start justify-between mb-3">
@@ -144,12 +160,11 @@ export default function ClassWorkoutEditor({
           </button>
         </div>
         <ul className="divide-y divide-border -mx-2">
-          {rows.map((row, i) => {
+          {numberedRows.map(({ row, n }) => {
             if (row.kind === "solo") {
-              n += 1;
               const { title, details } = formatItem(row.item);
               return (
-                <li key={row.item.id} className="px-2 py-2 flex items-start gap-3">
+                <li key={row.item.id ?? `s-${n}`} className="px-2 py-2 flex items-start gap-3">
                   <span className="text-xs text-muted font-mono w-5 text-right shrink-0 pt-0.5">{n}.</span>
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{title}</div>
@@ -289,7 +304,7 @@ export default function ClassWorkoutEditor({
           // Group row
           if (editingGroupKey === row.key) {
             const initial = {
-              members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, groupRounds: _r, ...rest }) => rest),
+              members: row.items.map(toGroupMember),
               totalSec: row.totalSec,
               rounds: row.rounds,
             };

@@ -60,13 +60,13 @@ export default function MobileNav({
       active ? "text-accent" : "text-muted hover:text-foreground",
     );
 
-  const TabLink = ({ href, label, icon }: SidebarNavItem) => {
+  const renderTabLink = ({ href, label, icon }: SidebarNavItem) => {
     const Icon = icons[icon];
     const active = isActive(href);
     // Close the AI chat panel when navigating, otherwise it stays open over the
     // page you just went to (so the tap looks like it did nothing).
     return (
-      <Link href={href} onClick={() => setAiOpen(false)} aria-current={active ? "page" : undefined} className={tabCls(active)}>
+      <Link key={href} href={href} onClick={() => setAiOpen(false)} aria-current={active ? "page" : undefined} className={tabCls(active)}>
         <Icon size={20} strokeWidth={active ? 2.4 : 2} />
         <span className="truncate max-w-full px-0.5">{href === "/" ? "Home" : label}</span>
       </Link>
@@ -117,7 +117,7 @@ export default function MobileNav({
       {/* App-style bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-stretch justify-around h-14">
-          {tabs.map((t) => <TabLink key={t.href} {...t} />)}
+          {tabs.map((t) => renderTabLink(t))}
           <button onClick={() => setAiOpen(true)} aria-label="AI co-coach" className={tabCls(aiOpen)}>
             <Sparkles size={20} strokeWidth={aiOpen ? 2.4 : 2} />
             <span>AI</span>
@@ -128,7 +128,7 @@ export default function MobileNav({
               <span>More</span>
             </button>
           ) : (
-            workoutTab && <TabLink {...workoutTab} />
+            workoutTab && renderTabLink(workoutTab)
           )}
         </div>
       </nav>

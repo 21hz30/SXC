@@ -42,6 +42,7 @@ export default function Toaster() {
   useEffect(() => {
     const flash = searchParams.get("flash");
     if (!flash) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     push(flash);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("flash");

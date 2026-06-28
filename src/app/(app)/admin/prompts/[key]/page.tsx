@@ -46,7 +46,7 @@ export default async function PromptEditor({
 
   async function reset() {
     "use server";
-    const u = await requireAdmin();
+    await requireAdmin();
     await resetPrompt(key);
     revalidatePath(`/admin/prompts/${rawKey}`);
     revalidatePath(`/admin/prompts`);

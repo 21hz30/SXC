@@ -37,6 +37,19 @@ function fmtTotal(sec: number | null): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function stripClientId({ id, ...rest }: Item): Omit<Item, "id"> {
+  void id;
+  return rest;
+}
+
+function toGroupMember({ id, groupKey, groupTimeSec, groupRounds, ...rest }: Item): GroupMember {
+  void id;
+  void groupKey;
+  void groupTimeSec;
+  void groupRounds;
+  return rest;
+}
+
 export default function WorkoutEditor({
   workoutId,
   initialName,
@@ -153,7 +166,7 @@ export default function WorkoutEditor({
       description: description || null,
       type: type || null,
       tags: tags.join(",") || null,
-      items: items.map(({ id: _id, ...rest }) => rest),
+      items: items.map(stripClientId),
     };
     const res = await fetch(`/api/workouts/${workoutId}`, {
       method: "PUT",
@@ -295,7 +308,7 @@ export default function WorkoutEditor({
             // Group row
             if (editingGroupKey === row.key) {
               const initial = {
-                members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, groupRounds: _r, ...rest }) => rest),
+                members: row.items.map(toGroupMember),
                 totalSec: row.totalSec,
                 rounds: row.rounds,
               };

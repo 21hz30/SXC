@@ -18,6 +18,19 @@ function fmtTotal(sec: number | null): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function stripClientId({ id, ...rest }: Item): Omit<Item, "id"> {
+  void id;
+  return rest;
+}
+
+function toGroupMember({ id, groupKey, groupTimeSec, groupRounds, ...rest }: Item): GroupMember {
+  void id;
+  void groupKey;
+  void groupTimeSec;
+  void groupRounds;
+  return rest;
+}
+
 /**
  * Right-side slide-over for building a NEW workout on the class page: add the
  * name + its exercises (and groups) first, then save once. Posts to
@@ -86,7 +99,7 @@ export default function WorkoutCreateDrawer({ classId }: { classId: string }) {
           name: name.trim(),
           description: description.trim() || null,
           tags: tags.trim() || null,
-          items: items.map(({ id: _id, ...rest }) => rest),
+          items: items.map(stripClientId),
         }),
       });
       if (!res.ok) throw new Error("failed");
@@ -201,7 +214,7 @@ export default function WorkoutCreateDrawer({ classId }: { classId: string }) {
                     // Group row
                     if (editingGroupKey === row.key) {
                       const initial = {
-                        members: row.items.map(({ id: _id, groupKey: _g, groupTimeSec: _t, groupRounds: _r, ...rest }) => rest),
+                        members: row.items.map(toGroupMember),
                         totalSec: row.totalSec,
                         rounds: row.rounds,
                       };

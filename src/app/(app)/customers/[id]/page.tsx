@@ -1220,7 +1220,6 @@ function SectionCard({
   title,
   isEditing,
   editHref,
-  cancelHref: _cancelHref,
   children,
 }: {
   title: string;
@@ -1248,15 +1247,6 @@ function KV({ k, v }: { k: string; v: string }) {
       <dt className="text-xs text-muted">{k}</dt>
       <dd className="font-medium">{v}</dd>
     </>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-card border border-border rounded-xl p-4">
-      <div className="text-xs text-muted uppercase tracking-wide">{label}</div>
-      <div className="text-lg font-semibold mt-1 tabular-nums">{value}</div>
-    </div>
   );
 }
 

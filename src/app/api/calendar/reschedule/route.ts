@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { canAccessCamp, canAccessCustomer, canManageClass } from "@/lib/access";
 
 // POST /api/calendar/reschedule
 // Body: { type: "assignment" | "class", id, date: "YYYY-MM-DD", time?: "HH:MM" }
@@ -19,12 +20,33 @@ export async function POST(req: NextRequest) {
   }
 
   if (type === "assignment") {
-    const a = await db.workoutAssignment.findUnique({ where: { id }, select: { customerId: true } });
+    const a = await db.workoutAssignment.findUnique({
+      where: { id },
+      select: {
+        customerId: true,
+        camp: { select: { id: true, coachId: true, createdById: true } },
+        customer: {
+          select: {
+            userAccount: { select: { id: true } },
+            campMembers: { select: { camp: { select: { coachId: true } } } },
+            coachConnections: { select: { coachUserId: true, status: true } },
+          },
+        },
+      },
+    });
     if (!a) return Response.json({ ok: false, message: "not found" }, { status: 404 });
     // Owners move their own plan; staff can move anyone's.
     if (!isStaff) {
       const mine = await getMyCustomerId();
       if (a.customerId !== mine) return Response.json({ ok: false, message: "forbidden" }, { status: 403 });
+    } else if (
+      !(
+        user.role === "admin" ||
+        (a.camp && canAccessCamp(user, a.camp)) ||
+        canAccessCustomer(user, a.customer)
+      )
+    ) {
+      return Response.json({ ok: false, message: "forbidden" }, { status: 403 });
     }
     await db.workoutAssignment.update({ where: { id }, data: { scheduledDate: new Date(date) } });
     return Response.json({ ok: true });
@@ -32,8 +54,16 @@ export async function POST(req: NextRequest) {
 
   if (type === "class") {
     if (!isStaff) return Response.json({ ok: false, message: "forbidden" }, { status: 403 });
-    const cls = await db.class.findUnique({ where: { id }, select: { startsAt: true } });
+    const cls = await db.class.findUnique({
+      where: { id },
+      select: {
+        startsAt: true,
+        createdById: true,
+        camp: { select: { id: true, coachId: true, createdById: true } },
+      },
+    });
     if (!cls) return Response.json({ ok: false, message: "not found" }, { status: 404 });
+    if (!canManageClass(user, cls)) return Response.json({ ok: false, message: "forbidden" }, { status: 403 });
     // Use the dropped time if given; otherwise keep the class's existing time-of-day.
     const hhmm = /^\d{2}:\d{2}$/.test(time)
       ? time
