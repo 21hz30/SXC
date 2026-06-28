@@ -27,11 +27,30 @@
 
 - Confirm Git working tree and current branch.
 - Pull/fetch latest GitHub state before final commit/push when safe.
+- Review the staged diff and make sure unrelated work is not bundled together.
 - Run:
   - `npm run lint`
   - `npx tsc --noEmit`
 - If database/schema changes are involved, also run read-only Prisma/Supabase checks against dev first.
 - Do not merge/push if lint, typecheck, or relevant database checks fail.
+
+## Git commit standard
+
+- Treat this as a company project: commit messages must be clear to teammates reading history later.
+- Prefer small, focused commits. Split security fixes, lint cleanup, docs, UX, and database work when they are separable.
+- Use Conventional Commit style:
+  - `security(api): restrict class mutation routes`
+  - `fix(lint): satisfy React purity rules`
+  - `docs(memory): record workflow standards`
+  - `chore(db): baseline dev migration history`
+- Commit subject should explain the intent, not just the files changed.
+- For larger commits, include a body with:
+  - what changed;
+  - why it changed;
+  - how it was verified.
+- Before pushing, report the exact commit subject and verification results to the user.
+- Avoid force-pushing or rewriting pushed `main` history unless the user explicitly approves it.
+- If a pushed commit message is unclear, prefer a follow-up clarifying commit/PR description over rewriting public history.
 
 ## Current todo list
 
