@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Sparkles, Send, ChevronRight, CheckSquare, User as UserIcon, MessagesSquare, Plus } from "lucide-react";
+import { Sparkles, Send, ChevronRight, User as UserIcon, MessagesSquare, Plus } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useAiPanel } from "@/lib/stores/aiPanel";
 import { cn } from "@/lib/utils";
@@ -21,25 +21,13 @@ type Session = {
 };
 
 const SUGGESTIONS = [
-  "Add a todo to film a wall-ball demo tomorrow",
+  "Help me plan this week's coaching priorities",
   "Generate a 4-week Hyrox prep camp",
   "What should I focus on this week?",
 ];
 
-type SlashCmdMeta = { name: string; tool: string; description: string; icon: typeof CheckSquare };
-const SLASH_CMDS: SlashCmdMeta[] = [
-  { name: "todo", tool: "create_todo", description: "Create a todo. Usage: /todo <title> [due:YYYY-MM-DD]", icon: CheckSquare },
-];
-
-function notifyTodosChanged() {
-  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("sxc:todos-changed"));
-}
 function notifySessionsChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("sxc:sessions-changed"));
-}
-function parseSlashLine(text: string) {
-  const m = text.match(/^\/(\w+)\s*(.*)$/);
-  return m ? { cmd: m[1].toLowerCase(), rest: m[2] } : null;
 }
 
 export default function AiSidebar({ user }: { user: { name: string; role: string } }) {
@@ -50,7 +38,6 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showSlash, setShowSlash] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   // Staff can scope a NEW chat to a customer ("project"); athletes just talk.
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
@@ -121,41 +108,9 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
     inputRef.current?.focus();
   }
 
-  function onInputChange(v: string) {
-    setInput(v);
-    setShowSlash(v.startsWith("/") && !v.includes(" "));
-  }
-
-  async function executeSlash(text: string): Promise<boolean> {
-    if (!text.startsWith("/")) return false;
-    const parsed = parseSlashLine(text);
-    if (!parsed) return false;
-    const meta = SLASH_CMDS.find((c) => c.name === parsed.cmd);
-    if (!meta) {
-      setMessages((m) => [...m, { role: "user", content: text }, { role: "assistant", content: "Unknown command. Type `/` to see options." }]);
-      return true;
-    }
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    try {
-      const res = await fetch(`/api/tool/${meta.tool}/slash`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rest: parsed.rest }),
-      });
-      const data: { ok: boolean; message: string } = await res.json();
-      const reply = res.ok && data.ok ? `✅ ${data.message}` : `⚠️ ${data.message}`;
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
-      if (meta.tool === "create_todo" && data.ok) notifyTodosChanged();
-    } catch (e) {
-      setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${(e as Error).message}` }]);
-    }
-    return true;
-  }
-
   async function send(text: string) {
     if (!text.trim() || loading) return;
     setInput("");
-    setShowSlash(false);
 
     // "Just talk": with no chat yet, start one (optionally scoped to a customer
     // the coach picked) so the user never has to select a session first.
@@ -183,8 +138,6 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
         return;
       }
     }
-
-    if (await executeSlash(text)) return;
 
     const next: Msg[] = [...(created ? [] : messages), { role: "user", content: text }];
     setMessages(next);
@@ -216,7 +169,6 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
           copy[copy.length - 1] = { role: "assistant", content: assistant };
           return copy;
         });
-        if (chunk.includes("📌")) notifyTodosChanged();
       }
       notifySessionsChanged(); // title may have auto-updated
     } catch (e) {
@@ -344,24 +296,12 @@ export default function AiSidebar({ user }: { user: { name: string; role: string
         {/* Input — always available, so you can just start talking (hidden in history) */}
         {!showHistory && (
         <div className="relative border-t border-border">
-          {showSlash && (
-            <div className="absolute left-3 right-3 bottom-full mb-2 bg-white border border-border rounded-xl shadow-lg overflow-hidden">
-              <div className="px-3 py-2 text-xs text-muted bg-background border-b border-border">Commands</div>
-              {SLASH_CMDS.map((cmd) => (
-                <button key={cmd.name} onClick={() => { setInput(`/${cmd.name} `); setShowSlash(false); inputRef.current?.focus(); }} className="flex items-start gap-3 w-full text-left px-3 py-2.5 hover:bg-background">
-                  <cmd.icon size={16} className="text-accent mt-0.5 shrink-0" />
-                  <div><div className="text-sm font-medium">/{cmd.name}</div><div className="text-xs text-muted">{cmd.description}</div></div>
-                </button>
-              ))}
-            </div>
-          )}
           <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="p-3 flex gap-2">
             <input
               ref={inputRef}
               value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setShowSlash(false); }}
-              placeholder={session ? "Reply…" : "Ask anything or type /"}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={session ? "Reply…" : "Ask anything"}
               disabled={loading}
               className="flex-1 rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent"
             />

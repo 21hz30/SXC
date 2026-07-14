@@ -27,6 +27,7 @@ export async function runAgent(opts: {
 
   const client = getAIClient();
   const model = getAIModel();
+  const anthropicTools = toAnthropicTools() as unknown as Anthropic.Messages.Tool[];
 
   const convo: Anthropic.Messages.MessageParam[] = messages.map((m) => ({
     role: m.role === "user" ? "user" : "assistant",
@@ -40,7 +41,7 @@ export async function runAgent(opts: {
       model,
       max_tokens: 1024,
       system,
-      tools: toAnthropicTools() as unknown as Anthropic.Messages.Tool[],
+      ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {}),
       messages: convo,
     });
 

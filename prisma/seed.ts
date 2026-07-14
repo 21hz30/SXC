@@ -33,7 +33,6 @@ async function main() {
   await db.benchmark.deleteMany();
   await db.campMember.deleteMany();
   await db.camp.deleteMany();
-  await db.todo.deleteMany();
   await db.customer.deleteMany();
   await db.user.deleteMany();
 
@@ -318,15 +317,6 @@ async function main() {
       targetLungesSec: 290, targetWallballsSec: 355, targetRunSec: 280,
     },
   });
-
-  // Sample todos
-  await db.todo.createMany({ data: [
-    { ownerId: peter.id, title: "Mark attendance for today's class", dueDate: daysFromNow(0, 18, 0), source: "manual" },
-    { ownerId: peter.id, title: "Send Alex Chen Hyrox prep plan", dueDate: daysFromNow(2), source: "manual" },
-    { ownerId: peter.id, title: "Review beginners camp progress", source: "manual" },
-    { ownerId: src.id, title: "Plan next week's strength block", dueDate: daysFromNow(3), source: "manual" },
-    { ownerId: src.id, title: "Film wall ball demo video", source: "manual" },
-  ]});
 
   console.log("Seed complete.");
   console.log("  peter / peter123 (admin)");

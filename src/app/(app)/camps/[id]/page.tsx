@@ -432,12 +432,12 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
 
       {edit && (
         <>
-          <form action={updateCamp} className="bg-card border border-border rounded-xl p-5 mb-3 grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+          <form action={updateCamp} className="bg-card border border-border rounded-xl p-5 mb-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
               <label className="block text-xs text-muted mb-1">Name</label>
               <input name="name" required defaultValue={camp.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
             </div>
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <label className="block text-xs text-muted mb-1">Description</label>
               <textarea name="description" rows={2} defaultValue={camp.description ?? ""} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
             </div>
@@ -463,7 +463,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
               <label className="block text-xs text-muted mb-1">End date</label>
               <input name="endDate" type="date" required defaultValue={camp.endDate.toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
             </div>
-            <div className="col-span-2 flex justify-end gap-2">
+            <div className="sm:col-span-2 flex justify-end gap-2">
               <Link href={`/camps/${id}`} className="px-3 py-2 text-sm rounded-lg border border-border">Cancel</Link>
               <button type="submit" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium">Save</button>
             </div>
@@ -485,12 +485,20 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
         <section className="mb-6">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between mb-3">
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Weekly training plan</h2>
-            <span className="text-xs text-muted">Workouts land on each member&apos;s dashboard &amp; calendar. Schedule classes from the &ldquo;Add a class&rdquo; panel below or the calendar.</span>
+            <span className="text-xs text-muted">Workouts land on each member&apos;s dashboard &amp; calendar.</span>
           </div>
 
           <CampPlanBuilder
             key={planWeek}
             workouts={allWorkouts.map((w) => ({ id: w.id, name: w.name }))}
+            classes={camp.classes
+              .filter((c) => !c.canceledAt && c.startsAt >= planBase && c.startsAt < new Date(planBase.getTime() + 7 * 86_400_000))
+              .map((c) => ({
+                id: c.id,
+                title: c.title,
+                date: c.startsAt.toISOString().slice(0, 10),
+                time: formatTime(c.startsAt),
+              }))}
             weekStart={planWeek}
             initialDays={initialDays}
             memberCount={activeMembers.length}
@@ -633,7 +641,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
             <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Add a class</h2>
             <form action={addClass} className="bg-card border border-border rounded-xl p-4 space-y-2.5">
               <input name="title" required placeholder="Class title (e.g. Pro Team Strength)" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] text-muted mb-1">Date</label>
                   <input name="date" type="date" required defaultValue={camp.startDate.toISOString().slice(0, 10)} className="w-full rounded-lg border border-border px-2 py-1.5 text-sm" />

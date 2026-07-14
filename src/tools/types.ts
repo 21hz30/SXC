@@ -12,8 +12,7 @@ export type Tool = {
   schema: Record<string, unknown>; // JSON schema (for Anthropic tool_use)
   /**
    * Slash-command parser. Receives the raw text AFTER the command word
-   * (e.g. for "/todo Buy wall balls tomorrow" → "Buy wall balls tomorrow").
-   * Return parsed input ready for execute(), or null if it can't be parsed.
+   * and returns parsed input ready for execute(), or null if it can't be parsed.
    */
   parseSlash?: (rest: string) => Record<string, unknown> | null;
   execute: (ctx: Ctx, input: Record<string, unknown>) => Promise<ToolResult>;

@@ -44,7 +44,6 @@ model User {
   camps          Camp[]   @relation("CoachCamps")
   createdCamps   Camp[]   @relation("CampCreator")
   createdClasses Class[]  @relation("ClassCreator")
-  todos          Todo[]
   chatSessions   ChatSession[]
 
   // Multi-coach connections: pending/active/rejected per (customer, coach) pair.
@@ -107,17 +106,6 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   @@index([sessionId, createdAt])
-}
-
-model Todo {
-  id        String    @id @default(cuid())
-  ownerId   String
-  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  title     String
-  dueDate   DateTime?
-  done      Boolean   @default(false)
-  source    String    @default("manual") // "manual" | "ai" | "slash"
-  createdAt DateTime  @default(now())
 }
 
 model Customer {

@@ -5,8 +5,6 @@ import { requireUser } from "@/lib/auth";
 /**
  * Slash-command entrypoint. Receives the raw text AFTER the command word,
  * delegates parsing to the tool's parseSlash, then executes.
- *
- *   POST /api/tool/create_todo/slash  { "rest": "Buy wall balls tomorrow" }
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ name: string }> }) {
   const user = await requireUser();

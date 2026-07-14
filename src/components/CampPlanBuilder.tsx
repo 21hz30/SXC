@@ -3,9 +3,12 @@
 import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { Calendar } from "lucide-react";
 import { mondayOf } from "@/lib/utils";
 
 type WorkoutOpt = { id: string; name: string };
+type ClassSession = { id: string; title: string; date: string; time: string };
 type WRow = { key: number; workoutId: string; note: string };
 type Day = { workouts: WRow[] };
 
@@ -17,16 +20,18 @@ function emptyWeek(): Day[] {
  * Weekly camp-plan builder. The coach lays out each day of a Mon–Sun week with
  * any number of workouts, assigned to every active member. The whole week is
  * serialized into a single hidden `plan` field and handed to the server action.
- * (Classes are scheduled separately on the calendar — not from the plan.)
+ * Existing camp classes are displayed read-only in their matching day column.
  */
 export default function CampPlanBuilder({
   workouts,
+  classes,
   weekStart,
   initialDays,
   memberCount,
   action,
 }: {
   workouts: WorkoutOpt[];
+  classes: ClassSession[];
   weekStart: string;
   initialDays: { workouts: { workoutId: string; note: string }[] }[];
   memberCount: number;
@@ -50,12 +55,13 @@ export default function CampPlanBuilder({
   // Each column's weekday + date is derived from the real date (weekStart + d),
   // so the label always matches the calendar — never a hard-coded Mon→Sun list.
   const dayInfo = (d: number) => {
-    const base = new Date(weekStart + "T00:00:00");
-    if (isNaN(base.getTime())) return { weekday: "", date: "" };
+    const base = new Date(weekStart + "T00:00:00Z");
+    if (isNaN(base.getTime())) return { weekday: "", date: "", key: "" };
     const dt = new Date(base.getTime() + d * 86_400_000);
     return {
-      weekday: dt.toLocaleDateString("en-US", { weekday: "short" }),
-      date: dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      weekday: dt.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }),
+      date: dt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+      key: dt.toISOString().slice(0, 10),
     };
   };
 
@@ -99,12 +105,26 @@ export default function CampPlanBuilder({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {Array.from({ length: 7 }, (_, d) => {
           const info = dayInfo(d);
+          const dayClasses = classes.filter((c) => c.date === info.key);
           return (
           <div key={d} className="border border-border rounded-lg p-3 flex flex-col">
             <div className="flex items-baseline justify-between mb-2">
               <span className="text-xs font-semibold">{info.weekday}</span>
               <span className="text-[10px] text-muted tabular-nums">{info.date}</span>
             </div>
+
+            {dayClasses.length > 0 && (
+              <div className="space-y-1.5 mb-2">
+                {dayClasses.map((c) => (
+                  <Link key={c.id} href={`/classes/${c.id}`} className="block rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 hover:border-sky-300">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                      <Calendar size={11} /> Class · {c.time}
+                    </div>
+                    <div className="text-xs font-medium mt-0.5 truncate">{c.title}</div>
+                  </Link>
+                ))}
+              </div>
+            )}
 
             {/* Workouts */}
             <div className="space-y-2">
@@ -147,7 +167,7 @@ export default function CampPlanBuilder({
 
       <div className="flex items-center justify-between mt-4 gap-3 flex-wrap">
         <span className="text-xs text-muted">
-          {totalWorkouts} workout{totalWorkouts === 1 ? "" : "s"} → {memberCount} member{memberCount === 1 ? "" : "s"}
+          {totalWorkouts} workout{totalWorkouts === 1 ? "" : "s"} · {classes.length} class{classes.length === 1 ? "" : "es"} → {memberCount} member{memberCount === 1 ? "" : "s"}
         </span>
         <AssignButton disabled={!(totalWorkouts > 0 && memberCount > 0)} />
       </div>

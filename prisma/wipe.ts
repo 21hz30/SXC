@@ -1,6 +1,6 @@
 /**
- * One-shot data wipe script. Removes all athlete / camp / workout / chat /
- * todo data but KEEPS user accounts so coaches can still log in.
+ * One-shot data wipe script. Removes all athlete / camp / workout / chat data
+ * but KEEPS user accounts so coaches can still log in.
  *
  * Usage:  npx tsx prisma/wipe.ts
  */
@@ -15,7 +15,6 @@ const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) }
 async function main() {
   await db.chatMessage.deleteMany();
   await db.chatSession.deleteMany();
-  await db.todo.deleteMany();
   await db.log.deleteMany();
   await db.performance.deleteMany();
   await db.rosterEntry.deleteMany();

@@ -5,9 +5,8 @@ import { db } from "@/lib/db";
 import { requireUser, requireStaff, getMyCustomerId } from "@/lib/auth";
 import { formatTime, formatDate, startOfDay, endOfDay, addDays, formatDateLong } from "@/lib/utils";
 import { Calendar, ChevronDown, Dumbbell, KeyRound, Tent, UserPlus } from "lucide-react";
-import TodoList from "@/components/TodoList";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
-import { listTodos } from "@/domain/todos";
+import ClassSignupButton from "@/components/ClassSignupButton";
 import { backfillCampPlan } from "@/domain/camps";
 import { decideConnection, connectByCode, disconnectCoachConnection } from "@/domain/coachConnections";
 import ExerciseList from "@/components/ExerciseList";
@@ -25,26 +24,31 @@ export default async function Dashboard() {
   const isStaff = user.role === "admin" || user.role === "coach";
   const now = new Date();
   const myCustomerId = await getMyCustomerId();
-  const [todayClasses, upcomingClasses, todos, myAssignments, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode, pendingConnections, myCoaches] = await Promise.all([
-    // Coach-only views: today's roster, next 7 days, recent customer activity.
-    // Athletes don't render any of these, so we skip the queries entirely
-    // (saves ~3 round-trips per athlete dashboard load).
-    isStaff
-      ? db.class.findMany({
-          where: { startsAt: { gte: startOfDay(), lte: endOfDay() }, ...classScope(user) },
-          orderBy: { startsAt: "asc" },
-          include: { roster: true, workouts: { include: { workout: { select: { name: true } } } }, camp: true },
-        })
-      : Promise.resolve([]),
-    isStaff
-      ? db.class.findMany({
-          where: { startsAt: { gt: endOfDay(), lte: endOfDay(addDays(now, 7)) }, ...classScope(user) },
-          orderBy: { startsAt: "asc" },
-          take: 5,
-          include: { camp: true, roster: true },
-        })
-      : Promise.resolve([]),
-    listTodos({ user }),
+  const [dropInClasses, myAssignments, myClassSessions, myWorkouts, myPastRoster, myFeedbackDone, pendingApplications, nextClassRow, myMockResults, myStats, todayFood, todayWater, todayBurn, myActiveCampIds, myInvitationCode, pendingConnections, myCoaches] = await Promise.all([
+    // Every open drop-in over the next seven days. classScope keeps coaches in
+    // their tenant while customers can discover all classes open to drop-ins.
+    db.class.findMany({
+      where: {
+        startsAt: { gte: now, lte: endOfDay(addDays(now, 7)) },
+        dropInAllowed: true,
+        canceledAt: null,
+        ...classScope(user),
+      },
+      orderBy: { startsAt: "asc" },
+      select: {
+        id: true,
+        title: true,
+        startsAt: true,
+        location: true,
+        capacity: true,
+        camp: { select: { name: true, division: true } },
+        _count: { select: { roster: true } },
+        roster: {
+          where: { customerId: myCustomerId ?? "__none__" },
+          select: { id: true },
+        },
+      },
+    }),
     // The signed-in athlete's own training plan: everything not yet done, plus
     // anything dated today or later (so completed-today sessions still show).
     myCustomerId
@@ -54,6 +58,27 @@ export default async function Dashboard() {
           where: { customerId: myCustomerId, OR: [{ scheduledDate: { gte: startOfDay() } }, { scheduledDate: null }] },
           include: { workout: { select: { id: true, name: true, type: true, items: { orderBy: { order: "asc" } } } }, camp: { select: { name: true } } },
           orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
+        })
+      : Promise.resolve([]),
+    // Roster membership is the source of truth for class sessions. Detect the
+    // next seven days automatically so classes appear in the athlete's plan
+    // without creating duplicate WorkoutAssignment rows.
+    myCustomerId
+      ? db.class.findMany({
+          where: {
+            startsAt: { gte: startOfDay(), lte: endOfDay(addDays(now, 7)) },
+            canceledAt: null,
+            roster: { some: { customerId: myCustomerId } },
+          },
+          orderBy: { startsAt: "asc" },
+          select: {
+            id: true,
+            title: true,
+            startsAt: true,
+            durationMin: true,
+            location: true,
+            camp: { select: { name: true } },
+          },
         })
       : Promise.resolve([]),
     // The athlete's own private workouts, for self-adding to their plan.
@@ -86,7 +111,7 @@ export default async function Dashboard() {
     // header summary + quick sign-up button. Also pulls capacity + roster size
     // (for full check) and the caller's own roster row (to detect signed-up).
     db.class.findFirst({
-      where: { startsAt: { gte: now }, ...classScope(user) },
+      where: { startsAt: { gte: now }, canceledAt: null, ...classScope(user) },
       orderBy: { startsAt: "asc" },
       select: {
         id: true,
@@ -175,37 +200,52 @@ export default async function Dashboard() {
   const feedbackDoneClassIds = new Set(myFeedbackDone.map((p) => p.classId));
   const needFeedback = myPastRoster.filter((r) => !feedbackDoneClassIds.has(r.classId)).slice(0, 6);
 
-  const todoItems = todos;
-  // Group the athlete's plan into day sections (Today / Tomorrow / weekday) so
-  // it reads as a schedule. Using the local calendar date keeps grouping and the
-  // "Today" check consistent with how dates render (no UTC-slice day shift).
+  // Group assigned workouts and rostered classes into one day-by-day schedule.
+  // Using the local calendar date keeps grouping consistent with date rendering.
   const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const todayK = dayKey(new Date());
   const tomorrowK = dayKey(addDays(new Date(), 1));
-  type PlanItem = (typeof myAssignments)[number];
-  const planGroups: { key: string; label: string; dateText: string; todo: number; items: PlanItem[] }[] = [];
-  const planGroupIdx = new Map<string, number>();
-  for (const a of myAssignments) {
-    const key = a.scheduledDate ? dayKey(a.scheduledDate) : "anytime";
-    let gi = planGroupIdx.get(key);
-    if (gi == null) {
-      gi = planGroups.length;
-      planGroupIdx.set(key, gi);
-      let label = "Anytime";
-      let dateText = "";
-      if (a.scheduledDate) {
-        const [wd, ...rest] = formatDate(a.scheduledDate).split(", ");
-        dateText = rest.join(", ");
-        label = key === todayK ? "Today" : key === tomorrowK ? "Tomorrow" : wd;
-      }
-      planGroups.push({ key, label, dateText, todo: 0, items: [] });
+  type PlanWorkout = (typeof myAssignments)[number];
+  type PlanClass = (typeof myClassSessions)[number];
+  type PlanGroup = { key: string; label: string; dateText: string; open: number; workouts: PlanWorkout[]; classes: PlanClass[] };
+  const planGroupMap = new Map<string, PlanGroup>();
+
+  function ensurePlanGroup(date: Date | null): PlanGroup {
+    const key = date ? dayKey(date) : "anytime";
+    const existing = planGroupMap.get(key);
+    if (existing) return existing;
+
+    let label = "Anytime";
+    let dateText = "";
+    if (date) {
+      const [wd, ...rest] = formatDate(date).split(", ");
+      dateText = rest.join(", ");
+      label = key === todayK ? "Today" : key === tomorrowK ? "Tomorrow" : wd;
     }
-    planGroups[gi].items.push(a);
-    if (a.status !== "completed") planGroups[gi].todo += 1;
+    const group: PlanGroup = { key, label, dateText, open: 0, workouts: [], classes: [] };
+    planGroupMap.set(key, group);
+    return group;
   }
-  // Glance summaries for the header: today's workout(s) and the next class.
-  const todayItems = planGroups.find((g) => g.key === todayK)?.items ?? [];
-  const todayTodo = todayItems.filter((a) => a.status !== "completed");
+
+  for (const a of myAssignments) {
+    const group = ensurePlanGroup(a.scheduledDate);
+    group.workouts.push(a);
+    if (a.status !== "completed") group.open += 1;
+  }
+  for (const c of myClassSessions) ensurePlanGroup(c.startsAt).classes.push(c);
+
+  const planGroups = [...planGroupMap.values()].sort((a, b) => {
+    if (a.key === "anytime") return -1;
+    if (b.key === "anytime") return 1;
+    return a.key.localeCompare(b.key);
+  });
+
+  // Glance summaries for the header: today's workouts/classes and the next class.
+  const todayGroup = planGroupMap.get(todayK);
+  const todayWorkouts = todayGroup?.workouts ?? [];
+  const todayClassSessions = todayGroup?.classes ?? [];
+  const todayOpen = todayWorkouts.filter((a) => a.status !== "completed");
+  const todayTrainingCount = todayWorkouts.length + todayClassSessions.length;
   const classDayLabel = (d: Date) => {
     const k = dayKey(d);
     return k === todayK ? "Today" : k === tomorrowK ? "Tomorrow" : formatDate(d);
@@ -224,7 +264,7 @@ export default async function Dashboard() {
 
   // Show the plan card to every athlete (customers always; staff only once they
   // have something assigned — they manage plans elsewhere).
-  const showPlan = !!myCustomerId && (myAssignments.length > 0 || !isStaff);
+  const showPlan = !!myCustomerId && (myAssignments.length > 0 || myClassSessions.length > 0 || !isStaff);
 
   // Today's nutrition rollup — anyone with a linked customer profile, including
   // staff who train (they have their own customer record). The coach view of
@@ -424,19 +464,27 @@ export default async function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
         <SummaryCard
           icon={Dumbbell}
-          label="Today's workout"
-          title={todayItems.length === 0 ? "Rest day" : (todayTodo[0]?.workout.name ?? todayItems[0].workout.name)}
+          label="Today's training"
+          title={todayTrainingCount === 0 ? "Rest day" : (todayOpen[0]?.workout.name ?? todayClassSessions[0]?.title ?? todayWorkouts[0].workout.name)}
           sub={
-            todayItems.length === 0
+            todayTrainingCount === 0
               ? "Nothing scheduled — enjoy the recovery"
-              : todayTodo.length === 0
+              : todayOpen.length === 0 && todayClassSessions.length === 0
                 ? "All done for today ✓"
-                : todayItems.length > 1
-                  ? `+${todayItems.length - 1} more · tap to view`
-                  : "Tap to view the exercises"
+                : todayTrainingCount > 1
+                  ? `+${todayTrainingCount - 1} more · tap to view`
+                  : todayClassSessions.length === 1 && todayWorkouts.length === 0
+                    ? `${formatTime(todayClassSessions[0].startsAt)} class session`
+                    : "Tap to view the exercises"
           }
-          href={todayItems.length === 1 ? `/workouts/${todayItems[0].workout.id}` : "/calendar?view=day"}
-          muted={todayItems.length === 0}
+          href={
+            todayTrainingCount === 1
+              ? todayClassSessions.length === 1
+                ? `/classes/${todayClassSessions[0].id}`
+                : `/workouts/${todayWorkouts[0].workout.id}`
+              : "/calendar?view=day"
+          }
+          muted={todayTrainingCount === 0}
         />
         {nextClass ? (
           <div className="bg-card border border-border rounded-xl p-5 hover:border-accent transition">
@@ -577,22 +625,34 @@ export default async function Dashboard() {
         </div>
       )}
 
-      {/* Athletes get a single column (just their plan, feedback, mocks,
-          todos) — no right-hand sidebar duplicating what's already above.
-          Staff still get the 3+2 split because they need the class-management
-          views (today's roster, next 7 days, recent customer activity). */}
-      <div className={isStaff ? "grid grid-cols-1 lg:grid-cols-5 gap-6" : ""}>
-        <section className={`space-y-6${isStaff ? " lg:col-span-3" : ""}`}>
+      {/* Discovery stays full-width so the dashboard never collapses into an
+          empty main column with a narrow schedule rail. */}
+      <div className={`mb-8${user.role === "coach" && myInvitationCode ? " grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-6 items-start" : ""}`}>
+        <DropInClassList classes={dropInClasses} signupEnabled={!!myCustomerId} />
+
+        {user.role === "coach" && myInvitationCode && (
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <KeyRound size={14} className="text-muted shrink-0" />
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Your invitation code</h2>
+            </div>
+            <code className="block text-base font-mono tracking-wider rounded-lg bg-background border border-border px-3 py-2 mb-2 select-all">{myInvitationCode}</code>
+            <p className="text-xs text-muted leading-snug">Share this with an athlete so they can connect with you. Once they paste it on their profile, you&apos;ll see the request here to approve.</p>
+          </div>
+        )}
+      </div>
+
+      <section className="space-y-6">
           {showPlan && (
             <div>
               <div className="flex items-baseline justify-between mb-3">
                 <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Your training plan</h2>
-                <span className="text-xs text-muted">{myAssignments.filter((a) => a.status !== "completed").length} to do</span>
+                <span className="text-xs text-muted">{myAssignments.length + myClassSessions.length} scheduled</span>
               </div>
 
-              {myAssignments.length === 0 ? (
+              {myAssignments.length === 0 && myClassSessions.length === 0 ? (
                 <div className="bg-card border border-border border-dashed rounded-xl p-5 text-center text-sm text-muted">
-                  Nothing assigned right now. Add one of your own workouts below, or your coach will post the week&apos;s plan.
+                  Nothing scheduled right now. Add one of your own workouts below, or sign up for a class.
                 </div>
               ) : (
                 (() => {
@@ -602,8 +662,8 @@ export default async function Dashboard() {
                   // disclosure summary so the athlete sees scope at a glance.
                   const todayGroups = planGroups.filter((g) => g.key === todayK || g.key === "anytime");
                   const futureGroups = planGroups.filter((g) => g.key !== todayK && g.key !== "anytime");
-                  const futureItems = futureGroups.reduce((n, g) => n + g.items.length, 0);
-                  const futureTodo = futureGroups.reduce((n, g) => n + g.todo, 0);
+                  const futureItems = futureGroups.reduce((n, g) => n + g.workouts.length + g.classes.length, 0);
+                  const futureOpen = futureGroups.reduce((n, g) => n + g.open, 0);
                   function renderGroup(g: typeof planGroups[number]) {
                     return (
                       <section key={g.key}>
@@ -612,7 +672,23 @@ export default async function Dashboard() {
                           {g.dateText && <span className="text-xs text-muted">{g.dateText}</span>}
                         </div>
                         <ul className="space-y-3">
-                          {g.items.map((a) => {
+                          {g.classes.map((c) => (
+                            <li key={`class-${c.id}`} className="bg-sky-50 border border-sky-200 rounded-xl p-4">
+                              <Link href={`/classes/${c.id}`} className="block group">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Calendar size={15} className="text-sky-700 shrink-0" />
+                                  <span className="font-semibold group-hover:text-sky-800">{c.title}</span>
+                                  <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-sky-100 text-sky-700">Class session</span>
+                                </div>
+                                <div className="mt-1.5 text-xs text-muted flex flex-wrap gap-x-2 gap-y-1">
+                                  <span>{formatTime(c.startsAt)} · {c.durationMin} min</span>
+                                  {c.camp && <span>· {c.camp.name}</span>}
+                                  {c.location && <span>· {c.location}</span>}
+                                </div>
+                              </Link>
+                            </li>
+                          ))}
+                          {g.workouts.map((a) => {
                             const done = a.status === "completed";
                             return (
                               <li key={a.id} id={`plan-${a.id}`} className={`scroll-mt-20 bg-card border rounded-xl p-4 ${done ? "border-emerald-200" : "border-border"}`}>
@@ -669,8 +745,8 @@ export default async function Dashboard() {
                           <summary className="cursor-pointer flex items-center justify-between gap-2 px-4 py-3 list-none select-none">
                             <div className="flex items-baseline gap-2 flex-wrap min-w-0">
                               <span className="text-sm font-medium">Coming up</span>
-                              <span className="text-xs text-muted">{futureItems} workout{futureItems === 1 ? "" : "s"} · {futureGroups.length} day{futureGroups.length === 1 ? "" : "s"}</span>
-                              {futureTodo > 0 && <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-orange-100 text-orange-700">{futureTodo} to do</span>}
+                              <span className="text-xs text-muted">{futureItems} session{futureItems === 1 ? "" : "s"} · {futureGroups.length} day{futureGroups.length === 1 ? "" : "s"}</span>
+                              {futureOpen > 0 && <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-orange-100 text-orange-700">{futureOpen} to do</span>}
                             </div>
                             <ChevronDown size={14} className="text-muted shrink-0 transition group-open:rotate-180" />
                           </summary>
@@ -810,85 +886,82 @@ export default async function Dashboard() {
             </div>
           )}
 
-          <TodoList todos={todoItems} />
+      </section>
+    </div>
+  );
+}
 
-          {/* Coach-management view of today's classes: roster size + attendance.
-              Athletes already see their next class up top and their training plan
-              above — they don't need this. */}
-          {isStaff && (
-            <div>
-              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Today&apos;s classes</h2>
-              {todayClasses.length === 0 ? (
-                <div className="bg-card border border-border rounded-xl p-6 text-center text-muted text-sm">No classes scheduled today.</div>
-              ) : (
-                <ul className="space-y-3">
-                  {todayClasses.map((c) => {
-                    const attended = c.roster.filter((r) => r.attendance === "attended").length;
-                    return (
-                      <li key={c.id}>
-                        <Link href={`/classes/${c.id}`} className="block bg-card border border-border rounded-xl p-5 hover:border-accent transition">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-lg font-semibold">{c.title}</div>
-                              <div className="text-sm text-muted mt-0.5">{formatTime(c.startsAt)} · {c.camp?.name ?? "—"} · {c.workouts.length === 0 ? "No workout" : c.workouts.map((cw) => cw.workout.name).join(" + ")}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-2xl font-semibold tabular-nums">{c.roster.length}<span className="text-base text-muted font-normal"> / {c.capacity}</span></div>
-                              <div className="text-xs text-muted mt-0.5">{attended} attended</div>
-                            </div>
-                          </div>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          )}
-        </section>
+type DropInClassItem = {
+  id: string;
+  title: string;
+  startsAt: Date;
+  location: string | null;
+  capacity: number;
+  camp: { name: string; division: string | null } | null;
+  _count: { roster: number };
+  roster: { id: string }[];
+};
 
-        {/* Staff-only right rail. Coaches also get a card with their own
-            invitation code so they can share it with athletes without
-            having to dig into the customer detail page. */}
-        {isStaff && (
-          <section className="lg:col-span-2 space-y-6">
-            {/* Coach's own invitation code — sticky-prominent so it's easy
-                to copy/paste. Admins don't have a code (they're cross-tenant
-                superusers) so we only show this for role=coach. */}
-            {user.role === "coach" && myInvitationCode && (
-              <div className="bg-card border border-border rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <KeyRound size={14} className="text-muted shrink-0" />
-                  <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Your invitation code</h2>
-                </div>
-                <code className="block text-base font-mono tracking-wider rounded-lg bg-background border border-border px-3 py-2 mb-2 select-all">{myInvitationCode}</code>
-                <p className="text-xs text-muted leading-snug">Share this with an athlete so they can connect with you. Once they paste it on their profile, you&apos;ll see the request in your dashboard inbox to approve.</p>
-              </div>
-            )}
-
-            <div>
-              <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">Upcoming this week</h2>
-              {upcomingClasses.length === 0 ? (
-                <div className="text-sm text-muted">Nothing else this week.</div>
-              ) : (
-                <ul className="bg-card border border-border rounded-xl divide-y divide-border">
-                  {upcomingClasses.map((c) => (
-                    <li key={c.id}>
-                      <Link href={`/classes/${c.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-background">
-                        <div className="min-w-0">
-                          <div className="font-medium text-sm truncate">{c.title}</div>
-                          <div className="text-xs text-muted">{formatDate(c.startsAt)} · {formatTime(c.startsAt)}</div>
-                        </div>
-                        <div className="text-xs text-muted tabular-nums shrink-0 ml-2">{c.roster.length}/{c.capacity}</div>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
-        )}
+function DropInClassList({ classes, signupEnabled }: { classes: DropInClassItem[]; signupEnabled: boolean }) {
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">Drop-in schedule</h2>
+          <p className="text-xs text-muted mt-1">
+            {classes.length} open session{classes.length === 1 ? "" : "s"} in the next 7 days
+          </p>
+        </div>
+        <Link href="/calendar" className="inline-flex items-center gap-1.5 text-xs font-medium hover:text-orange-700 self-start sm:self-auto">
+          <Calendar size={14} /> View calendar
+        </Link>
       </div>
+      {classes.length === 0 ? (
+        <div className="bg-card border border-border border-dashed rounded-xl px-5 py-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <Calendar size={20} className="text-muted shrink-0 mt-0.5" />
+            <div>
+              <div className="text-sm font-medium">No drop-in sessions scheduled</div>
+              <div className="text-xs text-muted mt-1">New sessions will appear here as soon as they open.</div>
+            </div>
+          </div>
+          <Link href="/calendar" className="text-xs font-medium underline underline-offset-4 hover:text-orange-700 self-start sm:self-auto">Browse the calendar</Link>
+        </div>
+      ) : (
+        <ul className={classes.length === 1 ? "" : "grid grid-cols-1 md:grid-cols-2 gap-3"}>
+          {classes.map((c) => {
+            const division = divisionMeta(c.camp?.division);
+            return (
+              <li key={c.id} className="bg-card border border-border rounded-xl p-4 flex flex-col">
+                <Link href={`/classes/${c.id}`} className="min-w-0 flex-1 group">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold group-hover:text-orange-700">{c.title}</span>
+                    {division && <span className={`text-[9px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 ${division.cls}`}>{division.label}</span>}
+                  </div>
+                  <div className="text-xs text-muted mt-2 flex items-center gap-1.5">
+                    <Calendar size={13} className="shrink-0" />
+                    <span>{formatDate(c.startsAt)} · {formatTime(c.startsAt)}</span>
+                  </div>
+                  {(c.camp?.name || c.location) && (
+                    <div className="text-[11px] text-muted mt-1 leading-snug">{[c.camp?.name, c.location].filter(Boolean).join(" · ")}</div>
+                  )}
+                </Link>
+                <div className="mt-4 pt-3 border-t border-border flex items-center justify-between gap-3">
+                  <span className="text-xs text-muted tabular-nums">{c._count.roster} / {c.capacity} signed up</span>
+                  {signupEnabled && (
+                    <ClassSignupButton
+                      classId={c.id}
+                      signedUp={c.roster.length > 0}
+                      isFull={c._count.roster >= c.capacity}
+                      size="xs"
+                    />
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

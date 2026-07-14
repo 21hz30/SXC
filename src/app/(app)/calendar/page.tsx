@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { startOfDay, endOfDay, startOfWeek, startOfMonth, addDays, addMonths, formatTime, sameDay } from "@/lib/utils";
 import { classScope } from "@/lib/access";
-import { ChevronLeft, ChevronRight, CheckSquare, StickyNote, Dumbbell } from "lucide-react";
+import { ChevronLeft, ChevronRight, Dumbbell } from "lucide-react";
 import DayQuickAdd from "@/components/DayQuickAdd";
 import ClassSignupButton from "@/components/ClassSignupButton";
 import CalendarDnD from "@/components/CalendarDnD";
@@ -47,17 +47,13 @@ export default async function CalendarPage({
   // camp members), so this is fetched for everyone, not just customers.
   const myCustomerId = await getMyCustomerId();
 
-  const [classes, todos, assignments] = await Promise.all([
+  const [classes, assignments] = await Promise.all([
     db.class.findMany({
       where: { startsAt: { gte: queryStart, lte: queryEnd }, ...classScope(user) },
       orderBy: { startsAt: "asc" },
       // Only customerId (signed-up check) + attendance (count) + roster size are
       // read — don't drag every full RosterEntry row across a 42-day month view.
       include: { roster: { select: { customerId: true, attendance: true } }, camp: true },
-    }),
-    db.todo.findMany({
-      where: { ownerId: user.id, dueDate: { gte: queryStart, lte: queryEnd } },
-      orderBy: { dueDate: "asc" },
     }),
     // The athlete's own assigned workouts (camp plans + self-assigned) land on
     // the calendar as all-day items.
@@ -84,7 +80,7 @@ export default async function CalendarPage({
     <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Phone: Apple-style agenda (training plan first). Desktop: full grid. */}
       <div className="md:hidden">
-        <MobileCalendar classes={classes} todos={todos} assignments={assignments} cursor={cursor} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />
+        <MobileCalendar classes={classes} assignments={assignments} cursor={cursor} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />
       </div>
 
       <div className="hidden md:block">
@@ -116,16 +112,15 @@ export default async function CalendarPage({
         </div>
       </header>
 
-      {view === "day" && <DayView classes={classes} todos={todos} assignments={assignments} cursor={cursor} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
-      {view === "week" && <WeekView classes={classes} todos={todos} assignments={assignments} weekStart={rangeStart} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
-      {view === "month" && <MonthView classes={classes} todos={todos} assignments={assignments} monthStart={rangeStart} canAdd={isStaff} />}
+      {view === "day" && <DayView classes={classes} assignments={assignments} cursor={cursor} athlete={!isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
+      {view === "week" && <WeekView classes={classes} assignments={assignments} weekStart={rangeStart} canAdd={isStaff} canSignUp={canSignUp} signedUpIds={signedUpIds} />}
+      {view === "month" && <MonthView classes={classes} assignments={assignments} monthStart={rangeStart} canAdd={isStaff} />}
       </div>
     </div>
   );
 }
 
 type ClassWithRel = Awaited<ReturnType<typeof db.class.findMany>>[number] & { roster: { attendance: string }[]; camp: { name: string } | null };
-type TodoRow = Awaited<ReturnType<typeof db.todo.findMany>>[number];
 type AssignmentRow = Awaited<ReturnType<typeof db.workoutAssignment.findMany>>[number] & { workout: { id: string; name: string }; camp: { name: string } | null };
 
 const HOUR_PX = 52;
@@ -370,43 +365,6 @@ function TimeGrid({
   );
 }
 
-function TodoChip({ t }: { t: TodoRow }) {
-  if (t.source === "note") {
-    return (
-      <div className="text-[10px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 bg-sky-100 text-sky-800">
-        <StickyNote size={10} /> {t.title}
-      </div>
-    );
-  }
-  return (
-    <div
-      className={`text-[10px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${
-        t.done ? "bg-background text-muted line-through" : "bg-amber-100 text-amber-800"
-      }`}
-    >
-      <CheckSquare size={10} /> {t.title}
-    </div>
-  );
-}
-
-function TodoCard({ t }: { t: TodoRow }) {
-  // Notes are todos with source="note": no done-state, sticky-note styling.
-  if (t.source === "note") {
-    return (
-      <div className="flex items-start gap-2 p-2.5 rounded-lg border bg-sky-50 border-sky-200">
-        <StickyNote size={14} className="mt-0.5 shrink-0 text-sky-600" />
-        <div className="text-xs leading-snug text-foreground">{t.title}</div>
-      </div>
-    );
-  }
-  return (
-    <div className={`flex items-start gap-2 p-2.5 rounded-lg border ${t.done ? "bg-background border-border opacity-60" : "bg-amber-50 border-amber-200"}`}>
-      <CheckSquare size={14} className={`mt-0.5 shrink-0 ${t.done ? "text-emerald-500" : "text-amber-600"}`} />
-      <div className={`text-xs leading-snug ${t.done ? "line-through text-muted" : "text-foreground font-medium"}`}>{t.title}</div>
-    </div>
-  );
-}
-
 function AssignmentChip({ a, draggable = false, athlete = false }: { a: AssignmentRow; draggable?: boolean; athlete?: boolean }) {
   const done = a.status === "completed";
   // Athletes jump to their dashboard (where they mark the plan done); staff open
@@ -448,56 +406,36 @@ function AssignmentCard({ a, athlete = false }: { a: AssignmentRow; athlete?: bo
   );
 }
 
-function DayView({ classes, todos, assignments, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; assignments: AssignmentRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
+function DayView({ classes, assignments, cursor, athlete, canSignUp, signedUpIds }: { classes: ClassWithRel[]; assignments: AssignmentRow[]; cursor: Date; athlete: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const now = new Date();
   const { startHour, endHour } = gridRange(classes, [cursor]);
-  const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
   const dayAssignments = assignments.filter((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), cursor));
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:gap-6">
-      <div className="lg:col-span-3 bg-card border border-border rounded-xl overflow-hidden">
+      <div className={`${dayAssignments.length > 0 ? "lg:col-span-3" : "lg:col-span-4"} bg-card border border-border rounded-xl overflow-hidden`}>
         <TimeGrid days={[cursor]} classes={classes} startHour={startHour} endHour={endHour} now={now} compact={false} canSignUp={canSignUp} signedUpIds={signedUpIds} />
       </div>
-      <div className="space-y-5">
-        {dayAssignments.length > 0 && (
-          <div>
-            <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Training</h3>
-            <div className="space-y-2">
-              {dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} athlete={!canAdd} />)}
-            </div>
-          </div>
-        )}
+      {dayAssignments.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-medium text-muted uppercase tracking-wide">To-dos &amp; notes</h3>
-            {canAdd && (
-              <DayQuickAdd
-                date={cursor.toISOString().split("T")[0]}
-                returnTo={`/calendar?view=day&d=${cursor.toISOString().split("T")[0]}`}
-                variant="text"
-                label="Add"
-              />
-            )}
-          </div>
+          <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Training</h3>
           <div className="space-y-2">
-            {dayTodos.length === 0 ? <div className="text-xs text-muted">Nothing for this day.</div> : dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}
+            {dayAssignments.map((a) => <AssignmentCard key={a.id} a={a} athlete={athlete} />)}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function WeekView({ classes, todos, assignments, weekStart, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; assignments: AssignmentRow[]; weekStart: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
+function WeekView({ classes, assignments, weekStart, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; assignments: AssignmentRow[]; weekStart: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const now = new Date();
   const { startHour, endHour } = gridRange(classes, days);
   const isoDay = (d: Date) => d.toISOString().split("T")[0];
   const returnTo = `/calendar?view=week&d=${isoDay(weekStart)}`;
   const cols = `3.5rem repeat(7, minmax(0,1fr))`;
-  const dayTodos = days.map((d) => todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), d)));
   const dayAssignments = days.map((d) => assignments.filter((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), d)));
-  const hasAllDay = dayTodos.some((a) => a.length > 0) || dayAssignments.some((a) => a.length > 0);
+  const hasAllDay = dayAssignments.some((a) => a.length > 0);
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       {/* On phones the 7-day grid would be unreadable, so it scrolls horizontally
@@ -529,7 +467,6 @@ function WeekView({ classes, todos, assignments, weekStart, canAdd, canSignUp, s
           {days.map((d, i) => (
             <div key={d.toISOString()} data-drop-day={isoDay(d)} className="border-r border-border last:border-r-0 p-1 space-y-1 min-h-[1.75rem]">
               {dayAssignments[i].map((a) => <AssignmentChip key={a.id} a={a} draggable={canAdd} athlete={!canAdd} />)}
-              {dayTodos[i].map((t) => <TodoChip key={t.id} t={t} />)}
             </div>
           ))}
         </div>
@@ -542,7 +479,7 @@ function WeekView({ classes, todos, assignments, weekStart, canAdd, canSignUp, s
   );
 }
 
-function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classes: ClassWithRel[]; todos: TodoRow[]; assignments: AssignmentRow[]; monthStart: Date; canAdd: boolean }) {
+function MonthView({ classes, assignments, monthStart, canAdd }: { classes: ClassWithRel[]; assignments: AssignmentRow[]; monthStart: Date; canAdd: boolean }) {
   const gridStart = startOfWeek(monthStart);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const today = new Date();
@@ -557,9 +494,8 @@ function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classe
         ))}
         {days.map((d) => {
           const inDay = classes.filter((c) => sameDay(new Date(c.startsAt), d));
-          const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), d));
           const dayAssignments = assignments.filter((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), d));
-          const moreCount = Math.max(0, dayAssignments.length - 2) + Math.max(0, dayTodos.length - 2) + Math.max(0, inDay.length - 2);
+          const moreCount = Math.max(0, dayAssignments.length - 2) + Math.max(0, inDay.length - 2);
           const isCurMonth = d.getMonth() === month;
           const isToday = sameDay(d, today);
           return (
@@ -578,24 +514,13 @@ function MonthView({ classes, todos, assignments, monthStart, canAdd }: { classe
                     <Dumbbell size={10} /> {a.workout.name}
                   </Link>
                 ))}
-                {dayTodos.slice(0, 2).map((t) => (
-                  t.source === "note" ? (
-                    <div key={t.id} className="text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 bg-sky-100 text-sky-800">
-                      <StickyNote size={10} /> {t.title}
-                    </div>
-                  ) : (
-                    <div key={t.id} className={`text-[11px] rounded px-1.5 py-0.5 truncate flex items-center gap-1 ${t.done ? "bg-background text-muted line-through" : "bg-amber-100 text-amber-800"}`}>
-                      <CheckSquare size={10} /> {t.title}
-                    </div>
-                  )
-                ))}
                 {inDay.slice(0, 2).map((c) => (
                   <Link key={c.id} href={`/classes/${c.id}`} className="block text-[11px] bg-background border border-border rounded px-1.5 py-1 hover:border-accent truncate">
                     <span className="text-accent font-semibold">{formatTime(c.startsAt)}</span> {c.title}
                   </Link>
                 ))}
                 {moreCount > 0 && <div className="text-[10px] text-muted">+{moreCount} more</div>}
-                {canAdd && inDay.length === 0 && dayTodos.length === 0 && dayAssignments.length === 0 && (
+                {canAdd && inDay.length === 0 && dayAssignments.length === 0 && (
                   <span className="opacity-0 group-hover:opacity-100 transition">
                     <DayQuickAdd date={isoDay(d)} returnTo={returnTo} variant="text" label="Add" />
                   </span>
@@ -639,22 +564,20 @@ function MobileClassRow({ c, canSignUp, signedUp }: { c: ClassWithRel; canSignUp
   );
 }
 
-function MobileCalendar({ classes, todos, assignments, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; todos: TodoRow[]; assignments: AssignmentRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
+function MobileCalendar({ classes, assignments, cursor, canAdd, canSignUp, signedUpIds }: { classes: ClassWithRel[]; assignments: AssignmentRow[]; cursor: Date; canAdd: boolean; canSignUp: boolean; signedUpIds: Set<string> }) {
   const now = new Date();
   const weekStart = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const isoDay = (d: Date) => d.toISOString().split("T")[0];
   const hasItems = (d: Date) =>
     classes.some((c) => sameDay(new Date(c.startsAt), d)) ||
-    assignments.some((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), d)) ||
-    todos.some((t) => t.dueDate && sameDay(new Date(t.dueDate), d));
+    assignments.some((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), d));
 
   const dayClasses = classes
     .filter((c) => sameDay(new Date(c.startsAt), cursor))
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
   const dayAssignments = assignments.filter((a) => a.scheduledDate && sameDay(new Date(a.scheduledDate), cursor));
-  const dayTodos = todos.filter((t) => t.dueDate && sameDay(new Date(t.dueDate), cursor));
-  const empty = dayClasses.length === 0 && dayAssignments.length === 0 && dayTodos.length === 0;
+  const empty = dayClasses.length === 0 && dayAssignments.length === 0;
 
   const monthTitle = cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const dayTitle = sameDay(cursor, now)
@@ -711,16 +634,9 @@ function MobileCalendar({ classes, todos, assignments, cursor, canAdd, canSignUp
           </section>
         )}
 
-        {dayTodos.length > 0 && (
-          <section>
-            <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">To-dos &amp; notes</h3>
-            <div className="space-y-2">{dayTodos.map((t) => <TodoCard key={t.id} t={t} />)}</div>
-          </section>
-        )}
-
         {empty && (
           <div className="text-center text-sm text-muted py-12 bg-card border border-dashed border-border rounded-xl">
-            Nothing scheduled for this day.{canAdd ? " Tap Add to create something." : ""}
+            Nothing scheduled for this day.{canAdd ? " Tap Add to create a class." : ""}
           </div>
         )}
       </div>

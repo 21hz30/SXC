@@ -1,7 +1,6 @@
 import type { Tool } from "./types";
-import { create_todo } from "./create_todo";
 
-export const tools: Tool[] = [create_todo];
+export const tools: Tool[] = [];
 
 export function getTool(name: string): Tool | undefined {
   return tools.find((t) => t.name === name);
