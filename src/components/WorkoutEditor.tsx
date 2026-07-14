@@ -490,6 +490,13 @@ export function ItemForm({
 // ─── Group form ──────────────────────────────────────────────────────────────
 export type GroupMember = Omit<Item, "id" | "groupKey" | "groupTimeSec" | "groupRounds">;
 
+type GroupMemberNumberDraft = {
+  reps: string;
+  sets: string;
+  distanceM: string;
+  weightKg: string;
+};
+
 function emptyMember(): GroupMember {
   return {
     category: "other" as Category,
@@ -504,6 +511,25 @@ function emptyMember(): GroupMember {
     notes: null,
     tag: null,
   };
+}
+
+function memberNumberDraft(member?: GroupMember): GroupMemberNumberDraft {
+  return {
+    reps: member?.reps?.toString() ?? "",
+    sets: member?.sets?.toString() ?? "",
+    distanceM: member?.distanceM?.toString() ?? "",
+    weightKg: member?.weightKg?.toString() ?? "",
+  };
+}
+
+function optionalNumber(value: string): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function blurNumberInputOnWheel(e: React.WheelEvent<HTMLInputElement>) {
+  e.currentTarget.blur();
 }
 
 /**
@@ -526,6 +552,11 @@ export function GroupForm({
   const [totalMin, setTotalMin] = useState(initial?.totalSec != null ? String(Math.floor(initial.totalSec / 60)) : "");
   const [totalSecPart, setTotalSecPart] = useState(initial?.totalSec != null ? String(initial.totalSec % 60) : "");
   const [rounds, setRounds] = useState(initial?.rounds != null ? String(initial.rounds) : "");
+  // Keep number fields as strings while typing so intermediate edits and the
+  // caret are not disrupted by converting every keystroke back to a number.
+  const [memberNumbers, setMemberNumbers] = useState<GroupMemberNumberDraft[]>(() =>
+    startMembers.map((member) => memberNumberDraft(member))
+  );
   // Each member has its own min:sec for an optional per-exercise time cap.
   const [memberTimes, setMemberTimes] = useState<{ min: string; sec: string }[]>(() =>
     startMembers.map((m) => ({
@@ -540,12 +571,17 @@ export function GroupForm({
   function updateMemberTime(i: number, patch: Partial<{ min: string; sec: string }>) {
     setMemberTimes((cur) => cur.map((t, j) => (j === i ? { ...t, ...patch } : t)));
   }
+  function updateMemberNumber(i: number, field: keyof GroupMemberNumberDraft, value: string) {
+    setMemberNumbers((cur) => cur.map((draft, j) => (j === i ? { ...draft, [field]: value } : draft)));
+  }
   function addMember() {
     setMembers((cur) => [...cur, emptyMember()]);
+    setMemberNumbers((cur) => [...cur, memberNumberDraft()]);
     setMemberTimes((cur) => [...cur, { min: "", sec: "" }]);
   }
   function removeMember(i: number) {
     setMembers((cur) => cur.filter((_, j) => j !== i));
+    setMemberNumbers((cur) => cur.filter((_, j) => j !== i));
     setMemberTimes((cur) => cur.filter((_, j) => j !== i));
   }
 
@@ -556,8 +592,16 @@ export function GroupForm({
     // Bake per-member timeSec into each member from its min:sec inputs.
     const withTimes = members.map((m, i) => {
       const t = memberTimes[i] ?? { min: "", sec: "" };
+      const numberDraft = memberNumbers[i] ?? memberNumberDraft();
       const ms = t.min === "" && t.sec === "" ? null : Number(t.min || 0) * 60 + Number(t.sec || 0);
-      return { ...m, timeSec: ms };
+      return {
+        ...m,
+        reps: optionalNumber(numberDraft.reps),
+        sets: optionalNumber(numberDraft.sets),
+        distanceM: optionalNumber(numberDraft.distanceM),
+        weightKg: optionalNumber(numberDraft.weightKg),
+        timeSec: ms,
+      };
     });
     // Filter out completely-empty member rows.
     const nonEmpty = withTimes.filter((m) => m.label?.trim() || m.reps != null || m.sets != null || m.distanceM != null || m.weightKg != null || m.timeSec != null || m.notes?.trim() || m.category !== "other");
@@ -580,6 +624,7 @@ export function GroupForm({
       <ul className="space-y-3">
         {members.map((m, i) => {
           const mt = memberTimes[i] ?? { min: "", sec: "" };
+          const numberDraft = memberNumbers[i] ?? memberNumberDraft();
           return (
             <li key={i} className="bg-card border border-border rounded-lg p-3 space-y-2">
               <div className="flex items-center justify-between mb-1">
@@ -607,28 +652,28 @@ export function GroupForm({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                   <label className={labelCls}>Reps</label>
-                  <input type="number" min={0} value={m.reps ?? ""} onChange={(e) => updateMember(i, { reps: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                  <input type="number" min={0} value={numberDraft.reps} onChange={(e) => updateMemberNumber(i, "reps", e.target.value)} onWheel={blurNumberInputOnWheel} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Sets</label>
-                  <input type="number" min={0} value={m.sets ?? ""} onChange={(e) => updateMember(i, { sets: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                  <input type="number" min={0} value={numberDraft.sets} onChange={(e) => updateMemberNumber(i, "sets", e.target.value)} onWheel={blurNumberInputOnWheel} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Distance (m)</label>
-                  <input type="number" min={0} step="0.1" value={m.distanceM ?? ""} onChange={(e) => updateMember(i, { distanceM: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                  <input type="number" min={0} step="0.1" value={numberDraft.distanceM} onChange={(e) => updateMemberNumber(i, "distanceM", e.target.value)} onWheel={blurNumberInputOnWheel} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Weight (kg)</label>
-                  <input type="number" min={0} step="0.1" value={m.weightKg ?? ""} onChange={(e) => updateMember(i, { weightKg: e.target.value ? Number(e.target.value) : null })} className={inputCls} />
+                  <input type="number" min={0} step="0.1" value={numberDraft.weightKg} onChange={(e) => updateMemberNumber(i, "weightKg", e.target.value)} onWheel={blurNumberInputOnWheel} className={inputCls} />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>Time (min : sec, optional)</label>
                   <div className="flex items-center gap-1 max-w-[12rem]">
-                    <input type="number" min={0} step={1} value={mt.min} onChange={(e) => updateMemberTime(i, { min: e.target.value })} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+                    <input type="number" min={0} step={1} value={mt.min} onChange={(e) => updateMemberTime(i, { min: e.target.value })} onWheel={blurNumberInputOnWheel} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
                     <span className="text-muted shrink-0">:</span>
-                    <input type="number" min={0} max={59} step={1} value={mt.sec} onChange={(e) => updateMemberTime(i, { sec: e.target.value })} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+                    <input type="number" min={0} max={59} step={1} value={mt.sec} onChange={(e) => updateMemberTime(i, { sec: e.target.value })} onWheel={blurNumberInputOnWheel} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
                   </div>
                 </div>
                 <div>
@@ -649,15 +694,15 @@ export function GroupForm({
         <div>
           <label className={`${labelCls} text-foreground/80`}>Group total time</label>
           <div className="flex items-center gap-1 max-w-[12rem]">
-            <input type="number" min={0} step={1} value={totalMin} onChange={(e) => setTotalMin(e.target.value)} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+            <input type="number" min={0} step={1} value={totalMin} onChange={(e) => setTotalMin(e.target.value)} onWheel={blurNumberInputOnWheel} placeholder="min" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
             <span className="text-muted shrink-0">:</span>
-            <input type="number" min={0} max={59} step={1} value={totalSecPart} onChange={(e) => setTotalSecPart(e.target.value)} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+            <input type="number" min={0} max={59} step={1} value={totalSecPart} onChange={(e) => setTotalSecPart(e.target.value)} onWheel={blurNumberInputOnWheel} placeholder="sec" className="w-full min-w-0 rounded-lg border border-border bg-white px-2 py-2 text-sm" />
           </div>
           <div className="text-[11px] text-muted mt-1">Shared by all exercises in this group.</div>
         </div>
         <div>
           <label className={`${labelCls} text-foreground/80`}>Rounds (optional)</label>
-          <input type="number" min={1} step={1} value={rounds} onChange={(e) => setRounds(e.target.value)} placeholder="1" className="w-full max-w-[8rem] rounded-lg border border-border bg-white px-2 py-2 text-sm" />
+          <input type="number" min={1} step={1} value={rounds} onChange={(e) => setRounds(e.target.value)} onWheel={blurNumberInputOnWheel} placeholder="1" className="w-full max-w-[8rem] rounded-lg border border-border bg-white px-2 py-2 text-sm" />
           <div className="text-[11px] text-muted mt-1">Run the group N times back-to-back. Blank or 1 = once.</div>
         </div>
       </div>
