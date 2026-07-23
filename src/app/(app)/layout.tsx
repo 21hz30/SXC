@@ -46,7 +46,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/calendar", label: "Calendar", icon: "calendar" },
     { href: "/camps", label: "Camps", icon: "camps" },
     // Customers list is staff-only; athletes only ever see their own Profile.
-    ...(isStaff ? ([{ href: "/customers", label: "Customers", icon: "customers" }] satisfies SidebarNavItem[]) : []),
+    ...(isStaff
+      ? ([
+          { href: "/customers", label: "Customers", icon: "customers" },
+          { href: "/plans", label: "Weekly plans", icon: "plans" },
+        ] satisfies SidebarNavItem[])
+      : []),
     { href: "/workouts", label: "Workouts", icon: "workouts" },
     { href: "/nutrition", label: "Nutrition", icon: "nutrition" },
     { href: "/profile", label: "Profile", icon: "profile" },

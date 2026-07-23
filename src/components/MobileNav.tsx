@@ -77,7 +77,7 @@ export default function MobileNav({
     <>
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between h-14 px-4 bg-white border-b border-border">
         <Link href="/" aria-label="Go to dashboard" className="flex items-center rounded-lg hover:opacity-80 transition-opacity">
-          <Image src={srcLogo} alt="SRC by Peoplearth" width={32} height={32} className="h-8 w-8" priority />
+          <Image src={srcLogo} alt="SRC by Peoplearth" width={32} height={32} className="h-8 w-8" loading="eager" />
         </Link>
         {/* Language switch + avatar menu (info, profile link, log out). */}
         <div className="flex items-center gap-2">
