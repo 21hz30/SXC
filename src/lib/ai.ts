@@ -25,7 +25,7 @@ export function getAIClient(): Anthropic {
 }
 
 export function getAIModel(): string {
-  return process.env.AI_MODEL ?? "deepseek-v4-pro";
+  return process.env.AI_MODEL ?? "deepseek-chat";
 }
 
 /**

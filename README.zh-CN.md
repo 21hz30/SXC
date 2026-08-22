@@ -51,7 +51,7 @@ npm run dev
 | `SESSION_SECRET` | 是         | 用于签名会话 Cookie 的密钥，生产环境请使用足够长的随机字符串。        |
 | `AI_API_KEY`     | AI 对话需要 | 模型服务商的 API Key（需兼容 Anthropic）。                            |
 | `AI_BASE_URL`    | AI 对话需要 | 模型服务商的 Base URL。                                                |
-| `AI_MODEL`       | 可选       | 模型名称（默认为 `deepseek-v4-pro`）。                                 |
+| `AI_MODEL`       | 可选       | 模型名称（默认为 `deepseek-chat`）。                                   |
 
 不填 AI 密钥也可正常运行，但在设置 `AI_API_KEY`（通常还需 `AI_BASE_URL`）
 之前，**AI 协同教练对话功能将被禁用**。

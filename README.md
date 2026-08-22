@@ -49,7 +49,7 @@ Copy `.env.example` to `.env` and set:
 | `SESSION_SECRET` | yes         | Secret used to sign session cookies. Use a long random string in prod. |
 | `AI_API_KEY`     | for AI chat | API key for the model provider (Anthropic-compatible).                 |
 | `AI_BASE_URL`    | for AI chat | Base URL of the model provider.                                        |
-| `AI_MODEL`       | optional    | Model name (defaults to `deepseek-v4-pro`).                            |
+| `AI_MODEL`       | optional    | Model name (defaults to `deepseek-chat`).                              |
 
 The app runs without the AI keys, but the **AI co-coach chat is disabled** until
 `AI_API_KEY` (and usually `AI_BASE_URL`) are set.
