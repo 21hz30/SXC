@@ -47,7 +47,7 @@ async function buildContext(classId: string, customerId: string): Promise<string
   if (!cls) throw new Error("class not found");
 
   const customer = await db.customer.findUnique({
-    where: { id: customerId },
+    where: { id: customerId, deletedAt: null },
     include: {
       raceGoals: { orderBy: { updatedAt: "desc" }, take: 1 },
       raceResults: { orderBy: { eventDate: "desc" }, take: 1 },

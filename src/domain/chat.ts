@@ -47,7 +47,7 @@ export async function createSession(
   input: { title?: string; customerId?: string | null }
 ): Promise<ChatSessionDTO> {
   const customer = input.customerId
-    ? await db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, name: true } })
+    ? await db.customer.findUnique({ where: { id: input.customerId, deletedAt: null }, select: { id: true, name: true } })
     : null;
   const title = input.title?.trim() || (customer ? `Chat about ${customer.name}` : "New chat");
   const s = await db.chatSession.create({

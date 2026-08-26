@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
         customer: {
           select: {
             userAccount: { select: { id: true } },
-            campMembers: { select: { camp: { select: { coachId: true } } } },
+            campMembers: { select: { camp: { select: { coachId: true, createdById: true } } } },
             coachConnections: { select: { coachUserId: true, status: true } },
           },
         },

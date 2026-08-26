@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   // Pin the workspace root to THIS directory. Without this, Turbopack walks up
   // and picks the parent checkout (/Users/peterzhang/SXC) as the root because
   // it also has a package-lock.json — making the dev server straddle two

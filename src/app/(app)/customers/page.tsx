@@ -3,11 +3,11 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formatSec, formatDate } from "@/lib/utils";
-import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, Timer } from "lucide-react";
+import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, CalendarPlus, Timer } from "lucide-react";
 import RoleBadge from "@/components/RoleBadge";
 import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 import { requireCoach } from "@/lib/auth";
-import { customerScope } from "@/lib/access";
+import { campScope, customerScope, workoutScope } from "@/lib/access";
 import { customerDetail } from "@/domain/customers";
 import { createAccount, AccountError } from "@/domain/accounts";
 import { addCoachAddedConnection } from "@/domain/coachConnections";
@@ -15,6 +15,10 @@ import AccountForm from "@/components/AccountForm";
 import TagCombobox from "@/components/TagCombobox";
 import CustomerList, { type CustItem } from "@/components/CustomerList";
 import { flashUrl } from "@/lib/flash";
+import { assignWeeklyPlan, nextWeekStart } from "@/domain/weeklyPlans";
+import WeeklyAssignmentBuilder, { type WeeklyPlanSubscriber, type WeeklyPlanWorkout } from "@/components/WeeklyAssignmentBuilder";
+import { archiveCustomerAccount, restoreCustomerProfile } from "@/domain/accountLifecycle";
+import { isUniqueConstraintError, normalizePhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +38,15 @@ const ATT_META: Record<string, { label: string; cls: string }> = {
   pending: { label: "Upcoming", cls: "bg-zinc-100 text-zinc-600" },
 };
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; sel?: string; error?: string }> }) {
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; sel?: string; assign?: string; error?: string }> }) {
   const user = await requireCoach();
-  const { new: isNew, edit, sel, error } = await searchParams;
+  const { new: isNew, edit, sel, assign, error } = await searchParams;
+  const connectionWhere = user.role === "coach"
+    ? { coachUserId: user.id, status: "active" }
+    : { status: "active" };
+  const memberWhere = user.role === "coach"
+    ? { status: "active", camp: campScope(user) }
+    : { status: "active" };
   // Exclude staff (admin/coach) profiles — they live on the Team page.
   const [customers, camps] = await Promise.all([
     db.customer.findMany({
@@ -53,9 +63,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       orderBy: { name: "asc" },
       // Roster rows are only tallied by attendance — select that one field rather
       // than hydrating every customer's full class history.
-      include: { rosterEntries: { select: { attendance: true } }, campMembers: { select: { campId: true } }, userAccount: { select: { role: true } } },
+      include: {
+        rosterEntries: { select: { attendance: true } },
+        campMembers: { where: memberWhere, select: { campId: true, camp: { select: { name: true } } } },
+        coachConnections: { where: connectionWhere, select: { coach: { select: { name: true } } } },
+        userAccount: { select: { role: true } },
+      },
     }),
-    db.camp.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    db.camp.findMany({ where: campScope(user), orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   // Roster-wide plan adherence: pull every customer's assignment status+date in
   // one shot, then compute the % per customer in JS so the list can show it.
@@ -90,9 +105,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       attended: c.rosterEntries.filter((r) => r.attendance === "attended").length,
       total: c.rosterEntries.filter((r) => r.attendance !== "pending").length,
       campIds: c.campMembers.map((m) => m.campId),
+      campNames: c.campMembers.map((m) => m.camp.name),
+      subscriptionCoachNames: c.coachConnections.map((connection) => connection.coach.name),
       accountRole: c.userAccount?.role === "admin" || c.userAccount?.role === "coach" ? c.userAccount.role : null,
       adherencePct: a && a.due > 0 ? Math.round((a.done / a.due) * 100) : null,
       adherenceDue: a?.due ?? 0,
+      isSubscribed: c.coachConnections.length > 0,
+      segment: c.coachConnections.length > 0 ? "subscription" : c.campMembers.length > 0 ? "camp" : "other",
     };
   });
 
@@ -125,6 +144,53 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       })()
     : null;
   const selItem = selectedCustomer ? listItems.find((i) => i.id === selectedCustomer.id) ?? null : null;
+  const archivedCustomers = user.role === "admin"
+    ? await db.customer.findMany({
+        where: { deletedAt: { not: null } },
+        orderBy: { deletedAt: "desc" },
+        select: { id: true, name: true, deletedAt: true, deleteReason: true, userAccount: { select: { username: true } } },
+      })
+    : [];
+  const assigningCustomer = assign === "1" && selectedCustomer && selItem?.isSubscribed ? selectedCustomer : null;
+  const assignmentWorkoutRows = assigningCustomer
+    ? await db.workout.findMany({
+        where: workoutScope(user),
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, type: true, tags: true },
+      })
+    : [];
+  const assignmentSubscriber: WeeklyPlanSubscriber | null = assigningCustomer && selItem
+    ? {
+        id: assigningCustomer.id,
+        name: assigningCustomer.name,
+        detail: customerDetail(assigningCustomer) || assigningCustomer.email || "—",
+        coachNames: selItem.subscriptionCoachNames,
+      }
+    : null;
+  const assignmentWorkouts: WeeklyPlanWorkout[] = assignmentWorkoutRows;
+
+  async function assignPlan(formData: FormData) {
+    "use server";
+    const actor = await requireCoach();
+    const customerId = String(formData.get("customerId") ?? "").trim();
+    const returnPath = customerId ? `/customers?sel=${encodeURIComponent(customerId)}` : "/customers";
+    let input: unknown;
+    try {
+      input = JSON.parse(String(formData.get("plan") ?? "{}"));
+    } catch {
+      redirect(flashUrl(`${returnPath}&assign=1`, "Invalid weekly plan"));
+    }
+    const result = await assignWeeklyPlan(actor, input);
+    if (!result.ok) redirect(flashUrl(`${returnPath}&assign=1`, result.message));
+
+    revalidatePath("/customers");
+    revalidatePath("/");
+    revalidatePath("/calendar");
+    const summary = result.created > 0
+      ? `${result.created} assignments created${result.skipped > 0 ? ` · ${result.skipped} already existed` : ""}`
+      : `No new assignments · ${result.skipped} already existed`;
+    redirect(flashUrl(`${returnPath}&week=${result.weekStart}`, summary));
+  }
 
   async function createCustomer(formData: FormData) {
     "use server";
@@ -133,6 +199,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     if (!name) redirect("/customers?new=1&error=name");
     const email = String(formData.get("email") ?? "").trim() || null;
     const phone = String(formData.get("phone") ?? "").trim() || null;
+    const phoneNormalized = phone ? normalizePhone(phone) : null;
     const tags = String(formData.get("tags") ?? "").trim() || null;
 
     // A customer gets a login account too (same as admin/coach creation).
@@ -140,11 +207,12 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     const password = String(formData.get("password") ?? "");
     if (!/^[a-z0-9]{3,}$/.test(username)) redirect("/customers?new=1&error=username");
     if (!(password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password))) redirect("/customers?new=1&error=weak");
+    if (phone && !phoneNormalized) redirect("/customers?new=1&error=phone");
     if (await db.user.findUnique({ where: { username } })) redirect("/customers?new=1&error=dupuser");
 
     // Phone is our human-facing unique handle: if given, it must be unique.
     if (phone) {
-      const dupePhone = await db.customer.findFirst({ where: { phone } });
+      const dupePhone = await db.customer.findFirst({ where: { phoneNormalized } });
       if (dupePhone) redirect("/customers?new=1&error=phone");
     }
     // If the name already exists, require something to tell the two apart.
@@ -156,6 +224,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         name,
         email,
         phone,
+        phoneNormalized,
         age: Number(formData.get("age")) || null,
         weightKg: Number(formData.get("weightKg")) || null,
         heightCm: Number(formData.get("heightCm")) || null,
@@ -165,7 +234,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     // Create the linked login. If it fails (e.g. username taken in a race),
     // roll back the just-created profile so we don't leave an account-less one.
     try {
-      await createAccount({ username, password, name, role: "customer", email, customerId: c.id });
+      await createAccount({ username, password, name, role: "customer", email, customerId: c.id, actorUserId: actor.id });
     } catch (e) {
       await db.customer.delete({ where: { id: c.id } }).catch(() => {});
       if (e instanceof AccountError) redirect("/customers?new=1&error=dupuser");
@@ -181,17 +250,24 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
 
   async function updateCustomer(formData: FormData) {
     "use server";
-    await requireCoach();
+    const actor = await requireCoach();
     const customerId = String(formData.get("customerId") ?? "");
     const name = String(formData.get("name") ?? "").trim();
     if (!customerId || !name) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=name`);
     const email = String(formData.get("email") ?? "").trim() || null;
     const phone = String(formData.get("phone") ?? "").trim() || null;
+    const phoneNormalized = phone ? normalizePhone(phone) : null;
     const tags = String(formData.get("tags") ?? "").trim() || null;
 
-    if (phone) {
+    if (phone && !phoneNormalized) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=phone`);
+    const inScope = await db.customer.findFirst({
+      where: { AND: [{ id: customerId }, customerScope(actor)] },
+      select: { id: true },
+    });
+    if (!inScope) redirect("/customers");
+    if (phoneNormalized) {
       const dupePhone = await db.customer.findFirst({
-        where: { phone, NOT: { id: customerId } },
+        where: { phoneNormalized, NOT: { id: customerId } },
         select: { id: true },
       });
       if (dupePhone) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=phone`);
@@ -205,36 +281,50 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     });
     if (sameName && !phone && !email && !tags) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=dupename`);
 
-    const updated = await db.customer.update({
-      where: { id: customerId },
-      data: {
-        name,
-        email,
-        phone,
-        age: Number(formData.get("age")) || null,
-        weightKg: Number(formData.get("weightKg")) || null,
-        heightCm: Number(formData.get("heightCm")) || null,
-        tags,
-      },
-    });
+    let updated;
+    try {
+      updated = await db.customer.update({
+        where: { id: customerId },
+        data: {
+          name,
+          email,
+          phone,
+          phoneNormalized,
+          age: Number(formData.get("age")) || null,
+          weightKg: Number(formData.get("weightKg")) || null,
+          heightCm: Number(formData.get("heightCm")) || null,
+          tags,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) redirect(`/customers?edit=${encodeURIComponent(customerId)}&error=phone`);
+      throw error;
+    }
     revalidatePath("/customers");
     redirect(flashUrl("/customers", `${updated.name} updated`));
   }
 
-  async function deleteCustomer(formData: FormData) {
+  async function archiveCustomer(formData: FormData) {
     "use server";
-    await requireCoach();
+    const actor = await requireCoach();
     const customerId = String(formData.get("customerId") ?? "");
     if (!customerId) return;
-    // Remove the whole person: their profile (related rows — benchmarks, races,
-    // goals, activity, roster, camp memberships, performances, logs — cascade)
-    // AND any linked login account, so no orphaned login is left behind.
-    const linked = await db.user.findFirst({ where: { customerId }, select: { id: true } });
-    const removed = await db.customer.delete({ where: { id: customerId } });
-    if (linked) await db.user.delete({ where: { id: linked.id } }).catch(() => {});
+    const result = await archiveCustomerAccount(actor, customerId, "Archived from customer roster");
+    if (!result.ok) redirect(flashUrl("/customers", result.message));
     revalidatePath("/customers");
     revalidatePath("/coaches");
-    redirect(flashUrl("/customers", `${removed.name} deleted`));
+    redirect(flashUrl("/customers", `${result.name} archived`));
+  }
+
+  async function restoreCustomer(formData: FormData) {
+    "use server";
+    const actor = await requireCoach();
+    const customerId = String(formData.get("customerId") ?? "");
+    const result = await restoreCustomerProfile(actor, customerId);
+    if (!result.ok) redirect(flashUrl("/customers", result.message));
+    revalidatePath("/customers");
+    revalidatePath("/coaches");
+    redirect(flashUrl("/customers", `${result.name} restored`));
   }
 
   return (
@@ -252,7 +342,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Customers list — a sidebar (left on desktop; below the form on mobile) */}
         <aside className="lg:col-span-1 order-2 lg:order-1">
-          <CustomerList items={listItems} camps={camps} deleteAction={deleteCustomer} />
+          <CustomerList items={listItems} camps={camps} archiveAction={archiveCustomer} />
         </aside>
 
         {/* Main content — the add/edit form, or a hint on desktop */}
@@ -260,9 +350,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           {isNew ? (
             <AccountForm action={createCustomer} error={error} cancelHref="/customers" submitLabel="Create customer" />
           ) : editingCustomer ? (
-            <form action={updateCustomer} className="bg-card border border-border rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <form action={updateCustomer} className="bg-card border border-border rounded-xl p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
               {error && (
-                <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <div className="sm:col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   {error === "phone"
                     ? "That phone number is already used by another customer."
                     : error === "dupename"
@@ -271,7 +361,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 </div>
               )}
               <input type="hidden" name="customerId" value={editingCustomer.id} />
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-sm font-medium mb-1.5">Name *</label>
                 <input name="name" required defaultValue={editingCustomer.name} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
               </div>
@@ -287,13 +377,37 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 <label className="block text-sm font-medium mb-1.5">Tags</label>
                 <TagCombobox name="tags" defaultValue={(editingCustomer.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean)} suggestions={allCustomerTags} placeholder="Choose or create a tag…" />
               </div>
-              <div className="col-span-2 flex gap-2 justify-end">
+              <div className="flex gap-2 justify-end sm:col-span-2">
                 <Link href="/customers" className="px-4 py-2 text-sm rounded-lg border border-border">Cancel</Link>
                 <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-foreground text-white">Save changes</button>
               </div>
             </form>
+          ) : assigningCustomer && assignmentSubscriber ? (
+            <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
+              <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link href={`/customers?sel=${assigningCustomer.id}`} className="inline-flex items-center gap-1 text-xs text-accent hover:underline">
+                    <span aria-hidden>←</span><span>Back to customer</span>
+                  </Link>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight">Assign weekly plan</h2>
+                  <p className="mt-1 text-sm text-muted">
+                    <span>Current completion</span>: {selItem?.adherencePct != null ? `${selItem.adherencePct}%` : "No completed plan items yet"}
+                  </p>
+                </div>
+                <CalendarPlus className="shrink-0 text-accent" size={22} />
+              </div>
+              <WeeklyAssignmentBuilder
+                subscribers={[assignmentSubscriber]}
+                workouts={assignmentWorkouts}
+                defaultWeek={nextWeekStart()}
+                action={assignPlan}
+                initialCustomerIds={[assignmentSubscriber.id]}
+                fixedCustomer={assignmentSubscriber}
+                redirectCustomerId={assignmentSubscriber.id}
+              />
+            </div>
           ) : selectedCustomer ? (
-            <div className="bg-card border border-border rounded-xl p-6">
+            <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
               <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
                 <div className="min-w-0">
                   <h2 className="text-2xl font-semibold tracking-tight truncate flex items-center gap-2">
@@ -310,8 +424,19 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       ))}
                     </div>
                   )}
+                  {(selItem?.isSubscribed || selItem?.campNames.length) && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {selItem?.isSubscribed && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Subscribed schedule</span>}
+                      {selItem?.campNames.map((campName) => <span key={campName} className="rounded-full bg-background px-2 py-0.5 text-[11px] text-muted"><span>Camp</span> · {campName}</span>)}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {selItem?.isSubscribed && (
+                    <Link href={`/customers?sel=${selectedCustomer.id}&assign=1`} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-foreground text-white hover:opacity-90">
+                      <CalendarPlus size={14} /> Assign plan
+                    </Link>
+                  )}
                   <Link href={`/customers?edit=${selectedCustomer.id}`} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border hover:bg-background"><Pencil size={14} /> Edit</Link>
                   <Link href={`/customers/${selectedCustomer.id}`} className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-foreground text-white hover:opacity-90"><ExternalLink size={14} /> Full profile</Link>
                 </div>
@@ -415,6 +540,29 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           )}
         </div>
       </div>
+
+      {user.role === "admin" && archivedCustomers.length > 0 && (
+        <section className="mt-8 border-t border-border pt-6">
+          <h2 className="text-base font-semibold">Archived customers</h2>
+          <div className="mt-3 divide-y divide-border rounded-lg border border-border bg-card">
+            {archivedCustomers.map((archived) => (
+              <div key={archived.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{archived.name}</div>
+                  <div className="text-xs text-muted">
+                    {archived.userAccount?.username ?? "No login"} · {archived.deletedAt ? formatDate(archived.deletedAt) : "Archived"}
+                    {archived.deleteReason ? ` · ${archived.deleteReason}` : ""}
+                  </div>
+                </div>
+                <form action={restoreCustomer}>
+                  <input type="hidden" name="customerId" value={archived.id} />
+                  <button type="submit" className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-background">Restore</button>
+                </form>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

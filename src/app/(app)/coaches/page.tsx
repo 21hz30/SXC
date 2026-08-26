@@ -11,19 +11,27 @@ import PasswordInput from "@/components/PasswordInput";
 import AccountForm from "@/components/AccountForm";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { flashUrl } from "@/lib/flash";
+import { archiveUserAccount, restoreUserAccount } from "@/domain/accountLifecycle";
+import { normalizePhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
 export default async function CoachesPage({ searchParams }: { searchParams: Promise<{ new?: string; edit?: string; error?: string }> }) {
   await requireAdmin();
   const { new: isNew, edit, error } = await searchParams;
-  const [users, tenants] = await Promise.all([
+  const [users, archivedUsers, tenants] = await Promise.all([
     db.user.findMany({
+      where: { deletedAt: null },
       orderBy: { createdAt: "desc" },
       include: {
         camps: true,
         customer: { select: { email: true } },
       },
+    }),
+    db.user.findMany({
+      where: { deletedAt: { not: null } },
+      orderBy: { deletedAt: "desc" },
+      select: { id: true, name: true, username: true, role: true, deletedAt: true, deleteReason: true },
     }),
     // Tenants power the per-row "Promote to coach" action (which team a new
     // coach joins). With a single tenant the choice is implicit (one click).
@@ -35,25 +43,27 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
   // — only the role differs (admin/coach).
   async function createCoach(formData: FormData) {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const name = String(formData.get("name") ?? "").trim();
     if (!name) redirect("/coaches?new=1&error=name");
     const email = String(formData.get("email") ?? "").trim() || null;
     const phone = String(formData.get("phone") ?? "").trim() || null;
+    const phoneNormalized = phone ? normalizePhone(phone) : null;
     const tags = String(formData.get("tags") ?? "").trim() || null;
     const role = String(formData.get("role") ?? "coach") === "admin" ? "admin" : "coach";
     const username = String(formData.get("username") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     if (!/^[a-z0-9]{3,}$/.test(username)) redirect("/coaches?new=1&error=username");
     if (!(password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password))) redirect("/coaches?new=1&error=weak");
+    if (phone && !phoneNormalized) redirect("/coaches?new=1&error=phone");
     if (await db.user.findUnique({ where: { username } })) redirect("/coaches?new=1&error=dupuser");
     if (phone) {
-      const dupePhone = await db.customer.findFirst({ where: { phone } });
+      const dupePhone = await db.customer.findFirst({ where: { phoneNormalized } });
       if (dupePhone) redirect("/coaches?new=1&error=phone");
     }
     const c = await db.customer.create({
       data: {
-        name, email, phone, tags,
+        name, email, phone, phoneNormalized, tags,
         age: Number(formData.get("age")) || null,
         weightKg: Number(formData.get("weightKg")) || null,
         heightCm: Number(formData.get("heightCm")) || null,
@@ -61,7 +71,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     });
     let newUserId: string;
     try {
-      const res = await createAccount({ username, password, name, role, email, customerId: c.id });
+      const res = await createAccount({ username, password, name, role, email, customerId: c.id, actorUserId: actor.id });
       newUserId = res.userId;
     } catch (e) {
       await db.customer.delete({ where: { id: c.id } }).catch(() => {});
@@ -73,7 +83,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     // per-row "Promote to coach" button. (Admins span tenants, so no link.)
     if (role === "coach") {
       const tenantId = (await db.tenant.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }))?.id;
-      if (tenantId) await promoteUserToCoach(newUserId, tenantId);
+      if (tenantId) await promoteUserToCoach(newUserId, tenantId, actor.id);
     }
     revalidatePath("/coaches");
     redirect(flashUrl("/coaches", `${name} added as ${role}`));
@@ -81,7 +91,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
 
   async function updateUser(formData: FormData) {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const userId = String(formData.get("userId") ?? "");
     const username = String(formData.get("username") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
@@ -103,9 +113,9 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
 
     const existing = await db.user.findUnique({
       where: { id: userId },
-      select: { customerId: true, name: true, tenantId: true, invitationCode: true },
+      select: { customerId: true, name: true, role: true, tenantId: true, invitationCode: true, deletedAt: true },
     });
-    if (!existing) redirect("/coaches");
+    if (!existing || existing.deletedAt) redirect("/coaches");
 
     // Picking "Coach" in this dialog needs a tenant + invitation code, which a
     // bare role write can't supply (the dialog has no tenant picker — that's the
@@ -120,8 +130,12 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
       name: string;
       role?: string;
       passwordHash?: string;
+      sessionVersion?: { increment: number };
     } = { username, name, ...(promotingToCoach ? {} : { role }) };
-    if (password) userData.passwordHash = await hashPassword(password);
+    if (password) {
+      userData.passwordHash = await hashPassword(password);
+      userData.sessionVersion = { increment: 1 };
+    }
 
     await db.$transaction(async (tx) => {
       await tx.user.update({
@@ -134,12 +148,33 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
           data: { name, email },
         });
       }
+      if (!promotingToCoach && existing.role !== role) {
+        await tx.accountAuditLog.create({
+          data: {
+            action: "ROLE_CHANGED",
+            actorUserId: actor.id,
+            targetUserId: userId,
+            targetCustomerId: existing.customerId,
+            metadataJson: JSON.stringify({ from: existing.role, to: role }),
+          },
+        });
+      }
+      if (password) {
+        await tx.accountAuditLog.create({
+          data: {
+            action: "PASSWORD_CHANGED_BY_ADMIN",
+            actorUserId: actor.id,
+            targetUserId: userId,
+            targetCustomerId: existing.customerId,
+          },
+        });
+      }
     });
 
     if (promotingToCoach) {
       const tenantId = existing.tenantId ?? (await db.tenant.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }))?.id;
       if (!tenantId) redirect(flashUrl("/coaches", "Create a tenant before adding a coach"));
-      const res = await promoteUserToCoach(userId, tenantId);
+      const res = await promoteUserToCoach(userId, tenantId, actor.id);
       if (!res.ok) redirect(flashUrl("/coaches", res.message));
     }
 
@@ -147,26 +182,32 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     redirect(flashUrl("/coaches", `${existing.name} updated`));
   }
 
-  async function deleteUser(formData: FormData) {
+  async function archiveUser(formData: FormData) {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const userId = String(formData.get("userId"));
-    // Remove the whole person: the login AND their linked athlete profile, so
-    // they no longer appear anywhere (e.g. a camp's "add member" picker). The
-    // profile's related rows (camp memberships, assignments, …) cascade.
-    const u = await db.user.findUnique({ where: { id: userId }, select: { name: true, customerId: true } });
-    await db.user.delete({ where: { id: userId } });
-    if (u?.customerId) await db.customer.delete({ where: { id: u.customerId } }).catch(() => {});
+    const result = await archiveUserAccount(actor, userId, "Archived from Team management");
+    if (!result.ok) redirect(flashUrl("/coaches", result.message));
     revalidatePath("/coaches");
     revalidatePath("/customers");
-    redirect(flashUrl("/coaches", `${u?.name ?? "User"} removed`));
+    redirect(flashUrl("/coaches", `${result.name} archived`));
+  }
+
+  async function restoreUser(formData: FormData) {
+    "use server";
+    const actor = await requireAdmin();
+    const result = await restoreUserAccount(actor, String(formData.get("userId") ?? ""));
+    if (!result.ok) redirect(flashUrl("/coaches", result.message));
+    revalidatePath("/coaches");
+    revalidatePath("/customers");
+    redirect(flashUrl("/coaches", `${result.name} restored`));
   }
 
   // Promote a customer-role user to coach: assigns the tenant + mints their
   // invitation code (shared logic with the customer-profile panel).
   async function promoteToCoach(formData: FormData) {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const userId = String(formData.get("userId") ?? "");
     const tenantId = String(formData.get("tenantId") ?? "");
     // This button is offered for customer rows only — re-check server-side so a
@@ -175,7 +216,7 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
     if (target?.role !== "customer") {
       redirect(flashUrl("/coaches", "Only customers can be promoted here"));
     }
-    const res = await promoteUserToCoach(userId, tenantId);
+    const res = await promoteUserToCoach(userId, tenantId, actor.id);
     revalidatePath("/coaches");
     revalidatePath("/customers");
     redirect(flashUrl("/coaches", res.ok ? `Promoted to coach in ${res.tenantName} — code ${res.code}` : res.message));
@@ -275,9 +316,9 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
                         </ConfirmSubmit>
                       </form>
                     )}
-                    <form action={deleteUser}>
+                    <form action={archiveUser}>
                       <input type="hidden" name="userId" value={u.id} />
-                      <ConfirmSubmit message={`Delete the account for ${u.name} (${u.username})? This cannot be undone.`} className="text-xs text-muted hover:text-red-600">Remove</ConfirmSubmit>
+                      <ConfirmSubmit message={`Archive ${u.name} (${u.username})? Their login will be disabled and an admin can restore it.`} className="text-xs text-muted hover:text-red-600">Archive</ConfirmSubmit>
                     </form>
                   </div>
                 </td>
@@ -287,6 +328,28 @@ export default async function CoachesPage({ searchParams }: { searchParams: Prom
         </table>
         </div>
       </div>
+
+      {archivedUsers.length > 0 && (
+        <section className="mt-8 border-t border-border pt-6">
+          <h2 className="text-base font-semibold">Archived accounts</h2>
+          <div className="mt-3 divide-y divide-border rounded-lg border border-border bg-card">
+            {archivedUsers.map((u) => (
+              <div key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{u.name} <span className="font-normal text-muted">({u.username})</span></div>
+                  <div className="text-xs text-muted">
+                    {u.role} · {u.deletedAt ? formatDate(u.deletedAt) : "Archived"}{u.deleteReason ? ` · ${u.deleteReason}` : ""}
+                  </div>
+                </div>
+                <form action={restoreUser}>
+                  <input type="hidden" name="userId" value={u.id} />
+                  <button type="submit" className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-background">Restore</button>
+                </form>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

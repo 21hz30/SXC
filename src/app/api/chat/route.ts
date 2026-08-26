@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 
 async function buildCustomerContext(customerId: string): Promise<string | null> {
   const c = await db.customer.findUnique({
-    where: { id: customerId },
+    where: { id: customerId, deletedAt: null },
     include: {
       benchmarks: { orderBy: { testedAt: "desc" }, take: 8 },
       campMembers: { include: { camp: { select: { name: true } } } },

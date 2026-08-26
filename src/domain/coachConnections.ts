@@ -26,9 +26,9 @@ export async function findCoachByCode(rawCode: string): Promise<CoachByCode | nu
   if (!code) return null;
   const coach = await db.user.findUnique({
     where: { invitationCode: code },
-    select: { id: true, name: true, role: true, customerId: true },
+    select: { id: true, name: true, role: true, customerId: true, deletedAt: true },
   });
-  if (!coach || coach.role !== "coach") return null;
+  if (!coach || coach.role !== "coach" || coach.deletedAt) return null;
   return { id: coach.id, name: coach.name, customerId: coach.customerId };
 }
 

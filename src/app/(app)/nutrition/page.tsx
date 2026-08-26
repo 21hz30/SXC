@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { FEATURES } from "@/lib/features";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
@@ -22,6 +23,7 @@ const MEAL_LABEL: Record<string, string> = { breakfast: "Breakfast", lunch: "Lun
 const VALID_MEAL_TYPES = new Set(Object.keys(MEAL_LABEL));
 
 export default async function NutritionPage({ searchParams }: { searchParams: Promise<{ meal?: string }> }) {
+  if (!FEATURES.nutrition) redirect("/");
   const user = await requireUser();
   const myCustomerId = await getMyCustomerId();
   if (!myCustomerId) redirect("/profile");

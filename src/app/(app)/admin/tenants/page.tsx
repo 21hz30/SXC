@@ -1,13 +1,15 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { requireAdmin, hashPassword } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { mintInvitationCode } from "@/lib/invitationCode";
 import { formatDate } from "@/lib/utils";
 import { flashUrl } from "@/lib/flash";
 import BackButton from "@/components/BackButton";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import { Building2, Copy, KeyRound, UserPlus } from "lucide-react";
+import { AccountError, createAccount } from "@/domain/accounts";
+import { normalizePhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,7 @@ export default async function TenantsAdminPage() {
     orderBy: { createdAt: "asc" },
     include: {
       coaches: {
+        where: { deletedAt: null },
         orderBy: { username: "asc" },
         select: { id: true, username: true, name: true, role: true, invitationCode: true },
       },
@@ -41,14 +44,19 @@ export default async function TenantsAdminPage() {
 
   async function createTenant(formData: FormData) {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const name = String(formData.get("name") ?? "").trim();
     const slugRaw = String(formData.get("slug") ?? "").trim().toLowerCase();
     const coachUsername = String(formData.get("coachUsername") ?? "").trim().toLowerCase();
     const coachName = String(formData.get("coachName") ?? "").trim();
     const coachPassword = String(formData.get("coachPassword") ?? "").trim();
-    if (!name || !slugRaw || !coachUsername || !coachName || !coachPassword) {
+    const coachPhone = String(formData.get("coachPhone") ?? "").trim();
+    if (!name || !slugRaw || !coachUsername || !coachName || !coachPassword || !coachPhone) {
       redirect(flashUrl("/admin/tenants", "All fields are required"));
+    }
+    if (!normalizePhone(coachPhone)) redirect(flashUrl("/admin/tenants", "Enter a valid phone number"));
+    if (!(coachPassword.length >= 8 && /[A-Za-z]/.test(coachPassword) && /\d/.test(coachPassword))) {
+      redirect(flashUrl("/admin/tenants", "Password must be at least 8 characters and include a letter and a number"));
     }
     // Slug = lowercase + only [a-z0-9-]. Clamps to 24 chars.
     const slug = slugRaw.replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
@@ -59,18 +67,23 @@ export default async function TenantsAdminPage() {
     if (userConflict) redirect(flashUrl("/admin/tenants", `Username "${coachUsername}" already taken`));
 
     const tenant = await db.tenant.create({ data: { name, slug } });
-    const passwordHash = await hashPassword(coachPassword);
     const invitationCode = mintInvitationCode(slug, coachUsername);
-    await db.user.create({
-      data: {
+    try {
+      await createAccount({
         username: coachUsername,
-        passwordHash,
+        password: coachPassword,
         name: coachName,
+        phone: coachPhone,
         role: "coach",
         tenantId: tenant.id,
         invitationCode,
-      },
-    });
+        actorUserId: actor.id,
+      });
+    } catch (error) {
+      await db.tenant.delete({ where: { id: tenant.id } }).catch(() => {});
+      if (error instanceof AccountError) redirect(flashUrl("/admin/tenants", error.message));
+      throw error;
+    }
     revalidatePath("/admin/tenants");
     redirect(flashUrl("/admin/tenants", `Tenant "${name}" created — invite code ${invitationCode}`));
   }
@@ -209,8 +222,12 @@ export default async function TenantsAdminPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Initial password</label>
-                <input name="coachPassword" placeholder="they can change it later" required minLength={6} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
+                <input name="coachPassword" type="password" autoComplete="new-password" placeholder="8+ letters and numbers" required minLength={8} pattern="(?=.*[A-Za-z])(?=.*\d).{8,}" className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
               </div>
+            </div>
+            <div className="mt-3 max-w-sm">
+              <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">Phone</label>
+              <input name="coachPhone" type="tel" inputMode="tel" autoComplete="tel" placeholder="e.g. 13800138000" required className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm" />
             </div>
           </div>
 

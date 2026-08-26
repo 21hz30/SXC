@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Phone } from "lucide-react";
 
 /**
- * "Add your phone" gate. Shown (from the app layout) to any athlete whose
+ * "Add your phone" gate. Shown (from the app layout) to any account whose
  * profile has no phone number yet — phone is now required for everyone. No skip:
  * they enter a number, we save it, and a full reload clears the modal (the
  * reload also dodges iOS WeChat's RSC cache, like the other log forms).
@@ -17,9 +17,7 @@ export default function PhoneModal() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const digits = phone.replace(/\D/g, "");
-    // Mirror the server bound (6–20 digits) so an over-long paste fails here with
-    // guidance instead of bouncing off a 400 — this modal has no skip.
-    if (digits.length < 6 || digits.length > 20) {
+    if (digits.length < 7 || digits.length > 15) {
       setError("Enter a valid phone number.");
       return;
     }

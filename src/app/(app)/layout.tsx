@@ -14,6 +14,7 @@ import MobileNav from "@/components/MobileNav";
 import SidebarNav, { type SidebarNavItem } from "@/components/SidebarNav";
 import { LangToggle } from "@/components/I18nRuntime";
 import { Suspense } from "react";
+import { FEATURES } from "@/lib/features";
 
 async function logout() {
   "use server";
@@ -31,13 +32,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // account lookup — no extra query.
   const needsOnboarding = account.customerId != null && account.onboardedAt === null;
 
-  // Phone backfill: phone is now required at customer sign-up, but customers who
-  // registered before that may have none. Prompt them for it once, after any
-  // first-login onboarding (gating on `!needsOnboarding` keeps the two modals
-  // from stacking). Scoped to the customer role — staff aren't shown this
-  // athlete-facing prompt, and many staff profiles legitimately have no phone.
+  // Phone backfill: every account now needs a recovery number. Prompt legacy
+  // accounts once, after any first-login onboarding (gating on
+  // `!needsOnboarding` keeps the two blocking modals from stacking).
   const needsPhone =
-    account.role === "customer" && account.customerId != null && !account.phone && !needsOnboarding;
+    account.customerId != null && !account.phoneNormalized && !needsOnboarding;
 
   const isStaff = user.role === "admin" || user.role === "coach";
   const nav: SidebarNavItem[] = [
@@ -49,11 +48,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ...(isStaff
       ? ([
           { href: "/customers", label: "Customers", icon: "customers" },
-          { href: "/plans", label: "Weekly plans", icon: "plans" },
         ] satisfies SidebarNavItem[])
       : []),
     { href: "/workouts", label: "Workouts", icon: "workouts" },
-    { href: "/nutrition", label: "Nutrition", icon: "nutrition" },
+    ...(FEATURES.nutrition
+      ? ([{ href: "/nutrition", label: "Nutrition", icon: "nutrition" }] satisfies SidebarNavItem[])
+      : []),
     { href: "/profile", label: "Profile", icon: "profile" },
     ...(user.role === "admin"
       ? [

@@ -16,6 +16,7 @@ import TodayNutrition from "@/components/TodayNutrition";
 import { flashUrl } from "@/lib/flash";
 import { classScope, campScope, canAccessCamp } from "@/lib/access";
 import { rollDay, bmrKcal, type Stats, type DayIntake } from "@/domain/nutrition";
+import { FEATURES } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export default async function Dashboard() {
     // surfaces another tenant's applications.
     isStaff
       ? db.campMember.findMany({
-          where: { status: "pending", camp: campScope(user) },
+          where: { status: "pending", camp: campScope(user), customer: { deletedAt: null } },
           include: { customer: { select: { id: true, name: true } }, camp: { select: { id: true, name: true } } },
           orderBy: { joinedAt: "asc" },
         })
@@ -139,22 +140,22 @@ export default async function Dashboard() {
       : Promise.resolve([]),
     // Nutrition MVP — body stats power the targets, food/water/burn power the
     // intake side. All scoped to TODAY (UTC-anchored start/end of day).
-    myCustomerId
+    FEATURES.nutrition && myCustomerId
       ? db.customer.findUnique({ where: { id: myCustomerId }, select: { gender: true, weightKg: true, heightCm: true, age: true } })
       : Promise.resolve(null),
-    myCustomerId
+    FEATURES.nutrition && myCustomerId
       ? db.foodLog.findMany({
           where: { customerId: myCustomerId, loggedAt: { gte: startOfDay(), lte: endOfDay() } },
           select: { calories: true, proteinG: true, carbsG: true, fatG: true, fiberG: true },
         })
       : Promise.resolve([]),
-    myCustomerId
+    FEATURES.nutrition && myCustomerId
       ? db.waterLog.findMany({
           where: { customerId: myCustomerId, loggedAt: { gte: startOfDay(), lte: endOfDay() } },
           select: { amountMl: true },
         })
       : Promise.resolve([]),
-    myCustomerId
+    FEATURES.nutrition && myCustomerId
       ? db.workoutAssignment.findMany({
           where: { customerId: myCustomerId, scheduledDate: { gte: startOfDay(), lte: endOfDay() }, status: "completed" },
           select: { caloriesBurned: true, workout: { select: { items: { select: { timeSec: true, groupTimeSec: true } } } } },
@@ -178,7 +179,7 @@ export default async function Dashboard() {
     // tenant's pending requests (with the target coach named) so nothing stalls.
     isStaff
       ? db.customerCoach.findMany({
-          where: { status: "pending", ...(user.role === "coach" ? { coachUserId: user.id } : {}) },
+          where: { status: "pending", customer: { deletedAt: null }, coach: { deletedAt: null }, ...(user.role === "coach" ? { coachUserId: user.id } : {}) },
           orderBy: { requestedAt: "asc" },
           include: {
             customer: { select: { id: true, name: true } },
@@ -190,7 +191,7 @@ export default async function Dashboard() {
     // "Your coaches" quick-connect card. Athletes can link multiple coaches.
     myCustomerId && !isStaff
       ? db.customerCoach.findMany({
-          where: { customerId: myCustomerId, status: { in: ["pending", "active"] } },
+          where: { customerId: myCustomerId, status: { in: ["pending", "active"] }, coach: { deletedAt: null } },
           orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
           include: { coach: { select: { id: true, name: true, tenant: { select: { name: true } } } } },
         })
@@ -269,7 +270,7 @@ export default async function Dashboard() {
   // Today's nutrition rollup — anyone with a linked customer profile, including
   // staff who train (they have their own customer record). The coach view of
   // someone else's nutrition is a different surface on the customer profile.
-  const showNutrition = !!myCustomerId;
+  const showNutrition = FEATURES.nutrition && !!myCustomerId;
   let nutritionProgress: ReturnType<typeof rollDay> | null = null;
   if (showNutrition) {
     const stats: Stats = { gender: myStats?.gender ?? null, weightKg: myStats?.weightKg ?? null, heightCm: myStats?.heightCm ?? null, age: myStats?.age ?? null };

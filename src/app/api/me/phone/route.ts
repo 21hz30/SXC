@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isUniqueConstraintError, normalizePhone } from "@/lib/phone";
 
 // POST /api/me/phone — body: { phone } → save the caller's own contact number.
 // Backs the "add your phone" prompt shown to athletes whose profile has none.
@@ -11,13 +12,23 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as { phone?: string };
   const phone = String(body.phone ?? "").trim();
-  // Loose validation so international numbers work: 6–20 digits once symbols
-  // (+, spaces, dashes, parens) are stripped.
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length < 6 || digits.length > 20) {
+  const phoneNormalized = normalizePhone(phone);
+  if (!phoneNormalized) {
     return Response.json({ ok: false, message: "Enter a valid phone number." }, { status: 400 });
   }
 
-  await db.customer.update({ where: { id: u.customerId }, data: { phone } });
+  try {
+    await db.$transaction([
+      db.customer.update({ where: { id: u.customerId }, data: { phone, phoneNormalized } }),
+      db.accountAuditLog.create({
+        data: { action: "PHONE_UPDATED", actorUserId: user.id, targetUserId: user.id, targetCustomerId: u.customerId },
+      }),
+    ]);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return Response.json({ ok: false, message: "That phone number is already used by another account." }, { status: 409 });
+    }
+    throw error;
+  }
   return Response.json({ ok: true });
 }

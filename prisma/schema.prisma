@@ -31,6 +31,10 @@ model User {
   customerId   String?  @unique
   customer     Customer? @relation("CustomerAccount", fields: [customerId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
+  sessionVersion Int    @default(0)
+  deletedAt      DateTime?
+  deletedByUserId String?
+  deleteReason    String?
 
   /// Tenant a coach belongs to. NULL for admin (cross-tenant) and customer
   /// roles. Required for role = "coach" once backfilled.
@@ -52,6 +56,8 @@ model User {
 
   // Workouts authored by this user (coach). NULL for legacy library workouts.
   createdWorkouts      Workout[]       @relation("WorkoutCreator")
+
+  @@index([deletedAt])
 }
 
 /**
@@ -113,6 +119,8 @@ model Customer {
   name          String
   email         String?
   phone         String?
+  /// Canonical E.164 form used for uniqueness, sign-up matching and recovery.
+  phoneNormalized String? @unique
   gender        String?  // "male" | "female"
   division      String?  // "open" | "pro" | "doubles" | "relay"
   age           Int?
@@ -126,6 +134,9 @@ model Customer {
   /// show onboarding. Coach-created profiles also start null until claimed.
   onboardedAt   DateTime?
   createdAt     DateTime @default(now())
+  deletedAt      DateTime?
+  deletedByUserId String?
+  deleteReason    String?
 
   /// Reverse side of the optional account link (User.customerId).
   userAccount   User?         @relation("CustomerAccount")
@@ -151,6 +162,27 @@ model Customer {
   weightLogs    WeightLog[]
   /// Many-to-many bridge to coaches the customer is connected to.
   coachConnections CustomerCoach[] @relation("CustomerCoaches")
+
+  @@index([deletedAt])
+}
+
+/// Append-only security and account-lifecycle history. IDs are deliberately
+/// scalar rather than foreign keys so an audit record survives any future
+/// compliance-driven hard deletion.
+model AccountAuditLog {
+  id               String   @id @default(cuid())
+  action           String
+  actorUserId      String?
+  targetUserId     String?
+  targetCustomerId String?
+  reason           String?
+  metadataJson     String?
+  createdAt        DateTime @default(now())
+
+  @@index([targetUserId, createdAt])
+  @@index([targetCustomerId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 /// A workout for one athlete to do OUTSIDE of a class — either pushed by a

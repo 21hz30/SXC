@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireUser, getMyCustomerId } from "@/lib/auth";
 import { hasDedicatedVisionModel } from "@/lib/ai";
 import { parseFoodFromImage, isSupportedFoodImageType } from "@/domain/foodlogs";
+import { FEATURES } from "@/lib/features";
 
 // POST /api/nutrition/food/photo — body: { imageBase64, mediaType } → ParsedFood
 // Called from the Log Meal form's "Take a photo" button. The image is already
@@ -9,6 +10,7 @@ import { parseFoodFromImage, isSupportedFoodImageType } from "@/domain/foodlogs"
 const MAX_BASE64_CHARS = 8_000_000; // ~6 MB decoded
 
 export async function POST(req: NextRequest) {
+  if (!FEATURES.nutrition) return Response.json({ error: "not found" }, { status: 404 });
   await requireUser();
   const mine = await getMyCustomerId();
   if (!mine) return Response.json({ error: "no customer profile" }, { status: 400 });

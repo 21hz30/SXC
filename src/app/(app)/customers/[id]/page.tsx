@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { formatDate, formatTime, formatSec } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { createSession } from "@/domain/chat";
-import { requireUser, requireAdmin, clearSession, getMyCustomerId, type SessionUser } from "@/lib/auth";
+import { requireUser, requireAdmin, getMyCustomerId, type SessionUser } from "@/lib/auth";
 import { promoteUserToCoach } from "@/domain/roles";
 import { Sparkles, Pencil, UserCheck } from "lucide-react";
 import BackButton from "@/components/BackButton";
@@ -19,6 +19,8 @@ import RaceTab, { type RaceDTO, type GoalDTO } from "@/components/RaceTab";
 import CustomerInsights from "@/components/CustomerInsights";
 import { STATION_KEYS, STATION_LABELS, RUN_KEYS } from "@/domain/races";
 import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
+import { archiveCustomerAccount } from "@/domain/accountLifecycle";
+import { isUniqueConstraintError, normalizePhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -53,11 +55,12 @@ async function assertCanEditCustomer(customerId: string): Promise<SessionUser> {
     where: { id: customerId },
     select: {
       userAccount: { select: { id: true } },
-      campMembers: { select: { camp: { select: { coachId: true } } } },
+      campMembers: { select: { camp: { select: { coachId: true, createdById: true } } } },
       coachConnections: { select: { coachUserId: true, status: true } },
+      deletedAt: true,
     },
   });
-  if (target && canAccessCustomer(u, target)) return u;
+  if (target && target.deletedAt === null && canAccessCustomer(u, target)) return u;
   redirect("/profile");
 }
 
@@ -106,11 +109,11 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     },
   });
   if (!c) notFound();
+  if (c.deletedAt) notFound();
   if (!canAccessCustomer(user, c)) redirect("/profile");
 
   // Self-view (the athlete looking at their own profile) vs staff-view.
   const isSelf = c.userAccount?.id === user.id;
-  const canEdit = isStaff || isSelf; // who may change this profile's fields
 
   // The Race tab is only meaningful once there's race data. Hide it on an
   // empty profile so a brand-new athlete sees a clean Training view — but
@@ -166,7 +169,13 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     };
     if (formData.has("name")) data.name = String(formData.get("name") ?? c!.name).trim() || c!.name;
     const e = strOrNull("email"); if (e !== undefined) data.email = e;
-    const ph = strOrNull("phone"); if (ph !== undefined) data.phone = ph;
+    const ph = strOrNull("phone");
+    if (ph !== undefined) {
+      const phoneNormalized = ph ? normalizePhone(ph) : null;
+      if (ph && !phoneNormalized) redirect(flashUrl(`/customers/${id}?editSection=identity`, "Enter a valid phone number"));
+      data.phone = ph;
+      data.phoneNormalized = phoneNormalized;
+    }
     const ag = numOrNull("age"); if (ag !== undefined) data.age = ag;
     const g = strOrNull("gender"); if (g !== undefined) data.gender = g;
     // Divisions are multi-select checkboxes (an athlete can race several). The
@@ -181,33 +190,33 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     const tg = strOrNull("tags"); if (tg !== undefined) data.tags = tg;
     const nt = strOrNull("notes"); if (nt !== undefined) data.notes = nt;
     if (Object.keys(data).length > 0) {
-      await db.customer.update({ where: { id }, data });
+      try {
+        await db.customer.update({ where: { id }, data });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) redirect(flashUrl(`/customers/${id}?editSection=identity`, "That phone number is already used"));
+        throw error;
+      }
     }
     revalidatePath(`/customers/${id}`);
     redirect(flashUrl(`/customers/${id}`, "Profile saved"));
   }
 
-  async function deleteCustomer() {
+  async function archiveCustomer() {
     "use server";
     const actor = await assertCanEditCustomer(id);
-    // Related benchmarks, races, goals, activity, videos, roster, camp
-    // memberships, performances and logs cascade via the schema.
-    const ownerDeletingSelf = actor.role === "customer";
-    await db.customer.delete({ where: { id } });
-    if (ownerDeletingSelf) {
-      // Deleting your own profile deletes the whole account.
-      await db.user.delete({ where: { id: actor.id } });
-      await clearSession();
-      redirect("/login");
+    if (actor.role !== "admin" && actor.role !== "coach") {
+      redirect(flashUrl(`/customers/${id}`, "Ask an administrator to deactivate your account"));
     }
+    const result = await archiveCustomerAccount(actor, id, "Archived from customer profile");
+    if (!result.ok) redirect(flashUrl(`/customers/${id}`, result.message));
     revalidatePath("/customers");
-    redirect(flashUrl("/customers", `${c!.name} deleted`));
+    redirect(flashUrl("/customers", `${result.name} archived`));
   }
 
   // ─── Role management ─────────────────────────────────────────────────
   async function promoteToCoach(formData: FormData) {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const tenantId = String(formData.get("tenantId") ?? "").trim();
     const target = await db.customer.findUnique({
       where: { id },
@@ -217,7 +226,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
       redirect(flashUrl(`/customers/${id}`, "Customer has no linked account — can't promote"));
     }
     // Sets role + tenant + mints the invitation code (shared with the Team page).
-    const res = await promoteUserToCoach(target.userAccount.id, tenantId);
+    const res = await promoteUserToCoach(target.userAccount.id, tenantId, actor.id);
     revalidatePath(`/customers/${id}`);
     revalidatePath("/admin/tenants");
     redirect(flashUrl(`/customers/${id}`, res.ok ? `Promoted to coach in ${res.tenantName} — code ${res.code}` : res.message));
@@ -225,7 +234,7 @@ export default async function CustomerDetail({ params, searchParams }: { params:
 
   async function promoteToAdmin() {
     "use server";
-    await requireAdmin();
+    const actor = await requireAdmin();
     const target = await db.customer.findUnique({
       where: { id },
       select: { userAccount: { select: { id: true } } },
@@ -233,10 +242,21 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     if (!target?.userAccount) {
       redirect(flashUrl(`/customers/${id}`, "Customer has no linked account — can't promote"));
     }
-    await db.user.update({
-      where: { id: target!.userAccount!.id },
-      data: { role: "admin", tenantId: null, invitationCode: null },
-    });
+    await db.$transaction([
+      db.user.update({
+        where: { id: target!.userAccount!.id },
+        data: { role: "admin", tenantId: null, invitationCode: null },
+      }),
+      db.accountAuditLog.create({
+        data: {
+          action: "ROLE_CHANGED",
+          actorUserId: actor.id,
+          targetUserId: target!.userAccount!.id,
+          targetCustomerId: id,
+          metadataJson: JSON.stringify({ to: "admin" }),
+        },
+      }),
+    ]);
     revalidatePath(`/customers/${id}`);
     revalidatePath("/admin/tenants");
     redirect(flashUrl(`/customers/${id}`, "Promoted to admin"));
@@ -284,15 +304,26 @@ export default async function CustomerDetail({ params, searchParams }: { params:
     }
     // Guard: never strip the last admin — would lock everyone out of the app.
     if (target.userAccount.role === "admin") {
-      const adminCount = await db.user.count({ where: { role: "admin" } });
+      const adminCount = await db.user.count({ where: { role: "admin", deletedAt: null } });
       if (adminCount <= 1) {
         redirect(flashUrl(`/customers/${id}`, "Can't demote the last admin"));
       }
     }
-    await db.user.update({
-      where: { id: target.userAccount.id },
-      data: { role: "customer", tenantId: null, invitationCode: null },
-    });
+    await db.$transaction([
+      db.user.update({
+        where: { id: target.userAccount.id },
+        data: { role: "customer", tenantId: null, invitationCode: null },
+      }),
+      db.accountAuditLog.create({
+        data: {
+          action: "ROLE_CHANGED",
+          actorUserId: actor.id,
+          targetUserId: target.userAccount.id,
+          targetCustomerId: id,
+          metadataJson: JSON.stringify({ from: target.userAccount.role, to: "customer" }),
+        },
+      }),
+    ]);
     revalidatePath(`/customers/${id}`);
     revalidatePath("/admin/tenants");
     redirect(flashUrl(`/customers/${id}`, "Demoted to customer"));
@@ -534,17 +565,13 @@ export default async function CustomerDetail({ params, searchParams }: { params:
                 </button>
               </form>
             )}
-            {canEdit && (
-              <form action={deleteCustomer}>
+            {isStaff && !isSelf && (
+              <form action={archiveCustomer}>
                 <ConfirmSubmit
-                  message={
-                    isSelf
-                      ? "Delete your account? This permanently removes your profile, benchmarks, race results, activity and history, and logs you out. This cannot be undone."
-                      : `Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`
-                  }
+                  message={`Archive ${c.name}? Their login will be disabled and they will be hidden from active lists. An admin can restore the account.`}
                   className="rounded-lg border border-border px-3 py-2 text-sm text-muted hover:border-red-300 hover:text-red-600"
                 >
-                  {isSelf ? "Delete account" : "Delete"}
+                  Archive
                 </ConfirmSubmit>
               </form>
             )}

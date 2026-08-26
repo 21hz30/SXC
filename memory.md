@@ -32,6 +32,8 @@
   - `npm run lint`
   - `npx tsc --noEmit`
 - If database/schema changes are involved, also run read-only Prisma/Supabase checks against dev first.
+- `prisma migrate status` may hang against the Supabase pooler from this
+  environment; direct read-only `pg` checks have worked reliably.
 - Do not merge/push if lint, typecheck, or relevant database checks fail.
 
 ## Git commit standard
@@ -77,7 +79,8 @@
 
 - Updated local `.env` to connect to Supabase `src-dev`.
 - Confirmed direct database connection works.
-- Pulled latest GitHub `main`.
+- Pulled latest GitHub `main` through `4bca201` on 2026-07-04.
+- Confirmed `src-dev` has no `_prisma_migrations` table via read-only metadata query.
 - Fixed class/calendar API authorization bugs.
 - Fixed ESLint errors/warnings; `npm run lint` is clean.
 - Confirmed `npx tsc --noEmit` is clean.

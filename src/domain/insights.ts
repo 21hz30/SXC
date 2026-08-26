@@ -36,7 +36,7 @@ const FALLBACK_PROMPT =
 
 async function buildContext(customerId: string): Promise<string> {
   const c = await db.customer.findUnique({
-    where: { id: customerId },
+    where: { id: customerId, deletedAt: null },
     include: {
       benchmarks: { orderBy: { testedAt: "desc" }, take: 14 },
       raceResults: { orderBy: { eventDate: "desc" }, take: 5 },

@@ -2,6 +2,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import "dotenv/config";
 import bcrypt from "bcryptjs";
+import { assertDestructiveDatabaseOperation } from "./destructive-guard";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is not set");
@@ -16,7 +17,9 @@ function daysFromNow(d: number, hour = 7, min = 0) {
 }
 
 async function main() {
+  assertDestructiveDatabaseOperation("ALLOW_DESTRUCTIVE_SEED", "Demo database reset");
   // Wipe everything (cascade does most of the work, but be explicit for clarity)
+  await db.accountAuditLog.deleteMany();
   await db.chatMessage.deleteMany();
   await db.chatSession.deleteMany();
   await db.log.deleteMany();
@@ -43,6 +46,15 @@ async function main() {
   const src = await db.user.create({
     data: { username: "src", passwordHash: await bcrypt.hash("src123", 10), name: "SRC Coach", role: "coach" },
   });
+
+  const [peterProfile, srcProfile] = await Promise.all([
+    db.customer.create({ data: { name: peter.name, phone: "13800000001", phoneNormalized: "+8613800000001" } }),
+    db.customer.create({ data: { name: src.name, phone: "13800000002", phoneNormalized: "+8613800000002" } }),
+  ]);
+  await Promise.all([
+    db.user.update({ where: { id: peter.id }, data: { customerId: peterProfile.id } }),
+    db.user.update({ where: { id: src.id }, data: { customerId: srcProfile.id } }),
+  ]);
 
   // Customers
   const customers = await Promise.all(

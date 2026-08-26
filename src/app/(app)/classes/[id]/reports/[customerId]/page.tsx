@@ -46,7 +46,7 @@ export default async function ReportPage({
     if (!ok) redirect("/calendar");
   }
 
-  const customer = await db.customer.findUnique({ where: { id: customerId } });
+  const customer = await db.customer.findUnique({ where: { id: customerId, deletedAt: null } });
   if (!customer) notFound();
 
   const existing = await db.classReport.findUnique({

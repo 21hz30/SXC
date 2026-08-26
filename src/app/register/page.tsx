@@ -11,14 +11,15 @@ import srcLogo from "@/assets/brand/src-logo.png";
 export default async function RegisterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; code?: string }>;
+  searchParams: Promise<{ error?: string; code?: string; phone?: string }>;
 }) {
   if (await getSessionUser()) redirect("/");
-  const { error, code: codeParam } = await searchParams;
+  const { error, code: codeParam, phone: phoneParam } = await searchParams;
   // A coach shares /register?code=SRC-TAY-XXXX — pre-fill (and keep) the code
   // so the athlete doesn't have to type it. Uppercased to match how codes are
   // minted and looked up.
   const presetCode = (codeParam ?? "").trim().toUpperCase();
+  const presetPhone = (phoneParam ?? "").trim();
 
   async function doRegister(formData: FormData) {
     "use server";
@@ -29,7 +30,10 @@ export default async function RegisterPage({
     // A coach invitation only arrives as a deep-link (/register?code=…) now —
     // there's no code field on the lean sign-up form. Keep it across bounces.
     const code = presetCode;
-    const codeQS = code ? `&code=${encodeURIComponent(code)}` : "";
+    const continuation = new URLSearchParams();
+    if (code) continuation.set("code", code);
+    if (phone) continuation.set("phone", phone);
+    const continuationQS = continuation.size ? `&${continuation.toString()}` : "";
 
     // Sign-up asks for the four essentials only: login name, display name,
     // phone, password. Email + coach connection are gathered later, in
@@ -37,16 +41,16 @@ export default async function RegisterPage({
 
     // Username: this is the LOGIN name. English letters and numbers only —
     // no spaces or special characters — so it's safe and easy to type.
-    if (!/^[a-z0-9]{3,}$/.test(username)) redirect(`/register?error=username${codeQS}`);
+    if (!/^[a-z0-9]{3,}$/.test(username)) redirect(`/register?error=username${continuationQS}`);
     // Password rules: 8+ chars, at least one letter and one number.
     const passwordOk =
       password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
-    if (!passwordOk) redirect(`/register?error=invalid${codeQS}`);
+    if (!passwordOk) redirect(`/register?error=invalid${continuationQS}`);
     // Phone is required for every athlete (their coach needs a way to reach
     // them). Loose check — 6–20 digits once symbols are stripped — so CN mobiles
     // and international numbers both pass.
     const phoneDigits = phone.replace(/\D/g, "");
-    if (phoneDigits.length < 6 || phoneDigits.length > 20) redirect(`/register?error=phone${codeQS}`);
+    if (phoneDigits.length < 6 || phoneDigits.length > 20) redirect(`/register?error=phone${continuationQS}`);
 
     // Public sign-up creates an athlete (customer) account: a login + a linked
     // profile. Phone may "claim" a profile a coach already pre-made (handled in
@@ -58,7 +62,7 @@ export default async function RegisterPage({
       userId = res.userId;
       customerId = res.customerId;
     } catch (e) {
-      if (e instanceof AccountError) redirect(`/register?error=taken${codeQS}`);
+      if (e instanceof AccountError) redirect(`/register?error=taken${continuationQS}`);
       throw e;
     }
 
@@ -73,8 +77,10 @@ export default async function RegisterPage({
     jar.set(SESSION_COOKIE, makeToken(userId), {
       httpOnly: true,
       sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
+      priority: "high",
     });
     redirect("/profile");
   }
@@ -90,8 +96,8 @@ export default async function RegisterPage({
     : null;
 
   return (
-    <main className="flex-1 flex items-center justify-center p-8">
-      <form action={doRegister} className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 shadow-sm">
+    <main className="flex flex-1 items-center justify-center p-4 sm:p-8">
+      <form action={doRegister} className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-8">
         <div className="mb-6 flex flex-col items-center text-center">
           <Image src={srcLogo} alt="SRC by Peoplearth" width={112} height={112} priority />
           <div className="text-sm text-muted mt-2">Create your athlete account</div>
@@ -131,6 +137,7 @@ export default async function RegisterPage({
         </label>
         <input
           name="phone"
+          defaultValue={presetPhone}
           type="tel"
           inputMode="tel"
           autoComplete="tel"

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { Pencil, Trash2, Search } from "lucide-react";
+import { Archive, CalendarPlus, Pencil, Search } from "lucide-react";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 import RoleBadge from "@/components/RoleBadge";
 import { formatSec } from "@/lib/utils";
@@ -21,6 +21,10 @@ export type CustItem = {
   adherencePct: number | null;
   /** Total assignments that were due (scheduled today or earlier) — for context */
   adherenceDue: number;
+  isSubscribed: boolean;
+  campNames: string[];
+  subscriptionCoachNames: string[];
+  segment: "subscription" | "camp" | "other";
 };
 
 /**
@@ -31,23 +35,37 @@ export type CustItem = {
 export default function CustomerList({
   items,
   camps,
-  deleteAction,
+  archiveAction,
 }: {
   items: CustItem[];
   camps: { id: string; name: string }[];
-  deleteAction: (formData: FormData) => void | Promise<void>;
+  archiveAction: (formData: FormData) => void | Promise<void>;
 }) {
   const sp = useSearchParams();
   const activeId = sp.get("sel") ?? sp.get("edit");
   const [q, setQ] = useState("");
   const [camp, setCamp] = useState("");
+  const [segment, setSegment] = useState<"all" | CustItem["segment"]>("all");
 
   const ql = q.trim().toLowerCase();
   const filtered = items.filter(
     (c) =>
       (!ql || c.name.toLowerCase().includes(ql) || c.detail.toLowerCase().includes(ql)) &&
-      (!camp || c.campIds.includes(camp)),
+      (!camp || c.campIds.includes(camp)) &&
+      (segment === "all" || c.segment === segment),
   );
+  const counts = {
+    all: items.length,
+    subscription: items.filter((item) => item.segment === "subscription").length,
+    camp: items.filter((item) => item.segment === "camp").length,
+    other: items.filter((item) => item.segment === "other").length,
+  };
+  const segments = [
+    { key: "all" as const, label: "All", count: counts.all },
+    { key: "subscription" as const, label: "Plans", count: counts.subscription },
+    { key: "camp" as const, label: "Camp members", count: counts.camp },
+    { key: "other" as const, label: "Other", count: counts.other },
+  ];
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -61,6 +79,20 @@ export default function CustomerList({
             className="w-full rounded-lg border border-border pl-8 pr-2 py-1.5 text-sm outline-none focus:border-accent"
           />
         </div>
+        <div role="group" aria-label="Customer groups" className="grid grid-cols-4 overflow-hidden rounded-lg border border-border bg-background">
+          {segments.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              aria-pressed={segment === option.key}
+              onClick={() => setSegment(option.key)}
+              className={`min-w-0 px-1 py-1.5 text-[11px] font-medium transition-colors ${segment === option.key ? "bg-foreground text-white" : "text-muted hover:text-foreground"}`}
+            >
+              <span className="flex min-h-7 items-center justify-center whitespace-normal leading-tight">{option.label}</span>
+              <span className="block text-[10px] tabular-nums opacity-70">{option.count}</span>
+            </button>
+          ))}
+        </div>
         {camps.length > 0 && (
           <select
             value={camp}
@@ -72,6 +104,11 @@ export default function CustomerList({
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+        )}
+        {segment === "subscription" && filtered.length > 0 && (
+          <Link href="/plans" className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-xs font-medium text-white hover:opacity-90">
+            <CalendarPlus size={14} /> Bulk assign
+          </Link>
         )}
       </div>
       <ul className="divide-y divide-border max-h-[64vh] overflow-y-auto">
@@ -101,15 +138,25 @@ export default function CustomerList({
                   {c.total > 0 && <> · {c.attended}/{c.total} att.</>}
                 </div>
               </Link>
-              <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100">
+              <div className="flex items-center gap-2 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                {c.isSubscribed && (
+                  <Link
+                    href={`/customers?sel=${c.id}&assign=1`}
+                    className="text-accent hover:text-foreground"
+                    aria-label={`Assign plan to ${c.name}`}
+                    title="Assign plan"
+                  >
+                    <CalendarPlus size={15} />
+                  </Link>
+                )}
                 <Link href={`/customers?edit=${c.id}`} className="text-muted hover:text-foreground" aria-label={`Edit ${c.name}`}><Pencil size={14} /></Link>
-                <form action={deleteAction}>
+                <form action={archiveAction}>
                   <input type="hidden" name="customerId" value={c.id} />
                   <ConfirmSubmit
-                    message={`Delete ${c.name}? This permanently removes their benchmarks, race results, activity and roster history. This cannot be undone.`}
+                    message={`Archive ${c.name}? Their login will be disabled and they will be hidden from active lists. An admin can restore the account.`}
                     className="text-muted hover:text-red-600"
                   >
-                    <Trash2 size={14} />
+                    <Archive size={14} />
                   </ConfirmSubmit>
                 </form>
               </div>
@@ -118,7 +165,7 @@ export default function CustomerList({
         })}
       </ul>
       <div className="px-4 py-2 text-[11px] text-muted border-t border-border">
-        {filtered.length === items.length ? `${items.length} on roster` : `${filtered.length} of ${items.length}`}
+        {filtered.length === items.length && segment === "all" ? `${items.length} on roster` : `${filtered.length} of ${items.length}`}
       </div>
     </div>
   );

@@ -57,15 +57,16 @@ export function campScope(u: SessionUser): Record<string, unknown> {
  *   customer → self
  */
 export function customerScope(u: SessionUser): Record<string, unknown> {
-  if (isAdmin(u)) return {};
+  if (isAdmin(u)) return { deletedAt: null };
   if (u.role === "coach")
     return {
+      deletedAt: null,
       OR: [
         { coachConnections: { some: { coachUserId: u.id, status: "active" } } },
-        { campMembers: { some: { camp: { coachId: u.id } } } },
+        { campMembers: { some: { camp: { OR: [{ coachId: u.id }, { createdById: u.id }] } } } },
       ],
     };
-  if (u.role === "customer") return { userAccount: { id: u.id } };
+  if (u.role === "customer") return { deletedAt: null, userAccount: { id: u.id } };
   return { id: "__none__" };
 }
 
@@ -76,7 +77,7 @@ export function customerScope(u: SessionUser): Record<string, unknown> {
  * it has no login or its login is a customer-role account.
  */
 export function nonStaffCustomerWhere(): Record<string, unknown> {
-  return { OR: [{ userAccount: null }, { userAccount: { role: "customer" } }] };
+  return { deletedAt: null, OR: [{ userAccount: null }, { userAccount: { role: "customer", deletedAt: null } }] };
 }
 
 /**
@@ -159,7 +160,7 @@ export function canUseLibraryWorkout(
 export function canAccessCustomer(
   u: SessionUser,
   customer: {
-    campMembers: { camp: { coachId: string | null } }[];
+    campMembers: { camp: { coachId: string | null; createdById?: string | null } }[];
     coachConnections?: { coachUserId: string; status: string }[];
     userAccount?: { id: string } | null;
   }
@@ -172,7 +173,7 @@ export function canAccessCustomer(
       // (they entered this coach's code — consent-based, lets the coach vet
       // them before approving), OR a member of a camp this coach runs.
       (customer.coachConnections ?? []).some((cc) => cc.coachUserId === u.id && (cc.status === "active" || cc.status === "pending")) ||
-      customer.campMembers.some((cm) => cm.camp.coachId === u.id)
+      customer.campMembers.some((cm) => cm.camp.coachId === u.id || cm.camp.createdById === u.id)
     );
   return false;
 }

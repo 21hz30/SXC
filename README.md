@@ -8,8 +8,9 @@ AI co-coach for drafting plans and athlete-specific guidance.
 
 **Stack:** Next.js 16 (App Router) · React 19 · Prisma 7 + PostgreSQL (Supabase) · Tailwind 4 · Anthropic SDK.
 
-> **Auth:** a simple cookie-based session scheme. Every account is an admin —
-> sign in or create an account from the **Register** page.
+> **Auth:** a simple cookie-based session scheme. Public registration creates
+> athlete/customer accounts. Admins create coach/admin accounts from the Team
+> page.
 
 ---
 
@@ -47,12 +48,18 @@ Copy `.env.example` to `.env` and set:
 | ---------------- | ----------- | ---------------------------------------------------------------------- |
 | `DATABASE_URL`   | yes         | Supabase **session-mode pooler** URL. Format: `postgresql://postgres.<ref>:<password>@aws-1-<region>.pooler.supabase.com:5432/postgres` |
 | `SESSION_SECRET` | yes         | Secret used to sign session cookies. Use a long random string in prod. |
+| `NEXT_PUBLIC_FEATURE_NUTRITION` | optional | Set to `true` to restore the standalone Nutrition module; hidden by default. |
 | `AI_API_KEY`     | for AI chat | API key for the model provider (Anthropic-compatible).                 |
 | `AI_BASE_URL`    | for AI chat | Base URL of the model provider.                                        |
 | `AI_MODEL`       | optional    | Model name (defaults to `deepseek-chat`).                              |
 
 The app runs without the AI keys, but the **AI co-coach chat is disabled** until
 `AI_API_KEY` (and usually `AI_BASE_URL`) are set.
+
+> **Database migrations:** production deploys run `scripts/migrate-deploy.mjs`
+> before `next build`. That script only applies migrations on Vercel production
+> and uses a session-capable Postgres connection. Local and preview builds skip
+> automatic migrations.
 
 ## Common scripts
 
@@ -62,9 +69,10 @@ The app runs without the AI keys, but the **AI co-coach chat is disabled** until
 | `npm run build`      | Production build.                                     |
 | `npm start`          | Run the production build.                             |
 | `npm run lint`       | Lint with ESLint.                                     |
-| `npm run db:setup`   | Apply migrations + seed sample data (first-time local). |
+| `npm run db:setup`   | Apply pending migrations.                            |
 | `npm run db:migrate` | Apply pending migrations only (no seed).              |
-| `npm run db:seed`    | (Re)load sample data.                                 |
+| `npm run db:demo-reset` | Destructively reset demo data; requires an explicit development-only flag. |
+| `npm run db:wipe`    | Destructively wipe app data; requires an explicit development-only flag. |
 
 ## Project structure
 
@@ -72,10 +80,10 @@ The app runs without the AI keys, but the **AI co-coach chat is disabled** until
 src/
 ├─ app/             # Pages (UI) + API routes (backend) — Next.js App Router
 │  ├─ (app)/        # Logged-in dashboard: calendar, camps, customers, classes, workouts
-│  ├─ api/          # Backend endpoints (chat, workouts, todos, performance, ...)
+│  ├─ api/          # Backend endpoints (chat, workouts, performance, ...)
 │  └─ login/        # Login page
 ├─ agent/           # AI co-coach engine (streaming loop + system prompt)   [backend]
-├─ tools/           # Actions the AI can take (e.g. create_todo)            [backend]
+├─ tools/           # AI tool registry                                      [backend]
 ├─ domain/          # Business logic: workouts, performance, benchmarks     [backend]
 ├─ lib/             # DB client, auth, shared queries                       [backend]
 └─ components/      # Reusable UI                                           [frontend]

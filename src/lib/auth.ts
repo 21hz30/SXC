@@ -7,6 +7,8 @@ import { db } from "./db";
 
 const COOKIE = "sxc_session";
 export const SESSION_COOKIE = COOKIE;
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_MAX_AGE_MS = SESSION_MAX_AGE_SECONDS * 1000;
 
 export type Role = "admin" | "coach" | "customer";
 // `tenantId` is the coach's team (null for admins — they're cross-tenant — and
@@ -19,39 +21,71 @@ function sign(value: string): string {
   return createHmac("sha256", secret).update(value).digest("hex");
 }
 
-export function makeToken(userId: string): string {
-  const payload = `${userId}.${Date.now()}`;
+export function makeToken(userId: string, sessionVersion = 0): string {
+  const payload = `${userId}.${sessionVersion}.${Date.now()}`;
   return `${payload}.${sign(payload)}`;
 }
 
-export function decodeToken(token: string | undefined): string | null {
+type DecodedSession = { userId: string; sessionVersion: number };
+
+function decodeSession(token: string | undefined): DecodedSession | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [userId, ts, sig] = parts;
-  const expected = sign(`${userId}.${ts}`);
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const legacy = parts.length === 3;
+  const userId = parts[0];
+  const versionRaw = legacy ? "0" : parts[1];
+  const ts = legacy ? parts[1] : parts[2];
+  const sig = legacy ? parts[2] : parts[3];
+  const sessionVersion = Number(versionRaw);
+  const issuedAt = Number(ts);
+  if (!Number.isSafeInteger(sessionVersion) || sessionVersion < 0) return null;
+  if (!Number.isSafeInteger(issuedAt)) return null;
+  const age = Date.now() - issuedAt;
+  if (age < -5 * 60 * 1000 || age > SESSION_MAX_AGE_MS) return null;
+  const payload = legacy ? `${userId}.${ts}` : `${userId}.${versionRaw}.${ts}`;
+  const expected = sign(payload);
   try {
     if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    return userId;
+    return { userId, sessionVersion };
   } catch {
     return null;
   }
 }
 
-export type Account = SessionUser & { customerId: string | null; onboardedAt: Date | null; phone: string | null };
+export function decodeToken(token: string | undefined): string | null {
+  return decodeSession(token)?.userId ?? null;
+}
+
+export type Account = SessionUser & {
+  customerId: string | null;
+  onboardedAt: Date | null;
+  phone: string | null;
+  phoneNormalized: string | null;
+};
 
 // One cached account lookup per request. The layout, each page's requireUser,
 // nested guard helpers, and the many "what's my customerId?" lookups all funnel
 // through this, so a single render hits the users table exactly once.
 export const getAccount = cache(async function getAccount(): Promise<Account | null> {
   const jar = await cookies();
-  const userId = decodeToken(jar.get(COOKIE)?.value);
-  if (!userId) return null;
+  const session = decodeSession(jar.get(COOKIE)?.value);
+  if (!session) return null;
   const u = await db.user.findUnique({
-    where: { id: userId },
-    select: { id: true, username: true, name: true, role: true, tenantId: true, customerId: true, customer: { select: { onboardedAt: true, phone: true } } },
+    where: { id: session.userId },
+    select: {
+      id: true,
+      username: true,
+      name: true,
+      role: true,
+      tenantId: true,
+      customerId: true,
+      sessionVersion: true,
+      deletedAt: true,
+      customer: { select: { onboardedAt: true, phone: true, phoneNormalized: true, deletedAt: true } },
+    },
   });
-  if (!u) return null;
+  if (!u || u.deletedAt || u.sessionVersion !== session.sessionVersion || u.customer?.deletedAt) return null;
   return {
     id: u.id,
     username: u.username,
@@ -61,6 +95,7 @@ export const getAccount = cache(async function getAccount(): Promise<Account | n
     customerId: u.customerId,
     onboardedAt: u.customer?.onboardedAt ?? null,
     phone: u.customer?.phone ?? null,
+    phoneNormalized: u.customer?.phoneNormalized ?? null,
   };
 });
 
@@ -116,15 +151,17 @@ export async function login(username: string, password: string): Promise<Session
   // accept any case + whitespace from the user (e.g. "Peter" matches "peter").
   // Passwords stay case-sensitive — security best practice.
   const u = await db.user.findUnique({ where: { username: username.trim().toLowerCase() } });
-  if (!u) return null;
+  if (!u || u.deletedAt) return null;
   const ok = await bcrypt.compare(password, u.passwordHash);
   if (!ok) return null;
   const jar = await cookies();
-  jar.set(COOKIE, makeToken(u.id), {
+  jar.set(COOKIE, makeToken(u.id, u.sessionVersion), {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_MAX_AGE_SECONDS,
+    priority: "high",
   });
   return { id: u.id, username: u.username, name: u.name, role: u.role as Role, tenantId: u.tenantId };
 }

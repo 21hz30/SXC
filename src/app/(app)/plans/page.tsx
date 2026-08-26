@@ -1,4 +1,5 @@
 import { CalendarRange, Dumbbell, UsersRound } from "lucide-react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
@@ -6,21 +7,13 @@ import { requireStaff } from "@/lib/auth";
 import { workoutScope } from "@/lib/access";
 import { flashUrl } from "@/lib/flash";
 import { formatDate, mondayOf } from "@/lib/utils";
-import { assignWeeklyPlan } from "@/domain/weeklyPlans";
+import { assignWeeklyPlan, nextWeekStart } from "@/domain/weeklyPlans";
 import WeeklyAssignmentBuilder, {
   type WeeklyPlanSubscriber,
   type WeeklyPlanWorkout,
 } from "@/components/WeeklyAssignmentBuilder";
 
 export const dynamic = "force-dynamic";
-
-function nextMonday(): string {
-  const date = new Date();
-  date.setUTCHours(0, 0, 0, 0);
-  const day = date.getUTCDay();
-  date.setUTCDate(date.getUTCDate() + ((8 - day) % 7 || 7));
-  return date.toISOString().slice(0, 10);
-}
 
 export default async function WeeklyPlansPage({
   searchParams,
@@ -29,7 +22,7 @@ export default async function WeeklyPlansPage({
 }) {
   const user = await requireStaff();
   const params = await searchParams;
-  const defaultWeek = /^\d{4}-\d{2}-\d{2}$/.test(params.week ?? "") ? mondayOf(params.week!) : nextMonday();
+  const defaultWeek = /^\d{4}-\d{2}-\d{2}$/.test(params.week ?? "") ? mondayOf(params.week!) : nextWeekStart();
   const recentStart = new Date();
   recentStart.setDate(recentStart.getDate() - 42);
 
@@ -37,6 +30,8 @@ export default async function WeeklyPlansPage({
     db.customerCoach.findMany({
       where: {
         status: "active",
+        customer: { deletedAt: null },
+        coach: { deletedAt: null },
         ...(user.role === "coach" ? { coachUserId: user.id } : {}),
       },
       select: {
@@ -52,6 +47,7 @@ export default async function WeeklyPlansPage({
     db.workoutAssignment.findMany({
       where: {
         assignedById: user.id,
+        customer: { deletedAt: null },
         campId: null,
         scheduledDate: { gte: recentStart },
       },
@@ -132,6 +128,7 @@ export default async function WeeklyPlansPage({
     <div className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
       <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
+          <Link href="/customers" className="mb-3 inline-block text-xs text-accent hover:underline">← Customers</Link>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-accent">
             <CalendarRange size={15} /> Coaching delivery
           </div>

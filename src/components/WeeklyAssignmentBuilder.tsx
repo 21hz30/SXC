@@ -49,14 +49,20 @@ export default function WeeklyAssignmentBuilder({
   workouts,
   defaultWeek,
   action,
+  initialCustomerIds = [],
+  fixedCustomer,
+  redirectCustomerId,
 }: {
   subscribers: WeeklyPlanSubscriber[];
   workouts: WeeklyPlanWorkout[];
   defaultWeek: string;
   action: (formData: FormData) => void | Promise<void>;
+  initialCustomerIds?: string[];
+  fixedCustomer?: WeeklyPlanSubscriber;
+  redirectCustomerId?: string;
 }) {
   const nextKey = useRef(0);
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(initialCustomerIds));
   const [search, setSearch] = useState("");
   const [weekStart, setWeekStart] = useState(defaultWeek);
   const [days, setDays] = useState<PlanDay[]>(emptyWeek);
@@ -122,7 +128,18 @@ export default function WeeklyAssignmentBuilder({
   return (
     <form action={action} className="space-y-6">
       <input type="hidden" name="plan" value={payload} />
+      {redirectCustomerId && <input type="hidden" name="customerId" value={redirectCustomerId} />}
 
+      {fixedCustomer ? (
+        <section aria-labelledby="fixed-recipient-heading" className="border-y border-border bg-card px-4 py-3">
+          <div className="flex items-center gap-2 text-accent">
+            <UsersRound size={17} />
+            <h2 id="fixed-recipient-heading" className="text-sm font-semibold text-foreground">Assigning to</h2>
+          </div>
+          <div className="mt-1 text-sm font-medium" data-no-i18n>{fixedCustomer.name}</div>
+          {fixedCustomer.detail && <div className="text-xs text-muted truncate" data-no-i18n>{fixedCustomer.detail}</div>}
+        </section>
+      ) : (
       <section aria-labelledby="recipients-heading">
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -192,6 +209,7 @@ export default function WeeklyAssignmentBuilder({
           </div>
         </div>
       </section>
+      )}
 
       <section aria-labelledby="schedule-heading">
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

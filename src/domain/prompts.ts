@@ -13,6 +13,7 @@
 import { readFile } from "fs/promises";
 import path from "path";
 import { db } from "@/lib/db";
+import { FEATURES } from "@/lib/features";
 
 export type PromptKey = "chat.system" | "report.postClass" | "insights.customer" | "nutrition.foodParse";
 
@@ -83,6 +84,7 @@ export async function listPrompts(): Promise<PromptListItem[]> {
   const byKey = new Map(rows.map((r) => [r.key, r]));
   const out: PromptListItem[] = [];
   for (const key of Object.keys(PROMPT_REGISTRY) as PromptKey[]) {
+    if (key === "nutrition.foodParse" && !FEATURES.nutrition) continue;
     const meta = PROMPT_REGISTRY[key];
     const row = byKey.get(key);
     out.push({

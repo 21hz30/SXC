@@ -3,7 +3,14 @@ import { decodeToken, SESSION_COOKIE } from "@/lib/auth";
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith("/login") || pathname.startsWith("/register") || pathname.startsWith("/_next") || pathname.startsWith("/uploads")) {
+  if (
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/register") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname === "/api/auth/account-lookup" ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/uploads")
+  ) {
     return NextResponse.next();
   }
   const token = req.cookies.get(SESSION_COOKIE)?.value;

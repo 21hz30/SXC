@@ -1,18 +1,21 @@
 /**
  * One-shot data wipe script. Removes all athlete / camp / workout / chat data
- * but KEEPS user accounts so coaches can still log in.
+ * but KEEPS user accounts and their linked profiles so everyone can still log
+ * in and recover their account by phone.
  *
  * Usage:  npx tsx prisma/wipe.ts
  */
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import "dotenv/config";
+import { assertDestructiveDatabaseOperation } from "./destructive-guard";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is not set");
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
 
 async function main() {
+  assertDestructiveDatabaseOperation("ALLOW_DESTRUCTIVE_WIPE", "Database wipe");
   await db.chatMessage.deleteMany();
   await db.chatSession.deleteMany();
   await db.log.deleteMany();
@@ -29,7 +32,7 @@ async function main() {
   await db.raceResult.deleteMany();
   await db.campMember.deleteMany();
   await db.camp.deleteMany();
-  await db.customer.deleteMany();
+  await db.customer.deleteMany({ where: { userAccount: null } });
 
   const u = await db.user.count();
   const c = await db.customer.count();

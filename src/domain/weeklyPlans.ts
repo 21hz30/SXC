@@ -16,6 +16,15 @@ export type WeeklyPlanResult =
   | { ok: true; weekStart: string; customers: number; created: number; skipped: number }
   | { ok: false; message: string };
 
+/** Return the next Monday so a new plan never defaults to the current week. */
+export function nextWeekStart(): string {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  const day = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() + ((8 - day) % 7 || 7));
+  return date.toISOString().slice(0, 10);
+}
+
 function parseInput(raw: unknown):
   | { ok: true; weekStart: string; customerIds: string[]; days: PlanDay[] }
   | { ok: false; message: string } {

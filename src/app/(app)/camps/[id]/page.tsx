@@ -42,7 +42,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
       include: {
         coach: true,
         createdBy: true,
-        members: { include: { customer: true } },
+        members: { where: { customer: { deletedAt: null } }, include: { customer: true } },
         classes: {
           orderBy: { startsAt: "asc" },
           include: {
@@ -59,7 +59,7 @@ export default async function CampDetail({ params, searchParams }: { params: Pro
     isStaff
       ? db.workout.findMany({ where: workoutScope(user), orderBy: { name: "asc" }, select: { id: true, name: true, description: true, items: { select: { id: true } } } })
       : Promise.resolve([]),
-    edit ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } }) : Promise.resolve([]),
+    edit ? db.user.findMany({ where: { role: { in: ["admin", "coach"] }, deletedAt: null }, orderBy: { name: "asc" } }) : Promise.resolve([]),
     // Staff have a profile too, so they can join the camp and its classes as a
     // real participant — fetch their customer id like anyone else.
     getMyCustomerId(),

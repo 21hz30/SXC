@@ -10,8 +10,9 @@
 
 > 🇬🇧 English docs: [README.md](README.md)
 
-> **登录鉴权：** 采用简单的基于 Cookie 的会话机制。所有账号均为管理员
-> （admin）——在 **注册（Register）** 页面登录或创建账号即可。
+> **登录鉴权：** 采用简单的基于 Cookie 的会话机制。公开注册会创建运动员
+> /客户（customer）账号；教练（coach）和管理员（admin）账号由管理员在
+> Team 页面创建。
 
 ---
 
@@ -49,12 +50,17 @@ npm run dev
 | ---------------- | ---------- | ---------------------------------------------------------------------- |
 | `DATABASE_URL`   | 是         | Supabase **session-mode pooler** 连接串。格式：`postgresql://postgres.<ref>:<password>@aws-1-<region>.pooler.supabase.com:5432/postgres` |
 | `SESSION_SECRET` | 是         | 用于签名会话 Cookie 的密钥，生产环境请使用足够长的随机字符串。        |
+| `NEXT_PUBLIC_FEATURE_NUTRITION` | 可选 | 设为 `true` 可恢复独立 Nutrition 模块；默认隐藏。                 |
 | `AI_API_KEY`     | AI 对话需要 | 模型服务商的 API Key（需兼容 Anthropic）。                            |
 | `AI_BASE_URL`    | AI 对话需要 | 模型服务商的 Base URL。                                                |
 | `AI_MODEL`       | 可选       | 模型名称（默认为 `deepseek-chat`）。                                   |
 
 不填 AI 密钥也可正常运行，但在设置 `AI_API_KEY`（通常还需 `AI_BASE_URL`）
 之前，**AI 协同教练对话功能将被禁用**。
+
+> **数据库迁移：** 生产部署会在 `next build` 前运行
+> `scripts/migrate-deploy.mjs`。该脚本只在 Vercel production 环境执行迁移，
+> 并使用支持 session 的 Postgres 连接；本地和 preview 构建会跳过自动迁移。
 
 ## 常用脚本
 
@@ -64,9 +70,10 @@ npm run dev
 | `npm run build`      | 生产环境构建。                                    |
 | `npm start`          | 运行生产构建。                                    |
 | `npm run lint`       | 使用 ESLint 进行代码检查。                         |
-| `npm run db:setup`   | 执行迁移并载入示例数据（本地首次使用）。          |
+| `npm run db:setup`   | 执行待处理的数据库迁移。                         |
 | `npm run db:migrate` | 仅执行待处理的迁移（不载入数据）。                |
-| `npm run db:seed`    | （重新）载入示例数据。                            |
+| `npm run db:demo-reset` | 破坏性重置演示数据；仅限显式授权的开发环境。  |
+| `npm run db:wipe`    | 破坏性清空应用数据；仅限显式授权的开发环境。      |
 
 ## 项目结构
 
@@ -74,10 +81,10 @@ npm run dev
 src/
 ├─ app/             # 页面（UI）+ API 路由（后端）—— Next.js App Router
 │  ├─ (app)/        # 登录后的后台：日历、训练营、客户、课程、训练内容
-│  ├─ api/          # 后端接口（chat、workouts、todos、performance……）
+│  ├─ api/          # 后端接口（chat、workouts、performance……）
 │  └─ login/        # 登录页
 ├─ agent/           # AI 协同教练引擎（流式循环 + 系统提示词）          [后端]
-├─ tools/           # AI 可执行的动作（如 create_todo）                  [后端]
+├─ tools/           # AI 工具注册表                                      [后端]
 ├─ domain/          # 业务逻辑：训练内容、表现、基准数据                [后端]
 ├─ lib/             # 数据库客户端、鉴权、公共查询                      [后端]
 └─ components/      # 可复用 UI 组件                                    [前端]

@@ -1,6 +1,7 @@
 # SXC — Handoff / Status
 
-Quick orientation for picking up work. Last updated at commit `ffe7fcb`.
+Quick orientation for picking up work. Local repo last pulled through commit
+`4bca201` on 2026-07-04.
 
 ## What this is
 SXC is a Hyrox coaching app (Next.js 16 + Prisma 7 + Postgres/Supabase),
@@ -16,7 +17,7 @@ roles are **admin / coach / customer**.
 ## Databases (two Supabase projects, same schema)
 | | Project ref | Used by | Notes |
 |---|---|---|---|
-| **dev** | `auawpkzqdnquekyryxsq` | local (`.env` `DATABASE_URL`) | seed + test data; no `_prisma_migrations` |
+| **dev** | `auawpkzqdnquekyryxsq` | local (`.env` `DATABASE_URL`) | seed + test data; no `_prisma_migrations` table as of 2026-07-04 |
 | **prod** | `rwsnadqkknpodsetszsq` | Vercel | real data; tracked migrations |
 
 - Migrations need the **session pooler (`:5432`)**, not the transaction pooler
@@ -36,6 +37,8 @@ Logins: `peter` / `peter123` (admin), `testathlete` / `test1234` (customer).
   `src/lib/access.ts` (scopes; `nonStaffCustomerWhere()`).
 - **Accounts:** `src/domain/accounts.ts`; `/register` (customer signup),
   Team page `/(app)/coaches` (admin creates staff).
+- **Tenants:** multi-tenant foundations are in `Tenant`, `tenantId` fields, and
+  `/admin/tenants`; coaches are scoped through `src/lib/access.ts`.
 - **Onboarding wizard:** `src/components/OnboardingModal.tsx` (3 steps),
   `/api/me/onboarding`. Race schedule constants in `src/domain/races.ts`.
 - **Profile:** `/(app)/profile` → redirects to own `/customers/[id]`
@@ -52,9 +55,14 @@ Logins: `peter` / `peter123` (admin), `testathlete` / `test1234` (customer).
   `src/lib/stores/aiPanel.ts`; `MainShell.tsx` shrinks content when open.
 - **Post-class reports / watch data / prompts:** `src/domain/reports.ts`,
   `ClassWatchData`, `Prompt` (editable at `/admin/prompts`).
+- **Nutrition:** the standalone module and APIs are hidden by default through
+  `NEXT_PUBLIC_FEATURE_NUTRITION`; historical data and report advice remain.
+- **Account safety/recovery:** accounts use recoverable archive + audit history;
+  `/forgot-password` looks up usernames by normalized phone and directs password
+  help to administrator Peter. Legacy accounts without phones are prompted at login.
 
 ## Known follow-ups / not done
-- Per-exercise result entry on off-class workout logs (only overall RPE/feeling now).
-- Camp "add member" / class "add athlete" pickers may still list staff profiles.
+- Prisma dev migration bookkeeping is unresolved: dev schema exists, but
+  `_prisma_migrations` is not present in `src-dev`.
 - Perf floor is Supabase-in-Singapore latency (~200ms/query); pages already
   parallelize queries.

@@ -31,7 +31,7 @@ export default async function CampsPage({ searchParams }: { searchParams: Promis
       },
     }),
     user.role === "admin"
-      ? db.user.findMany({ where: { role: { in: ["admin", "coach"] } }, orderBy: { name: "asc" } })
+      ? db.user.findMany({ where: { role: { in: ["admin", "coach"] }, deletedAt: null }, orderBy: { name: "asc" } })
       : Promise.resolve([]),
     myCustomerId
       ? db.campMember.findMany({ where: { customerId: myCustomerId }, select: { campId: true, status: true } })
