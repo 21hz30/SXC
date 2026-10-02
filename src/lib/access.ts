@@ -85,7 +85,8 @@ export function nonStaffCustomerWhere(): Record<string, unknown> {
  *   admin    → all classes
  *   coach    → classes in a camp they coach/created, or that they created
  *              directly (standalone classes)
- *   customer → their camps' classes PLUS any drop-in (to discover & apply)
+ *   customer → active camp classes, classes they already joined, PLUS any
+ *               drop-in (to discover & apply)
  */
 export function classScope(u: SessionUser): Record<string, unknown> {
   if (isAdmin(u)) return {};
@@ -100,7 +101,8 @@ export function classScope(u: SessionUser): Record<string, unknown> {
   if (u.role === "customer")
     return {
       OR: [
-        { camp: { members: { some: { customer: { userAccount: { id: u.id } } } } } },
+        { camp: { members: { some: { customer: { userAccount: { id: u.id } }, status: "active" } } } },
+        { roster: { some: { customer: { userAccount: { id: u.id } } } } },
         { dropInAllowed: true },
       ],
     };

@@ -61,15 +61,18 @@ export default async function Dashboard() {
           orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
-    // Roster membership is the source of truth for class sessions. Detect the
-    // next seven days automatically so classes appear in the athlete's plan
-    // without creating duplicate WorkoutAssignment rows.
+    // A class session belongs in an athlete's plan when they are rostered OR
+    // actively enrolled in its camp. Camp membership is the planned schedule;
+    // roster signup is only needed for capacity tracking and drop-ins.
     myCustomerId
       ? db.class.findMany({
           where: {
             startsAt: { gte: startOfDay(), lte: endOfDay(addDays(now, 7)) },
             canceledAt: null,
-            roster: { some: { customerId: myCustomerId } },
+            OR: [
+              { roster: { some: { customerId: myCustomerId } } },
+              { camp: { members: { some: { customerId: myCustomerId, status: "active" } } } },
+            ],
           },
           orderBy: { startsAt: "asc" },
           select: {

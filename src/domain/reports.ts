@@ -17,7 +17,7 @@ import { getAIClient, getAIModel } from "@/lib/ai";
 import { formatDateLong } from "@/lib/utils";
 
 const FALLBACK_PROMPT =
-  "You are SXC, a Hyrox co-coach. Write a short markdown post-class report addressed " +
+  "You are SRC, a hybrid training co-coach. Write a short markdown post-class report addressed " +
   "to the athlete, with H2 sections: What you did today, How it went, Plan for the " +
   "next days, Eat, Avoid, Watch-outs.";
 

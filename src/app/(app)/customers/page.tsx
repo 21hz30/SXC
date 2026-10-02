@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formatSec, formatDate } from "@/lib/utils";
-import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, CalendarPlus, Timer } from "lucide-react";
+import { Plus, Pencil, ExternalLink, Dumbbell, CalendarDays, CalendarPlus, Timer, UsersRound } from "lucide-react";
 import RoleBadge from "@/components/RoleBadge";
 import { PLAN_STATE_META, planState, planAdherence } from "@/lib/planStatus";
 import { requireCoach } from "@/lib/auth";
@@ -332,11 +332,18 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <header className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Customers</h1>
-          <div className="text-sm text-muted mt-1">{customers.length} on roster</div>
+          <div className="text-sm text-muted mt-1">{customers.length} on roster · athletes you coach</div>
         </div>
-        <Link href="/customers?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
-          <Plus size={16} /> Add customer
-        </Link>
+        <div className="flex flex-wrap justify-end gap-2">
+          {user.role === "admin" && (
+            <Link href="/coaches" className="rounded-lg border border-border px-3 py-2 text-sm font-medium flex items-center gap-2 hover:bg-background">
+              <UsersRound size={16} /> Team management
+            </Link>
+          )}
+          <Link href="/customers?new=1" className="rounded-lg bg-foreground text-white px-4 py-2 text-sm font-medium flex items-center gap-2 hover:opacity-90">
+            <Plus size={16} /> Add customer
+          </Link>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">

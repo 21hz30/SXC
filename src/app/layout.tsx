@@ -3,8 +3,8 @@ import "./globals.css";
 import I18nRuntime from "@/components/I18nRuntime";
 
 export const metadata: Metadata = {
-  title: "SXC — Hyrox Coach",
-  description: "AI-powered training dashboard for Hyrox coaches.",
+  title: "SRC - Hybrid Training Platform",
+  description: "Hybrid training plans, classes, and coaching in one platform.",
   appleWebApp: { title: "SRC", statusBarStyle: "default" },
 };
 

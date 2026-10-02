@@ -27,7 +27,7 @@ export default async function MePage({ searchParams }: { searchParams: Promise<{
         <div className="mt-4 bg-card border border-border rounded-xl p-6 text-sm">
           <p>Your athlete portal is coming soon.</p>
           <p className="mt-3 text-muted">
-            For now your coach manages your profile, workouts, and race results inside SXC.
+            For now your coach manages your profile, workouts, and race results inside SRC.
             Once your account is linked, your post-class reports will appear here.
           </p>
           <form action={async () => { "use server"; const { clearSession } = await import("@/lib/auth"); await clearSession(); const { redirect } = await import("next/navigation"); redirect("/login"); }} className="mt-4">

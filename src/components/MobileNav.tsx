@@ -77,7 +77,7 @@ export default function MobileNav({
     <>
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between h-14 px-4 bg-white border-b border-border">
         <Link href="/" aria-label="Go to dashboard" className="flex items-center rounded-lg hover:opacity-80 transition-opacity">
-          <Image src={srcLogo} alt="SRC by Peoplearth" width={32} height={32} className="h-8 w-8" loading="eager" />
+          <Image src={srcLogo} alt="SRC - Hybrid Training Platform" width={32} height={32} className="h-8 w-8" loading="eager" />
         </Link>
         {/* Language switch + avatar menu (info, profile link, log out). */}
         <div className="flex items-center gap-2">
@@ -138,7 +138,7 @@ export default function MobileNav({
           <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} aria-hidden />
           <div className="absolute inset-y-0 left-0 w-72 max-w-[82%] bg-white flex flex-col shadow-xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-              <Image src={srcLogo} alt="SRC by Peoplearth" width={40} height={40} className="h-10 w-10" />
+              <Image src={srcLogo} alt="SRC - Hybrid Training Platform" width={40} height={40} className="h-10 w-10" />
               <button onClick={() => setOpen(false)} aria-label="Close menu" className="p-2 rounded-lg hover:bg-background">
                 <X size={20} />
               </button>

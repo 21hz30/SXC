@@ -2,8 +2,8 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Plus, Dumbbell } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { Plus, CalendarDays } from "lucide-react";
+import { addDays, formatDate, startOfWeek } from "@/lib/utils";
 import { categoryLabel } from "@/domain/exercises";
 import { cloneWorkout } from "@/domain/workouts";
 import { WORKOUT_TYPES, workoutTypeMeta } from "@/lib/workoutTypes";
@@ -13,10 +13,11 @@ import { flashUrl } from "@/lib/flash";
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkoutsPage({ searchParams }: { searchParams: Promise<{ new?: string; type?: string; creator?: string; tag?: string }> }) {
+export default async function WorkoutsPage({ searchParams }: { searchParams: Promise<{ new?: string; view?: string; type?: string; creator?: string; tag?: string }> }) {
   const user = await requireUser();
   const isStaff = user.role === "admin" || user.role === "coach";
-  const { new: isNew, type: typeFilter, creator: creatorParam, tag: tagParam } = await searchParams;
+  const { new: isNew, view: viewParam, type: typeFilter, creator: creatorParam, tag: tagParam } = await searchParams;
+  const trainingView = isStaff ? "library" : viewParam === "mine" ? "mine" : "assigned";
   const creatorFilter = creatorParam || null;
   const tagFilter = tagParam || null;
 
@@ -76,22 +77,61 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
 
   const shown = workouts.filter((w) => mType(w) && mCreator(w) && mTag(w));
   const anyFilter = !!typeFilter || !!creatorFilter || !!tagFilter;
-  const cur = { type: typeFilter, creator: creatorFilter ?? undefined, tag: tagFilter ?? undefined };
+  const cur = { view: trainingView === "library" ? undefined : trainingView, type: typeFilter, creator: creatorFilter ?? undefined, tag: tagFilter ?? undefined };
 
-  // Customers also see the workouts their coach assigned them (distinct, recent
-  // first) so they can review or copy one into their own library to practice.
+  // Customers get a dated assignment feed. Repeated assignments stay visible so
+  // the weekly plan is honest and each session can be moved independently.
   const assigned = !isStaff && myCustomerId
     ? await db.workoutAssignment.findMany({
         where: { customerId: myCustomerId },
-        orderBy: { scheduledDate: "desc" },
-        distinct: ["workoutId"],
-        take: 24,
+        orderBy: [{ scheduledDate: "asc" }, { createdAt: "asc" }],
+        take: 96,
         include: { workout: { include: { _count: { select: { items: true } } } }, camp: { select: { name: true } } },
       })
     : [];
+  const currentWeekStart = startOfWeek();
+  const currentWeekEnd = addDays(currentWeekStart, 7);
+  const assignedThisWeek = assigned.filter((a) => a.scheduledDate && a.scheduledDate >= currentWeekStart && a.scheduledDate < currentWeekEnd);
+  const assignedOutsideWeek = assigned.filter((a) => !a.scheduledDate || a.scheduledDate < currentWeekStart || a.scheduledDate >= currentWeekEnd);
   // Which assigned workouts the customer has already copied (match by name) — so
   // we can show "Added" instead of letting them pile up duplicates.
   const myWorkoutNames = new Set(workouts.map((w) => w.name));
+
+  async function moveAssignment(formData: FormData) {
+    "use server";
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const dateRaw = String(formData.get("scheduledDate") ?? "").trim();
+    if (!assignmentId || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateRaw)) redirect("/workouts?view=assigned");
+    const scheduledDate = new Date(dateRaw);
+    if (isNaN(scheduledDate.getTime())) redirect("/workouts?view=assigned");
+    await db.workoutAssignment.updateMany({
+      where: { id: assignmentId, customerId: mine, status: { not: "completed" } },
+      data: { scheduledDate },
+    });
+    revalidatePath("/workouts");
+    revalidatePath("/");
+    revalidatePath("/calendar");
+    redirect(flashUrl("/workouts?view=assigned", "Training session moved"));
+  }
+
+  async function addOwnAssignment(formData: FormData) {
+    "use server";
+    const mine = await getMyCustomerId();
+    if (!mine) redirect("/profile");
+    const workoutId = String(formData.get("workoutId") ?? "");
+    const dateRaw = String(formData.get("scheduledDate") ?? "").trim();
+    const workout = await db.workout.findFirst({ where: { id: workoutId, ownerCustomerId: mine }, select: { name: true } });
+    if (!workout) redirect("/workouts?view=mine");
+    const scheduledDate = dateRaw ? new Date(dateRaw) : null;
+    if (scheduledDate && isNaN(scheduledDate.getTime())) redirect("/workouts?view=mine");
+    await db.workoutAssignment.create({ data: { customerId: mine, workoutId, scheduledDate } });
+    revalidatePath("/workouts");
+    revalidatePath("/");
+    revalidatePath("/calendar");
+    redirect(flashUrl("/workouts?view=mine", `“${workout.name}” added to your plan`));
+  }
 
   async function createWorkout(formData: FormData) {
     "use server";
@@ -173,16 +213,16 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
       },
     });
     revalidatePath("/workouts");
-    redirect(flashUrl("/workouts", `“${orig.name}” added to your workouts`));
+    redirect(flashUrl("/workouts?view=mine", `“${orig.name}” added to your workouts`));
   }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Workouts</h1>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{isStaff ? "Workouts" : "Training"}</h1>
           <div className="text-sm text-muted mt-1">
-            {isStaff ? `${workouts.length} templates` : "Your coach's plan, plus workouts you save to practice"}
+            {isStaff ? `${workouts.length} templates` : trainingView === "assigned" ? "Your coach-assigned plan for the week" : "Your own saved training sessions"}
           </div>
         </div>
         {/* Compact icon button on phones; full label from sm up. */}
@@ -196,6 +236,17 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
           <span className="hidden sm:inline">New workout</span>
         </Link>
       </header>
+
+      {!isStaff && (
+        <nav aria-label="Training views" className="mb-6 flex w-full rounded-xl border border-border bg-card p-1 sm:w-fit">
+          <Link href="/workouts?view=assigned" className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium sm:flex-none ${trainingView === "assigned" ? "bg-foreground text-white" : "text-muted hover:bg-background"}`}>
+            Assigned plan <span className="ml-1 text-xs opacity-70">{assigned.length}</span>
+          </Link>
+          <Link href="/workouts?view=mine" className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium sm:flex-none ${trainingView === "mine" ? "bg-foreground text-white" : "text-muted hover:bg-background"}`}>
+            My workouts <span className="ml-1 text-xs opacity-70">{workouts.length}</span>
+          </Link>
+        </nav>
+      )}
 
       {isNew && (
         <form action={createWorkout} className="bg-card border border-border rounded-xl p-6 mb-6 space-y-4">
@@ -216,17 +267,28 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
         </form>
       )}
 
-      {/* Customer: the workouts a coach assigned — review, or save a copy to practice */}
-      {!isStaff && assigned.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3 flex items-center gap-1.5"><Dumbbell size={13} /> Assigned by your coach</h2>
-          <div className="space-y-3">
-            {assigned.map((a) => {
+      {/* Customer: the dated plan from a coach, grouped by the current week. */}
+      {!isStaff && trainingView === "assigned" && (
+        <section className="mb-8 space-y-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-medium text-muted uppercase tracking-wide flex items-center gap-1.5"><CalendarDays size={13} /> This week&apos;s assigned plan</h2>
+              <p className="mt-1 text-xs text-muted">Move an unfinished session to another day, or open Calendar to drag it into place.</p>
+            </div>
+            <Link href="/calendar?view=week" className="text-xs font-medium text-accent hover:underline">Open calendar</Link>
+          </div>
+          {assignedThisWeek.length === 0 && assignedOutsideWeek.length === 0 ? (
+            <div className="bg-card border border-border border-dashed rounded-xl p-6 text-center text-sm text-muted">
+              No training has been assigned yet. Your coach&apos;s plan will appear here.
+            </div>
+          ) : (
+            <div className="space-y-3">
+            {assignedThisWeek.map((a) => {
               const meta = workoutTypeMeta(a.workout.type);
               const added = myWorkoutNames.has(a.workout.name);
               return (
                 <div key={a.id} className="bg-card border border-border rounded-xl p-4 sm:p-5">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Link href={`/workouts/${a.workout.id}`} className="font-semibold hover:text-accent truncate">{a.workout.name}</Link>
@@ -238,7 +300,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
                         {a.scheduledDate ? ` · ${formatDate(a.scheduledDate)}` : ""}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <Link href={`/workouts/${a.workout.id}`} className="text-xs rounded-lg border border-border px-2.5 py-1.5 text-muted hover:text-accent hover:border-accent">View</Link>
                       {added ? (
                         <span className="text-xs rounded-lg px-2.5 py-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200">Saved</span>
@@ -250,18 +312,39 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
                       )}
                     </div>
                   </div>
+                  {a.status !== "completed" && a.scheduledDate && (
+                    <form action={moveAssignment} className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
+                      <input type="hidden" name="assignmentId" value={a.id} />
+                      <label className="text-[11px] text-muted">Move to time<input name="scheduledDate" type="datetime-local" defaultValue={dateTimeInput(a.scheduledDate)} className="mt-1 block rounded-lg border border-border bg-white px-2 py-1.5 text-xs" /></label>
+                      <button type="submit" className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:border-accent hover:text-accent">Save time</button>
+                    </form>
+                  )}
                 </div>
               );
             })}
-          </div>
+            {assignedOutsideWeek.length > 0 && (
+              <details className="bg-card border border-border rounded-xl">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Other assigned sessions <span className="text-xs text-muted">({assignedOutsideWeek.length})</span></summary>
+                <div className="space-y-3 border-t border-border p-3">
+                  {assignedOutsideWeek.map((a) => (
+                    <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
+                      <div className="min-w-0"><Link href={`/workouts/${a.workout.id}`} className="text-sm font-medium hover:text-accent">{a.workout.name}</Link><div className="text-xs text-muted">{a.scheduledDate ? formatDate(a.scheduledDate) : "Anytime"}{a.camp?.name ? ` · ${a.camp.name}` : ""}</div></div>
+                      {a.status !== "completed" && <form action={moveAssignment} className="flex items-end gap-2"><input type="hidden" name="assignmentId" value={a.id} /><label className="text-[11px] text-muted">Move<input name="scheduledDate" type="datetime-local" defaultValue={a.scheduledDate ? dateTimeInput(a.scheduledDate) : ""} className="mt-1 block rounded-lg border border-border bg-white px-2 py-1.5 text-xs" /></label><button type="submit" className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium">Save</button></form>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            </div>
+          )}
         </section>
       )}
 
-      {!isStaff && <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">My workouts</h2>}
+      {(isStaff || trainingView === "mine") && <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-3">{isStaff ? "Workout library" : "My workouts"}</h2>}
 
       {/* Filters — Type (tabs) · Created by (staff library) · Tag. Each chip
           preserves the other active filters; counts are faceted. Wraps on H5. */}
-      <div className="space-y-2.5 mb-4">
+      {(isStaff || trainingView === "mine") && <div className="space-y-2.5 mb-4">
         <div className="flex flex-wrap gap-2">
           <Link href={filtersUrl(cur, { type: undefined })} className={chipCls(!typeFilter)}>All <span className="tabular-nums opacity-70">{allTypeCount}</span></Link>
           {typeCounts.map((t) => (
@@ -294,9 +377,9 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      <div className="space-y-3">
+      {(isStaff || trainingView === "mine") && <div className="space-y-3">
         {shown.map((w) => {
           const lastUsed = w.classes
             .map((cw) => cw.class.startsAt)
@@ -304,7 +387,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
           const itemSummary = w.items.map((i) => categoryLabel(i.category)).slice(0, 6).join(" · ");
           return (
             <div key={w.id} className="block bg-card border border-border rounded-xl p-5 hover:border-accent transition">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Link href={`/workouts/${w.id}`} className="text-lg font-semibold hover:text-accent">{w.name}</Link>
@@ -312,7 +395,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
                   </div>
                   {w.description && <div className="text-sm text-muted mt-0.5">{w.description}</div>}
                 </div>
-                <div className="flex items-start gap-3 shrink-0">
+                <div className="flex flex-wrap items-start gap-3 sm:shrink-0">
                   <div className="text-right text-xs text-muted">
                     <div>{w.items.length} exercises</div>
                     <div>{w.classes.length} classes</div>
@@ -322,6 +405,13 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
                     <input type="hidden" name="workoutId" value={w.id} />
                     <button type="submit" className="text-xs rounded-lg border border-border px-2.5 py-1 text-muted hover:text-accent hover:border-accent">Duplicate</button>
                   </form>
+                  {!isStaff && (
+                    <form action={addOwnAssignment} className="mt-2 flex flex-col items-end gap-1.5">
+                      <input type="hidden" name="workoutId" value={w.id} />
+                      <label className="text-[10px] text-muted">Add to plan<input name="scheduledDate" type="datetime-local" className="mt-1 block rounded-lg border border-border bg-white px-2 py-1 text-[11px]" /></label>
+                      <button type="submit" className="text-xs rounded-lg bg-foreground text-white px-2.5 py-1 hover:opacity-90">Schedule</button>
+                    </form>
+                  )}
                 </div>
               </div>
               {itemSummary && (
@@ -342,7 +432,7 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
             {anyFilter ? "No workouts match these filters." : "No workouts yet — tap “New workout” to start."}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -350,6 +440,11 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
 /** "pro team, strength" → ["pro team", "strength"]; empty/blank → []. */
 function splitTags(tags: string | null | undefined): string[] {
   return (tags ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+function dateTimeInput(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /** Filter-chip styling — solid when active, outline + hover otherwise. */
@@ -362,11 +457,12 @@ function chipCls(active: boolean): string {
 /** Build /workouts?… keeping the current filters but overriding the patched
  *  dimension(s). Pass `undefined` for a dimension to clear it ("All"). */
 function filtersUrl(
-  cur: { type?: string; creator?: string; tag?: string },
+  cur: { view?: string; type?: string; creator?: string; tag?: string },
   patch: { type?: string; creator?: string; tag?: string },
 ): string {
   const m = { ...cur, ...patch };
   const qs = new URLSearchParams();
+  if (m.view) qs.set("view", m.view);
   if (m.type) qs.set("type", m.type);
   if (m.creator) qs.set("creator", m.creator);
   if (m.tag) qs.set("tag", m.tag);

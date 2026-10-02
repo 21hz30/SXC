@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "SRC by Peoplearth",
+    name: "SRC - Hybrid Training Platform",
     short_name: "SRC",
-    description: "AI-powered training dashboard for Hyrox coaches.",
+    description: "Hybrid training plans, classes, and coaching in one platform.",
     start_url: "/",
     display: "standalone",
     background_color: "#ffffff",

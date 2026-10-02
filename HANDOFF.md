@@ -4,7 +4,7 @@ Quick orientation for picking up work. Local repo last pulled through commit
 `4bca201` on 2026-07-04.
 
 ## What this is
-SXC is a Hyrox coaching app (Next.js 16 + Prisma 7 + Postgres/Supabase),
+SRC is a hybrid training platform (Next.js 16 + Prisma 7 + Postgres/Supabase),
 live at **https://hybridtraining.cn**. Everyone is an athlete with a profile;
 roles are **admin / coach / customer**.
 

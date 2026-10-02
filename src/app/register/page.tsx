@@ -99,7 +99,7 @@ export default async function RegisterPage({
     <main className="flex flex-1 items-center justify-center p-4 sm:p-8">
       <form action={doRegister} className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-8">
         <div className="mb-6 flex flex-col items-center text-center">
-          <Image src={srcLogo} alt="SRC by Peoplearth" width={112} height={112} priority />
+          <Image src={srcLogo} alt="SRC - Hybrid Training Platform" width={112} height={112} priority />
           <div className="text-sm text-muted mt-2">Create your athlete account</div>
         </div>
 

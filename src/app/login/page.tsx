@@ -28,7 +28,7 @@ export default async function LoginPage({
       <div className="absolute top-4 right-4"><LangToggle /></div>
       <form action={doLogin} className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-8">
         <div className="mb-6 flex flex-col items-center text-center">
-          <Image src={srcLogo} alt="SRC by Peoplearth" width={112} height={112} priority />
+          <Image src={srcLogo} alt="SRC - Hybrid Training Platform" width={112} height={112} priority />
         </div>
         <label className="block text-sm font-medium mb-1.5">Username</label>
         <input

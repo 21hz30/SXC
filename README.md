@@ -1,4 +1,4 @@
-# SXC — Hyrox Coach Dashboard
+# SRC - Hybrid Training Platform
 
 An AI-assisted training dashboard for Hyrox coaches: manage athletes, camps,
 classes, structured workouts, and per-class performance — with a built-in

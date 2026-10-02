@@ -45,19 +45,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/calendar", label: "Calendar", icon: "calendar" },
     { href: "/camps", label: "Camps", icon: "camps" },
     // Customers list is staff-only; athletes only ever see their own Profile.
+    // Customers and staff accounts live under one People entry; admins can
+    // switch to Team management from the Customers page.
     ...(isStaff
       ? ([
-          { href: "/customers", label: "Customers", icon: "customers" },
+          { href: "/customers", label: "People", icon: "customers" },
         ] satisfies SidebarNavItem[])
       : []),
-    { href: "/workouts", label: "Workouts", icon: "workouts" },
+    { href: "/workouts", label: "Training", icon: "workouts" },
     ...(FEATURES.nutrition
       ? ([{ href: "/nutrition", label: "Nutrition", icon: "nutrition" }] satisfies SidebarNavItem[])
       : []),
     { href: "/profile", label: "Profile", icon: "profile" },
     ...(user.role === "admin"
       ? [
-          { href: "/coaches", label: "Team", icon: "team" },
           { href: "/admin/tenants", label: "Tenants", icon: "tenants" },
           { href: "/admin/standards", label: "Standards", icon: "standards" },
           { href: "/admin/prompts", label: "AI prompts", icon: "prompts" },
@@ -70,7 +71,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-60 border-r border-border bg-white flex-col z-20">
         <div className="px-5 py-5 shrink-0">
           <Link href="/" aria-label="Go to dashboard" className="inline-block rounded-lg hover:opacity-80 transition-opacity">
-            <Image src={srcLogo} alt="SRC by Peoplearth" width={48} height={48} priority className="h-12 w-12" />
+            <Image src={srcLogo} alt="SRC - Hybrid Training Platform" width={48} height={48} priority className="h-12 w-12" />
           </Link>
         </div>
         <SidebarNav items={nav} />
